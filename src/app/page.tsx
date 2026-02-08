@@ -1,28 +1,120 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread } from '@/hooks/use-threads';
+import { addMessage } from '@/hooks/use-messages';
 import { DEFAULT_MODEL } from '@/lib/constants';
 import { ChatLayout } from '@/components/chat-layout';
-import { Loader2 } from 'lucide-react';
+import { ChatInput, type ReasoningEffort } from '@/components/chat-input';
+import { Button } from '@/components/ui/button';
+import { Wand2, BookOpen, Code, GraduationCap } from 'lucide-react';
+
+const SUGGESTED_PROMPTS = [
+  "How does AI work?",
+  "Are black holes real?",
+  "How many Rs are in the word \"strawberry\"?",
+  "What is the meaning of life?",
+];
+
+const CATEGORIES = [
+  { icon: Wand2, label: 'Create' },
+  { icon: BookOpen, label: 'Explore' },
+  { icon: Code, label: 'Code' },
+  { icon: GraduationCap, label: 'Learn' },
+];
 
 export default function HomePage() {
   const router = useRouter();
+  const [inputValue, setInputValue] = useState('');
+  const [model, setModel] = useState(DEFAULT_MODEL);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('low');
+  const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    const initChat = async () => {
-      const thread = await createThread(DEFAULT_MODEL);
-      router.replace(`/c/${thread.id}`);
-    };
-    initChat();
-  }, [router]);
+  const handleSend = async () => {
+    if (!inputValue.trim()) return;
+
+    setIsLoading(true);
+    try {
+      // 1. Create the thread
+      const thread = await createThread(model, reasoningEffort);
+
+      // 2. Add the user message
+      await addMessage(thread.id, 'user', inputValue.trim());
+
+      // 3. Navigate to the new chat
+      // The ChatPageClient will pick up the user message and start generating
+      router.push(`/c/${thread.id}`);
+    } catch (error) {
+      console.error('Failed to create chat:', error);
+      setIsLoading(false);
+    }
+  };
+
+  const handlePromptClick = (prompt: string) => {
+    setInputValue(prompt);
+  };
 
   return (
     <ChatLayout>
-      <div className="flex flex-col items-center justify-center h-full bg-[#12081a]">
-        <Loader2 className="h-8 w-8 text-pink-400 animate-spin mb-4" />
-        <span className="text-zinc-400">Starting new chat...</span>
+      <div className="flex flex-col h-full bg-[#1a1520]">
+        <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center p-4">
+          <div className="w-full max-w-3xl flex flex-col items-start px-4">
+            {/* Main heading */}
+            <h1 className="text-4xl font-semibold text-zinc-100 mb-8 tracking-tight">
+              How can I help you?
+            </h1>
+
+            {/* Category buttons */}
+            <div className="flex flex-wrap gap-2 mb-10">
+              {CATEGORIES.map((cat) => (
+                <Button
+                  key={cat.label}
+                  variant="ghost"
+                  className="h-10 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-sm font-medium transition-all hover:text-zinc-100"
+                >
+                  <cat.icon className="h-4 w-4" />
+                  {cat.label}
+                </Button>
+              ))}
+            </div>
+
+            {/* Suggested prompts */}
+            <div className="space-y-1 w-full text-left">
+              {SUGGESTED_PROMPTS.map((prompt, i) => (
+                <button
+                  key={i}
+                  onClick={() => handlePromptClick(prompt)}
+                  className="w-full text-left px-0 py-2.5 text-[15px] text-zinc-400/90 hover:text-zinc-200 transition-colors"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Terms and Privacy Policy */}
+          <div className="absolute bottom-24 left-0 right-0 text-center">
+            <p className="text-xs text-zinc-500">
+              Make sure you agree to our{' '}
+              <span className="underline cursor-pointer hover:text-zinc-400">Terms</span>
+              {' '}and our{' '}
+              <span className="underline cursor-pointer hover:text-zinc-400">Privacy Policy</span>
+            </p>
+          </div>
+        </div>
+
+        <ChatInput
+          value={inputValue}
+          onChange={setInputValue}
+          onSubmit={handleSend}
+          onStop={() => { }} // No-op here since navigation happens fast
+          isLoading={isLoading}
+          currentModel={model}
+          onModelChange={setModel}
+          reasoningEffort={reasoningEffort}
+          onReasoningEffortChange={setReasoningEffort}
+        />
       </div>
     </ChatLayout>
   );

@@ -28,8 +28,8 @@ interface ChatInputProps {
 
 const REASONING_OPTIONS: { value: ReasoningEffort; label: string; pro?: boolean }[] = [
     { value: 'low', label: 'Low' },
-    { value: 'medium', label: 'Medium', pro: true },
-    { value: 'high', label: 'High', pro: true },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
 ];
 
 export function ChatInput({
@@ -64,10 +64,10 @@ export function ChatInput({
     };
 
     return (
-        <div className="p-4 bg-[#1a1520]">
+        <div className="pb-4 px-4 pt-0 bg-[#1a1520]">
             <div className="max-w-3xl mx-auto">
                 {/* Input Container */}
-                <div className="relative rounded-2xl bg-[#252030] border border-[#3a3045]">
+                <div className="relative rounded-2xl bg-[#221c26] border border-[#302736]/60 shadow-xl transition-all duration-200">
                     {/* Textarea */}
                     <textarea
                         ref={textareaRef}
@@ -77,23 +77,22 @@ export function ChatInput({
                         placeholder="Type your message here..."
                         disabled={isLoading}
                         rows={1}
-                        className="w-full px-4 pt-4 pb-14 bg-transparent text-zinc-100 placeholder:text-zinc-500 focus:outline-none resize-none disabled:opacity-50 min-h-[56px]"
+                        className="w-full px-5 pt-4 pb-14 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none disabled:opacity-50 min-h-[60px] text-[15px] leading-relaxed"
                     />
 
                     {/* Bottom Bar */}
-                    <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 pb-3">
+                    <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-4 pb-3">
                         {/* Left side - Model selector and tools */}
-                        <div className="flex items-center gap-1">
-                            {/* Model Selector */}
+                        <div className="flex items-center gap-3">
+                            {/* Model Selector - Plain text style */}
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                     <Button
                                         variant="ghost"
-                                        className="h-8 px-2.5 gap-1.5 text-zinc-300 hover:text-zinc-100 hover:bg-[#3a3045] rounded-lg text-sm"
+                                        className="h-8 pl-0 pr-2 gap-2 text-zinc-100 hover:text-white hover:bg-transparent p-0 text-sm font-bold tracking-tight"
                                     >
-                                        <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
-                                        <span className="text-sm">{selectedModel.name}</span>
-                                        <ChevronDown className="h-3 w-3 opacity-60" />
+                                        <span className="">{selectedModel.name}</span>
+                                        <ChevronDown className="h-3 w-3 opacity-50" />
                                     </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent
@@ -140,59 +139,68 @@ export function ChatInput({
                                 </DropdownMenuContent>
                             </DropdownMenu>
 
-                            {/* Reasoning Effort Selector */}
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        className="h-8 px-2.5 gap-1.5 text-zinc-300 hover:text-zinc-100 hover:bg-[#3a3045] rounded-lg text-sm"
-                                    >
-                                        <Brain className="h-3.5 w-3.5 text-zinc-400" />
-                                        <span className="text-sm capitalize">{selectedReasoning.label}</span>
-                                        <ChevronUp className="h-3 w-3 opacity-60" />
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent
-                                    align="start"
-                                    side="top"
-                                    className="w-44 bg-[#1a1520] border-[#3a3045] shadow-2xl mb-2"
-                                >
-                                    {REASONING_OPTIONS.map((option) => (
-                                        <DropdownMenuItem
-                                            key={option.value}
-                                            onClick={() => onReasoningEffortChange(option.value)}
-                                            className={cn(
-                                                'flex items-center gap-2 py-2.5 px-3 cursor-pointer focus:bg-[#2a2535]',
-                                                option.value === reasoningEffort && 'bg-[#2a2535]'
-                                            )}
+                            {/* Reasoning Effort Selector - Pill style */}
+                            {selectedModel.supportsReasoning && (
+                                <div className="group/reasoning relative flex flex-col items-center">
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                className="h-8 px-3 gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-full transition-all text-xs font-semibold"
+                                            >
+                                                <Brain className="h-4 w-4" />
+                                                <span className="capitalize">{selectedReasoning.label}</span>
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent
+                                            align="start"
+                                            side="top"
+                                            className="w-44 bg-[#1a1520] border-[#3a3045] shadow-2xl mb-2"
                                         >
-                                            <Brain className="h-4 w-4 text-zinc-400" />
-                                            <span className="text-zinc-100">{option.label}</span>
-                                            {option.pro && (
-                                                <span className="text-[10px] text-zinc-500 ml-auto">Pro</span>
-                                            )}
-                                            {option.value === reasoningEffort && (
-                                                <Check className="h-3.5 w-3.5 text-emerald-400 ml-auto" />
-                                            )}
-                                        </DropdownMenuItem>
-                                    ))}
-                                </DropdownMenuContent>
-                            </DropdownMenu>
+                                            {REASONING_OPTIONS.map((option) => (
+                                                <DropdownMenuItem
+                                                    key={option.value}
+                                                    onClick={() => onReasoningEffortChange(option.value)}
+                                                    className={cn(
+                                                        'flex items-center gap-2 py-2.5 px-3 cursor-pointer focus:bg-[#2a2535]',
+                                                        option.value === reasoningEffort && 'bg-[#2a2535]'
+                                                    )}
+                                                >
+                                                    <Brain className="h-4 w-4 text-zinc-400" />
+                                                    <span className="text-zinc-100">{option.label}</span>
+                                                    {option.pro && (
+                                                        <span className="text-[10px] text-zinc-500 ml-auto">Pro</span>
+                                                    )}
+                                                    {option.value === reasoningEffort && (
+                                                        <Check className="h-3.5 w-3.5 text-emerald-400 ml-auto" />
+                                                    )}
+                                                </DropdownMenuItem>
+                                            ))}
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
 
-                            {/* Search Button */}
+                                    {/* Custom Tooltip */}
+                                    <div className="absolute bottom-full mb-2 hidden group-hover/reasoning:block z-50 pointer-events-none">
+                                        <div className="bg-[#1a1520]/95 backdrop-blur-md text-[11px] px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
+                                            <span className="text-[#fce7ef]">Reasoning Effort</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Search Button - Pill style */}
                             <Button
                                 variant="ghost"
-                                className="h-8 px-2.5 gap-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-[#3a3045] rounded-lg text-sm"
+                                className="h-8 px-3 gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-full transition-all text-xs font-semibold"
                             >
-                                <Globe className="h-3.5 w-3.5" />
-                                <span className="text-sm">Search</span>
+                                <Globe className="h-4 w-4" />
+                                <span className="">Search</span>
                             </Button>
 
-                            {/* Attachment */}
+                            {/* Attachment - Pill style */}
                             <Button
                                 variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-zinc-500 hover:text-zinc-300 hover:bg-[#3a3045] rounded-lg"
+                                className="h-8 w-11 p-0 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-full transition-all flex items-center justify-center"
                                 title="Attach file"
                             >
                                 <Paperclip className="h-4 w-4" />
@@ -205,7 +213,7 @@ export function ChatInput({
                                 type="button"
                                 size="icon"
                                 onClick={onStop}
-                                className="h-8 w-8 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400"
+                                className="h-8 w-8 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-all border border-red-500/20"
                             >
                                 <Square className="h-3.5 w-3.5 fill-current" />
                             </Button>
@@ -215,7 +223,7 @@ export function ChatInput({
                                 size="icon"
                                 onClick={onSubmit}
                                 disabled={!value?.trim()}
-                                className="h-8 w-8 rounded-lg bg-pink-600 hover:bg-pink-500 text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                                className="h-8 w-8 rounded-lg bg-[#3a283e] hover:bg-[#4a354e] text-pink-300/80 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <ArrowUp className="h-4 w-4" />
                             </Button>

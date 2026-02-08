@@ -5,6 +5,8 @@ export interface Thread {
   id: string;
   title: string;
   model: string;
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  isPinned?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -34,6 +36,18 @@ db.version(1).stores({
 // Version 2: Add reasoning field (non-indexed, just stored)
 db.version(2).stores({
   threads: 'id, title, model, createdAt, updatedAt',
+  messages: 'id, threadId, role, createdAt',
+});
+
+// Version 3: Add reasoningEffort to threads
+db.version(3).stores({
+  threads: 'id, title, model, reasoningEffort, createdAt, updatedAt',
+  messages: 'id, threadId, role, createdAt',
+});
+
+// Version 4: Add isPinned to threads
+db.version(4).stores({
+  threads: 'id, title, model, reasoningEffort, isPinned, createdAt, updatedAt',
   messages: 'id, threadId, role, createdAt',
 });
 

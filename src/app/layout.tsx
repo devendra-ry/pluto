@@ -9,7 +9,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Pluto - AI Chat",
+  title: "dev.chat",
   description: "Local-first AI chat interface powered by Chutes API",
 };
 

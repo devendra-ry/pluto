@@ -11,12 +11,14 @@
   "dependencies": {
     "@ai-sdk/openai": "^3.0.26",
     "@ai-sdk/react": "^3.0.79",
+    "@tailwindcss/typography": "^0.5.19",
     "ai": "^6.0.77",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "dexie": "^4.3.0",
     "dexie-react-hooks": "^4.2.0",
+    "highlight.js": "^11.11.1",
     "lucide-react": "^0.563.0",
     "nanoid": "^5.1.6",
     "next": "16.1.6",
@@ -25,6 +27,7 @@
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
+    "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.4.0"
   },

@@ -22,12 +22,13 @@ export function useThread(id: string | null) {
 }
 
 // Create a new thread
-export async function createThread(model: string): Promise<Thread> {
+export async function createThread(model: string, reasoningEffort?: 'low' | 'medium' | 'high'): Promise<Thread> {
     const now = new Date();
     const thread: Thread = {
         id: nanoid(),
         title: 'New Chat',
         model,
+        reasoningEffort,
         createdAt: now,
         updatedAt: now,
     };
@@ -43,6 +44,16 @@ export async function updateThreadTitle(id: string, title: string) {
 // Update thread model
 export async function updateThreadModel(id: string, model: string) {
     await db.threads.update(id, { model, updatedAt: new Date() });
+}
+
+// Update thread reasoning effort
+export async function updateReasoningEffort(id: string, effort: 'low' | 'medium' | 'high') {
+    await db.threads.update(id, { reasoningEffort: effort, updatedAt: new Date() });
+}
+
+// Toggle thread pin
+export async function toggleThreadPin(id: string, isPinned: boolean) {
+    await db.threads.update(id, { isPinned, updatedAt: new Date() });
 }
 
 // Update thread timestamp (for sorting)

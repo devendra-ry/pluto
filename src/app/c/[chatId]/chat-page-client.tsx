@@ -4,11 +4,12 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { ChatMessage } from '@/components/chat-message';
 import { ChatInput, type ReasoningEffort } from '@/components/chat-input';
 import { ChatLayout } from '@/components/chat-layout';
-import { useThread, updateThreadTitle, updateThreadModel, touchThread } from '@/hooks/use-threads';
+import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort } from '@/hooks/use-threads';
 import { useMessages, addMessage, deleteMessage } from '@/hooks/use-messages';
 import { DEFAULT_MODEL, AVAILABLE_MODELS } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
-import { Wand2, BookOpen, Code, GraduationCap, Brain, Settings, ChevronUp } from 'lucide-react';
+import { Wand2, BookOpen, Code, GraduationCap, Brain, Settings, ChevronUp, ChevronDown, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface ChatPageClientProps {
     chatId: string;
@@ -44,16 +45,18 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const [messages, setMessages] = useState<ChatMessageType[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isThinking, setIsThinking] = useState(false);
-    const [currentReasoning, setCurrentReasoning] = useState('');
     const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('low');
+    const [isAtBottom, setIsAtBottom] = useState(true);
     const hasInitialized = useRef(false);
     const abortControllerRef = useRef<AbortController | null>(null);
+    const generatingRef = useRef<string | null>(null);
 
     useEffect(() => {
         if (thread?.model) {
             setModel(thread.model);
         }
-    }, [thread?.model]);
+        setReasoningEffort(thread?.reasoningEffort ?? 'low');
+    }, [thread]);
 
     useEffect(() => {
         if (!hasInitialized.current && storedMessages.length > 0) {
@@ -75,18 +78,41 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         setInputValue('');
         setIsLoading(false);
         setIsThinking(false);
-        setCurrentReasoning('');
+        generatingRef.current = null;
+        // Reset reasoning effort only if it's not already 'low' or if we want to default to 'low' for new chats
+        setReasoningEffort('low');
+        setIsAtBottom(true);
     }, [chatId]);
 
-    useEffect(() => {
+    const scrollToBottom = useCallback(() => {
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            setIsAtBottom(true);
         }
-    }, [messages, isThinking, currentReasoning]);
+    }, []);
+
+    const handleScroll = useCallback(() => {
+        if (scrollRef.current) {
+            const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+            const atBottom = scrollHeight - scrollTop - clientHeight < 50;
+            setIsAtBottom(atBottom);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (scrollRef.current && isAtBottom) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+    }, [messages, isThinking, isAtBottom]);
 
     const handleModelChange = async (newModel: string) => {
         setModel(newModel);
         await updateThreadModel(chatId, newModel);
+    };
+
+    const handleReasoningEffortChange = async (effort: ReasoningEffort) => {
+        setReasoningEffort(effort);
+        await updateReasoningEffort(chatId, effort);
     };
 
     const handleStop = useCallback(() => {
@@ -95,37 +121,37 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             abortControllerRef.current = null;
             setIsLoading(false);
             setIsThinking(false);
-            setCurrentReasoning('');
+            generatingRef.current = null;
         }
     }, []);
 
-    const sendMessage = useCallback(async (userMessage: string, existingMessages: ChatMessageType[]) => {
-        const userMsg: ChatMessageType = {
-            id: crypto.randomUUID(),
-            role: 'user',
-            content: userMessage,
-        };
-
-        const updatedMessages = [...existingMessages, userMsg];
-        setMessages(updatedMessages);
-        await addMessage(chatId, 'user', userMessage);
-
-        if (thread?.title === 'New Chat' && existingMessages.length === 0) {
-            const title = userMessage.slice(0, 50) + (userMessage.length > 50 ? '...' : '');
-            await updateThreadTitle(chatId, title);
-        }
+    const generateResponse = useCallback(async (currentMessages: ChatMessageType[]) => {
+        const lastMsg = currentMessages[currentMessages.length - 1];
+        if (generatingRef.current === lastMsg.id) return;
+        generatingRef.current = lastMsg.id;
 
         setIsThinking(true);
         setIsLoading(true);
-        setCurrentReasoning('');
         abortControllerRef.current = new AbortController();
+
+        // Update title if it's a new chat and we have at least one message
+        const selectedModel = AVAILABLE_MODELS.find(m => m.id === model);
+        const supportsReasoning = selectedModel?.supportsReasoning ?? true;
+
+        if (thread?.title === 'New Chat' && currentMessages.length > 0) {
+            const firstUserMsg = currentMessages.find(m => m.role === 'user');
+            if (firstUserMsg) {
+                const title = firstUserMsg.content.slice(0, 50) + (firstUserMsg.content.length > 50 ? '...' : '');
+                updateThreadTitle(chatId, title);
+            }
+        }
 
         try {
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    messages: updatedMessages.map((m) => ({ role: m.role, content: m.content })),
+                    messages: currentMessages.map((m) => ({ role: m.role, content: m.content })),
                     model,
                     reasoningEffort,
                 }),
@@ -136,13 +162,14 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 throw new Error('Failed to get response');
             }
 
+            const assistantMsgId = crypto.randomUUID();
             const assistantMsg: ChatMessageType = {
-                id: crypto.randomUUID(),
+                id: assistantMsgId,
                 role: 'assistant',
                 content: '',
                 reasoning: '',
             };
-            setMessages([...updatedMessages, assistantMsg]);
+            setMessages(prev => [...prev, assistantMsg]);
 
             const reader = response.body?.getReader();
             const decoder = new TextDecoder();
@@ -170,9 +197,19 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
                                 // Check for reasoning content (some models use reasoning_content)
                                 const reasoningContent = delta?.reasoning_content || delta?.thinking || '';
-                                if (reasoningContent) {
+                                if (reasoningContent && supportsReasoning) {
                                     fullReasoning += reasoningContent;
-                                    setCurrentReasoning(fullReasoning);
+                                    setMessages((prev) => {
+                                        const updated = [...prev];
+                                        const msgIdx = updated.findIndex(m => m.id === assistantMsgId);
+                                        if (msgIdx !== -1) {
+                                            updated[msgIdx] = {
+                                                ...updated[msgIdx],
+                                                reasoning: fullReasoning,
+                                            };
+                                        }
+                                        return updated;
+                                    });
                                     // Still thinking while we have reasoning content
                                     setIsThinking(true);
                                 }
@@ -185,10 +222,10 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                     fullContent += content;
                                     setMessages((prev) => {
                                         const updated = [...prev];
-                                        const lastIdx = updated.length - 1;
-                                        if (updated[lastIdx]?.role === 'assistant') {
-                                            updated[lastIdx] = {
-                                                ...updated[lastIdx],
+                                        const msgIdx = updated.findIndex(m => m.id === assistantMsgId);
+                                        if (msgIdx !== -1) {
+                                            updated[msgIdx] = {
+                                                ...updated[msgIdx],
                                                 content: fullContent,
                                                 reasoning: fullReasoning,
                                             };
@@ -211,20 +248,46 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 // User stopped
             } else {
                 console.error('Chat error:', error);
-                setMessages(updatedMessages);
+                // Remove the empty assistant message if it failed
+                setMessages(currentMessages);
             }
         } finally {
             setIsLoading(false);
             setIsThinking(false);
-            setCurrentReasoning('');
+            generatingRef.current = null;
             abortControllerRef.current = null;
         }
-    }, [chatId, model, reasoningEffort, thread?.title]);
+    }, [chatId, model, reasoningEffort, thread]);
+
+    // Check for pending user message on load (e.g. new chat from home)
+    useEffect(() => {
+        if (hasInitialized.current && messages.length > 0 && !isLoading && !isThinking) {
+            const lastMessage = messages[messages.length - 1];
+            if (lastMessage.role === 'user') {
+                generateResponse(messages);
+            }
+        }
+    }, [messages, isLoading, isThinking, generateResponse]);
+
+    const sendMessage = useCallback(async (userMessage: string, existingMessages: ChatMessageType[]) => {
+        const userMsg: ChatMessageType = {
+            id: crypto.randomUUID(),
+            role: 'user',
+            content: userMessage,
+        };
+
+        const updatedMessages = [...existingMessages, userMsg];
+        setMessages(updatedMessages);
+        await addMessage(chatId, 'user', userMessage);
+
+        await generateResponse(updatedMessages);
+    }, [chatId, generateResponse]);
 
     const handleSend = useCallback(async () => {
         if (!inputValue.trim() || isLoading) return;
         const userMessage = inputValue.trim();
         setInputValue('');
+        setIsAtBottom(true);
         await sendMessage(userMessage, messages);
     }, [inputValue, isLoading, messages, sendMessage]);
 
@@ -242,24 +305,41 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             await deleteMessage(msg.id);
         }
 
-        setMessages(previousMessages);
-        await sendMessage(newContent, previousMessages);
-    }, [messages, storedMessages, sendMessage]);
+        const userMsg: ChatMessageType = {
+            id: crypto.randomUUID(),
+            role: 'user',
+            content: newContent
+        };
+        const updatedMessages = [...previousMessages, userMsg];
+
+        setMessages(updatedMessages);
+        await addMessage(chatId, 'user', newContent);
+
+        await generateResponse(updatedMessages);
+    }, [messages, storedMessages, chatId, generateResponse]);
 
     const handleRetry = useCallback(async (messageId: string) => {
-        const msgIndex = messages.findIndex(m => m.id === messageId);
-        if (msgIndex === -1 || messages[msgIndex].role !== 'user') return;
+        let msgIndex = messages.findIndex(m => m.id === messageId);
+        if (msgIndex === -1) return;
 
-        const userContent = messages[msgIndex].content;
-        const previousMessages = messages.slice(0, msgIndex);
-        const messagesToDelete = storedMessages.slice(msgIndex);
+        // If retrying an assistant message, find the preceding user message
+        if (messages[msgIndex].role === 'assistant') {
+            msgIndex = messages.slice(0, msgIndex).findLastIndex(m => m.role === 'user');
+            if (msgIndex === -1) return;
+        } else if (messages[msgIndex].role !== 'user') {
+            return;
+        }
+
+        const previousMessages = messages.slice(0, msgIndex + 1); // Include the user message
+        const messagesToDelete = storedMessages.slice(msgIndex + 1); // Delete responses after it
+
         for (const msg of messagesToDelete) {
             await deleteMessage(msg.id);
         }
 
         setMessages(previousMessages);
-        await sendMessage(userContent, previousMessages);
-    }, [messages, storedMessages, sendMessage]);
+        await generateResponse(previousMessages);
+    }, [messages, storedMessages, generateResponse]);
 
     const handleDelete = useCallback(async (messageId: string) => {
         await deleteMessage(messageId);
@@ -270,17 +350,21 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         <ChatLayout>
             <div className="flex flex-col h-full bg-[#1a1520]">
                 {/* Settings button in top right */}
-                <div className="absolute top-4 right-4 z-10">
+                <div className="absolute top-6 right-8 z-10">
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-zinc-500 hover:text-zinc-300 hover:bg-[#2a2035]"
+                        className="h-9 w-9 text-zinc-500 hover:text-zinc-300 hover:bg-[#2a2035]/50 rounded-xl transition-all"
                     >
-                        <Settings className="h-4 w-4" />
+                        <Settings className="h-5 w-5" />
                     </Button>
                 </div>
 
-                <div ref={scrollRef} className="flex-1 overflow-y-auto">
+                <div
+                    ref={scrollRef}
+                    className="flex-1 overflow-y-auto scroll-smooth"
+                    onScroll={handleScroll}
+                >
                     {messages.length === 0 && !isThinking ? (
                         <div className="flex flex-col items-center justify-center h-full px-4">
                             {/* Main heading */}
@@ -326,7 +410,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                             </div>
                         </div>
                     ) : (
-                        <div className="max-w-3xl mx-auto py-4">
+                        <div className="max-w-3xl mx-auto pt-8 pb-4">
                             {messages.map((message, i) => {
                                 const selectedModel = AVAILABLE_MODELS.find((m) => m.id === model);
                                 return (
@@ -334,9 +418,10 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                         key={message.id}
                                         id={message.id}
                                         role={message.role}
-                                        content={message.content}
+                                        content={message.content.replace(/^(#{1,6})([^#\s])/gm, '$1 $2')}
                                         reasoning={message.reasoning}
                                         isStreaming={isLoading && i === messages.length - 1 && message.role === 'assistant'}
+                                        isThinking={isThinking && i === messages.length - 1 && message.role === 'assistant'}
                                         modelName={message.role === 'assistant' ? selectedModel?.name : undefined}
                                         onEdit={message.role === 'user' ? handleEdit : undefined}
                                         onRetry={handleRetry}
@@ -344,22 +429,21 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                     />
                                 );
                             })}
+                        </div>
+                    )}
+                </div>
 
-                            {/* Thinking indicator with live reasoning */}
-                            {isThinking && (
-                                <div className="py-4 px-4">
-                                    <div className="flex items-center gap-2 text-zinc-400 mb-3">
-                                        <Brain className="h-4 w-4" />
-                                        <span className="text-sm font-medium">Reasoning</span>
-                                        <ChevronUp className="h-4 w-4" />
-                                    </div>
-                                    {currentReasoning && (
-                                        <div className="rounded-xl bg-[#1f0f1f] p-5 text-sm text-zinc-300 leading-relaxed">
-                                            <p className="whitespace-pre-wrap">{currentReasoning}</p>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
+                <div className="relative w-full max-w-3xl mx-auto px-4">
+                    {/* Floating Scroll to Bottom Button - Pill Style */}
+                    {!isAtBottom && scrollRef.current && scrollRef.current.scrollHeight > scrollRef.current.clientHeight && (
+                        <div className="absolute -top-14 left-1/2 -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                            <button
+                                onClick={scrollToBottom}
+                                className="h-9 px-4 rounded-full bg-zinc-900/60 backdrop-blur-lg border border-white/5 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/80 shadow-2xl transition-all flex items-center gap-2 group"
+                            >
+                                <span className="text-xs font-semibold tracking-tight">Scroll to bottom</span>
+                                <ChevronDown className="h-4 w-4 transition-transform group-hover:translate-y-0.5" />
+                            </button>
                         </div>
                     )}
                 </div>
@@ -373,7 +457,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     currentModel={model}
                     onModelChange={handleModelChange}
                     reasoningEffort={reasoningEffort}
-                    onReasoningEffortChange={setReasoningEffort}
+                    onReasoningEffortChange={handleReasoningEffortChange}
                 />
             </div>
         </ChatLayout>

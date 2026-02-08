@@ -2,16 +2,19 @@
 
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
-import { Copy, RotateCcw, Pencil, ArrowUpRight, ChevronDown, ChevronUp, Brain } from 'lucide-react';
+import { Copy, RefreshCcw, SquarePen, GitBranch, ChevronDown, ChevronUp, Brain, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 interface ChatMessageProps {
     id: string;
     role: 'user' | 'assistant';
     content: string;
     isStreaming?: boolean;
+    isThinking?: boolean;
     modelName?: string;
     reasoning?: string;
     onEdit?: (id: string, newContent: string) => void;
@@ -24,6 +27,7 @@ export function ChatMessage({
     role,
     content,
     isStreaming,
+    isThinking,
     modelName,
     reasoning,
     onEdit,
@@ -60,10 +64,39 @@ export function ChatMessage({
         setIsEditing(false);
     };
 
+    const ActionIcon = ({
+        icon: Icon,
+        title,
+        onClick,
+        className
+    }: {
+        icon: any;
+        title: string;
+        onClick?: () => void;
+        className?: string;
+    }) => (
+        <div className="relative group/icon flex flex-col items-center">
+            <button
+                onClick={onClick}
+                className={cn(
+                    "p-2 rounded-lg text-zinc-400/70 hover:text-zinc-100 hover:bg-zinc-800/50 transition-all",
+                    className
+                )}
+            >
+                <Icon className="h-[1.1rem] w-[1.1rem]" />
+            </button>
+            <div className="absolute top-full mt-2 hidden group-hover/icon:block z-20 pointer-events-none">
+                <div className="bg-zinc-950 text-white text-[11px] px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/5 font-medium tracking-tight animate-in fade-in zoom-in-95 duration-200">
+                    {title}
+                </div>
+            </div>
+        </div>
+    );
+
     // User message - right aligned with bubble
     if (isUser) {
         return (
-            <div className="flex flex-col items-end py-4 px-4 group">
+            <div className="flex flex-col items-end py-6 px-4 group mb-6">
                 {isEditing ? (
                     <div className="w-full max-w-[75%] flex flex-col gap-2">
                         <textarea
@@ -92,42 +125,34 @@ export function ChatMessage({
                     </div>
                 ) : (
                     <>
-                        <div className="max-w-[75%] rounded-2xl px-4 py-3 bg-[#2a2035] text-zinc-100">
-                            <p className="whitespace-pre-wrap break-words">{content}</p>
+                        <div className="max-w-[75%] rounded-2xl px-4 py-3 bg-[#2a2035]/80 backdrop-blur-sm border border-white/5 text-zinc-100 shadow-lg">
+                            <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">{content}</p>
                         </div>
                         {/* Action icons below message - same row */}
-                        <div className="flex items-center gap-3 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity translate-x-1">
                             {onRetry && (
-                                <button
-                                    className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                                <ActionIcon
+                                    icon={RefreshCcw}
+                                    title="Regenerate"
                                     onClick={() => onRetry(id)}
-                                    title="Retry"
-                                >
-                                    <RotateCcw className="h-4 w-4" />
-                                </button>
+                                />
                             )}
-                            <button
-                                className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                            <ActionIcon
+                                icon={GitBranch}
                                 title="Branch"
-                            >
-                                <ArrowUpRight className="h-4 w-4" />
-                            </button>
+                            />
                             {onEdit && (
-                                <button
-                                    className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                                <ActionIcon
+                                    icon={SquarePen}
+                                    title="Edit message"
                                     onClick={handleEdit}
-                                    title="Edit"
-                                >
-                                    <Pencil className="h-4 w-4" />
-                                </button>
+                                />
                             )}
-                            <button
-                                className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                            <ActionIcon
+                                icon={Copy}
+                                title="Copy message"
                                 onClick={handleCopy}
-                                title="Copy"
-                            >
-                                <Copy className="h-4 w-4" />
-                            </button>
+                            />
                         </div>
                     </>
                 )}
@@ -136,97 +161,128 @@ export function ChatMessage({
     }
 
     // Assistant message - left aligned, plain text, no bubble
-    return (
-        <div className="py-4 px-4 group">
-            <div className="max-w-3xl">
-                {/* Reasoning section (collapsible) - collapsed by default */}
-                {reasoning && (
-                    <div className="mb-4">
-                        {/* Header - just text and chevron */}
-                        <button
-                            onClick={() => setReasoningExpanded(!reasoningExpanded)}
-                            className="flex items-center gap-2 text-zinc-400 hover:text-zinc-300 transition-colors mb-3"
-                        >
-                            <Brain className="h-4 w-4" />
-                            <span className="text-sm font-medium">Reasoning</span>
-                            {reasoningExpanded ? (
-                                <ChevronUp className="h-4 w-4" />
-                            ) : (
-                                <ChevronDown className="h-4 w-4" />
-                            )}
-                        </button>
+    if (!isUser && !content && !reasoning && !isThinking) return null;
 
-                        {/* Content - purple background, no scrollbars, no border */}
-                        {reasoningExpanded && (
-                            <div className="rounded-xl bg-[#1f0f1f] p-5 text-sm text-zinc-300 leading-relaxed">
-                                <p className="whitespace-pre-wrap">{reasoning}</p>
+    return (
+        <div className="py-6 px-4 group">
+            <div className="max-w-3xl">
+                {/* Reasoning section (collapsible) */}
+                {(reasoning || isThinking) && (
+                    <div className="mb-6">
+                        <div
+                            className={cn(
+                                "rounded-xl transition-all duration-300 ease-in-out overflow-hidden border",
+                                reasoningExpanded
+                                    ? "bg-[#16121a] border-white/5 shadow-xl"
+                                    : "bg-transparent border-transparent"
+                            )}
+                        >
+                            <button
+                                onClick={() => setReasoningExpanded(!reasoningExpanded)}
+                                className={cn(
+                                    "flex items-center gap-1.5 transition-colors px-0 py-2",
+                                    reasoningExpanded ? "border-b border-white/5 bg-white/[0.02] -mx-3 px-3 w-[calc(100%+1.5rem)]" : ""
+                                )}
+                            >
+                                <Brain className={cn(
+                                    "h-4 w-4 shrink-0 transition-colors",
+                                    reasoningExpanded ? "text-pink-400/80" : "text-zinc-500"
+                                )} />
+                                <span className="text-[13px] font-medium tracking-tight text-zinc-400">Reasoning</span>
+                                <ChevronDown className={cn(
+                                    "h-3.5 w-3.5 text-zinc-600/80 shrink-0 transition-transform duration-300",
+                                    reasoningExpanded && "rotate-180"
+                                )} />
+                                {isThinking && <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-600/50 shrink-0 ml-1" />}
+                            </button>
+
+                            <div
+                                className={cn(
+                                    "grid transition-all duration-300 ease-in-out",
+                                    reasoningExpanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+                                )}
+                            >
+                                <div className="overflow-hidden">
+                                    <div className="p-4 pt-1">
+                                        {reasoning ? (
+                                            <div className="prose prose-invert prose-sm max-w-none prose-p:text-zinc-400 prose-p:leading-relaxed prose-headings:text-zinc-200 prose-headings:font-semibold prose-strong:text-zinc-200 prose-p:my-3">
+                                                <ReactMarkdown
+                                                    rehypePlugins={[rehypeHighlight, rehypeRaw]}
+                                                    remarkPlugins={[remarkGfm]}
+                                                >
+                                                    {reasoning}
+                                                </ReactMarkdown>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-1.5 h-6 opacity-40 py-4">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce [animation-delay:-0.3s]" />
+                                                <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce [animation-delay:-0.15s]" />
+                                                <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce" />
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
-                        )}
+                        </div>
                     </div>
                 )}
 
                 {/* Main content */}
-                <div className="prose prose-invert prose-sm max-w-none prose-p:text-zinc-200 prose-p:leading-relaxed prose-headings:text-zinc-100 prose-strong:text-zinc-100 prose-code:text-pink-300 prose-p:my-2">
-                    <ReactMarkdown
-                        rehypePlugins={[rehypeHighlight]}
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                            p: ({ children }) => (
-                                <p className="text-zinc-200 leading-relaxed my-1">{children}</p>
-                            ),
-                            pre: ({ children }) => (
-                                <pre className="bg-[#1a1520] rounded-lg p-4 overflow-x-auto my-3 border border-[#2a2035]">
-                                    {children}
-                                </pre>
-                            ),
-                            code: ({ className, children, ...props }) => {
-                                const isInline = !className;
-                                return isInline ? (
-                                    <code className="bg-[#2a2035] px-1.5 py-0.5 rounded text-sm text-pink-300" {...props}>
+                {content && (
+                    <div className="prose prose-invert max-w-none prose-p:text-zinc-200 prose-p:leading-relaxed prose-p:text-[15px] prose-headings:text-zinc-100 prose-headings:font-semibold prose-strong:text-zinc-100 prose-code:text-pink-300 prose-p:my-4">
+                        <ReactMarkdown
+                            rehypePlugins={[rehypeHighlight, rehypeRaw]}
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                                pre: ({ children }) => (
+                                    <pre className="bg-[#1a1520]/80 backdrop-blur-sm rounded-xl p-5 overflow-x-auto my-6 border border-[#2d2235]/60 scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
                                         {children}
-                                    </code>
-                                ) : (
-                                    <code className={className} {...props}>
-                                        {children}
-                                    </code>
-                                );
-                            },
-                        }}
-                    >
-                        {content}
-                    </ReactMarkdown>
-                </div>
-
-                {isStreaming && content && (
-                    <span className="inline-block w-2 h-4 bg-pink-400 animate-pulse ml-1" />
+                                    </pre>
+                                ),
+                                code: ({ className, children, ...props }) => {
+                                    const isInline = !className;
+                                    return isInline ? (
+                                        <code className="bg-[#2a2035]/60 px-1.5 py-0.5 rounded-md text-sm text-pink-300 font-mono border border-white/5" {...props}>
+                                            {children}
+                                        </code>
+                                    ) : (
+                                        <code className={cn(className, "font-mono text-sm leading-relaxed")} {...props}>
+                                            {children}
+                                        </code>
+                                    );
+                                },
+                                li: ({ children }) => (
+                                    <li className="text-zinc-200/90 py-1">{children}</li>
+                                ),
+                            }}
+                        >
+                            {content}
+                        </ReactMarkdown>
+                    </div>
                 )}
+
 
                 {/* Action icons below AI message */}
                 {!isStreaming && content && (
-                    <div className="flex items-center gap-3 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                            className="text-zinc-500 hover:text-zinc-300 transition-colors"
-                            onClick={handleCopy}
-                            title="Copy"
-                        >
-                            <Copy className="h-4 w-4" />
-                        </button>
-                        <button
-                            className="text-zinc-500 hover:text-zinc-300 transition-colors"
-                            title="Branch"
-                        >
-                            <ArrowUpRight className="h-4 w-4" />
-                        </button>
+                    <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity -ml-2">
                         {onRetry && (
-                            <button
-                                className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                            <ActionIcon
+                                icon={RefreshCcw}
                                 title="Regenerate"
-                            >
-                                <RotateCcw className="h-4 w-4" />
-                            </button>
+                                onClick={() => onRetry(id)}
+                            />
                         )}
+                        <ActionIcon
+                            icon={GitBranch}
+                            title="Branch"
+                        />
+                        <ActionIcon
+                            icon={Copy}
+                            title="Copy message"
+                            onClick={handleCopy}
+                        />
                         {modelName && (
-                            <span className="text-xs text-zinc-500 ml-1">{modelName}</span>
+                            <span className="text-xs text-zinc-500/80 font-medium ml-3">{modelName}</span>
                         )}
                     </div>
                 )}
