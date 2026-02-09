@@ -1,6 +1,6 @@
 'use client';
 
-import { Minimax, Qwen, Zhipu, NousResearch } from '@lobehub/icons';
+import { Minimax, Qwen, Zhipu, NousResearch, Gemini, OpenRouter } from '@lobehub/icons';
 import { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -137,6 +137,24 @@ function NousResearchLogo({ className }: { className?: string }) {
     );
 }
 
+// Google - Official logo from @lobehub/icons
+function GoogleLogo({ className }: { className?: string }) {
+    return (
+        <div className={className} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Gemini.Color size={20} />
+        </div>
+    );
+}
+
+// OpenRouter - Official logo from @lobehub/icons
+function OpenRouterLogo({ className }: { className?: string }) {
+    return (
+        <div className={className} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <OpenRouter size={20} />
+        </div>
+    );
+}
+
 // Provider icons mapping
 const PROVIDER_LOGOS: Record<string, React.ComponentType<{ className?: string }>> = {
     'deepseek-ai': DeepSeekLogo,
@@ -146,6 +164,8 @@ const PROVIDER_LOGOS: Record<string, React.ComponentType<{ className?: string }>
     'zai-org': ZhipuLogo,
     'Qwen': QwenLogo,
     'NousResearch': NousResearchLogo,
+    'google': GoogleLogo,
+    'openrouter': OpenRouterLogo,
 };
 
 export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProps) {

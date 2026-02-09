@@ -27,6 +27,8 @@ export const PROVIDERS: Provider[] = [
     { id: 'zai-org', name: 'ZAI', color: '#9B59B6' },
     { id: 'Qwen', name: 'Qwen', color: '#3498DB' },
     { id: 'NousResearch', name: 'Nous', color: '#FFFFFF' },
+    { id: 'google', name: 'Google', color: '#4285F4' },
+    { id: 'openrouter', name: 'OpenRouter', color: '#6563FF' },
 ];
 
 export const CAPABILITY_INFO: Record<Capability, { label: string; icon: string }> = {
@@ -209,6 +211,46 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         provider: 'moonshotai',
         supportsReasoning: false,
         capabilities: [],
+    },
+    {
+        id: 'gemini-3-flash-preview',
+        name: 'Gemini 3 Flash Thinking',
+        description: 'Google\'s latest reasoning model',
+        provider: 'google',
+        supportsReasoning: true,
+        capabilities: ['reasoning', 'vision', 'fast'],
+    },
+    {
+        id: 'openrouter/pony-alpha',
+        name: 'Pony Alpha',
+        description: 'Advanced reasoning and creative model',
+        provider: 'openrouter',
+        supportsReasoning: true,
+        capabilities: ['reasoning', 'fast'],
+    },
+    {
+        id: 'stepfun/step-3.5-flash:free',
+        name: 'Step 3.5 Flash (Free)',
+        description: 'High-speed reasoning model from Stepfun',
+        provider: 'openrouter',
+        supportsReasoning: true,
+        capabilities: ['reasoning', 'fast', 'vision'],
+    },
+    {
+        id: 'arcee-ai/trinity-large-preview:free',
+        name: 'Trinity Large Preview (Free)',
+        description: 'Large-scale preview model from Arcee AI',
+        provider: 'openrouter',
+        supportsReasoning: false,
+        capabilities: ['fast'],
+    },
+    {
+        id: 'arcee-ai/trinity-mini:free',
+        name: 'Trinity Mini (Free)',
+        description: 'Lightweight efficient reasoning model from Arcee AI',
+        provider: 'openrouter',
+        supportsReasoning: true,
+        capabilities: ['reasoning'],
     },
 ];
 
