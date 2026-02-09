@@ -253,14 +253,6 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         capabilities: ['reasoning'],
     },
     {
-        id: 'gemini-2.5-pro',
-        name: 'Gemini 2.5 Pro',
-        description: 'Google\'s most powerful reasoning model',
-        provider: 'google',
-        supportsReasoning: true,
-        capabilities: ['reasoning', 'vision', 'toolCalling'],
-    },
-    {
         id: 'gemini-2.5-flash',
         name: 'Gemini 2.5 Flash',
         description: 'Fast and capable multimodal reasoning model',
@@ -275,6 +267,22 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         provider: 'google',
         supportsReasoning: true,
         capabilities: ['reasoning', 'vision', 'toolCalling', 'fast'],
+    },
+    {
+        id: 'tngtech/DeepSeek-TNG-R1T2-Chimera',
+        name: 'DeepSeek TNG-R1T2 Chimera',
+        description: 'Advanced reasoning model (Chimera)',
+        provider: 'deepseek-ai',
+        supportsReasoning: true,
+        capabilities: ['reasoning'],
+    },
+    {
+        id: 'zai-org/GLM-4.6V',
+        name: 'GLM 4.6V',
+        description: 'Multimodal vision and reasoning model',
+        provider: 'zai-org',
+        supportsReasoning: true,
+        capabilities: ['vision', 'reasoning', 'toolCalling'],
     },
     {
         id: 'gemma-3-27b-it',
