@@ -4,10 +4,39 @@ import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
-import { Copy, RefreshCcw, SquarePen, GitBranch, ChevronDown, ChevronUp, Brain, Loader2 } from 'lucide-react';
+import { Copy, RefreshCcw, SquarePen, GitBranch, ChevronDown, Brain, Loader2, type LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
+
+interface ActionIconProps {
+    icon: LucideIcon;
+    title: string;
+    onClick?: () => void;
+    className?: string;
+}
+
+function ActionIcon({ icon: Icon, title, onClick, className }: ActionIconProps) {
+    return (
+        <div className="relative group/icon flex flex-col items-center">
+            <button
+                onClick={onClick}
+                className={cn(
+                    "p-2 rounded-lg text-zinc-400/70 hover:text-zinc-100 hover:bg-zinc-800/50 transition-all",
+                    className
+                )}
+            >
+                <Icon className="h-[1.1rem] w-[1.1rem]" />
+            </button>
+            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover/icon:block z-[100] pointer-events-none">
+                <div className="bg-zinc-950 text-white text-[11px] px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/5 font-medium tracking-tight animate-in fade-in zoom-in-95 duration-200">
+                    {title}
+                </div>
+            </div>
+        </div>
+    );
+}
 
 interface ChatMessageProps {
     id: string;
@@ -32,19 +61,17 @@ export function ChatMessage({
     reasoning,
     onEdit,
     onRetry,
-    onDelete,
 }: ChatMessageProps) {
-    const [copied, setCopied] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editContent, setEditContent] = useState(content);
     // Collapsed by default
     const [reasoningExpanded, setReasoningExpanded] = useState(false);
     const isUser = role === 'user';
+    const { showToast } = useToast();
 
     const handleCopy = async () => {
         await navigator.clipboard.writeText(content);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        showToast('Copied to clipboard!', 'success');
     };
 
     const handleEdit = () => {
@@ -64,39 +91,10 @@ export function ChatMessage({
         setIsEditing(false);
     };
 
-    const ActionIcon = ({
-        icon: Icon,
-        title,
-        onClick,
-        className
-    }: {
-        icon: any;
-        title: string;
-        onClick?: () => void;
-        className?: string;
-    }) => (
-        <div className="relative group/icon flex flex-col items-center">
-            <button
-                onClick={onClick}
-                className={cn(
-                    "p-2 rounded-lg text-zinc-400/70 hover:text-zinc-100 hover:bg-zinc-800/50 transition-all",
-                    className
-                )}
-            >
-                <Icon className="h-[1.1rem] w-[1.1rem]" />
-            </button>
-            <div className="absolute top-full mt-2 hidden group-hover/icon:block z-20 pointer-events-none">
-                <div className="bg-zinc-950 text-white text-[11px] px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/5 font-medium tracking-tight animate-in fade-in zoom-in-95 duration-200">
-                    {title}
-                </div>
-            </div>
-        </div>
-    );
-
     // User message - right aligned with bubble
     if (isUser) {
         return (
-            <div className="flex flex-col items-end py-6 px-4 group mb-6">
+            <div className="flex flex-col items-end py-3 px-4 group">
                 {isEditing ? (
                     <div className="w-full max-w-[75%] flex flex-col gap-2">
                         <textarea
@@ -161,11 +159,24 @@ export function ChatMessage({
     }
 
     // Assistant message - left aligned, plain text, no bubble
-    if (!isUser && !content && !reasoning && !isThinking) return null;
+    // Don't return null if streaming (loading) - show loading indicator
+    if (!isUser && !content && !reasoning && !isThinking && !isStreaming) return null;
+
+    // Show loading indicator for non-thinking models when streaming but no content yet
+    const showLoadingDots = isStreaming && !content && !reasoning && !isThinking;
 
     return (
-        <div className="py-6 px-4 group">
+        <div className="py-3 px-4 group">
             <div className="max-w-3xl">
+                {/* Loading indicator for non-thinking models */}
+                {showLoadingDots && (
+                    <div className="flex items-center gap-1.5 h-6 py-4">
+                        <span className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:-0.3s]" />
+                        <span className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:-0.15s]" />
+                        <span className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce" />
+                    </div>
+                )}
+
                 {/* Reasoning section (collapsible) */}
                 {(reasoning || isThinking) && (
                     <div className="mb-6">
@@ -229,13 +240,21 @@ export function ChatMessage({
 
                 {/* Main content */}
                 {content && (
-                    <div className="prose prose-invert max-w-none prose-p:text-zinc-200 prose-p:leading-relaxed prose-p:text-[15px] prose-headings:text-zinc-100 prose-headings:font-semibold prose-strong:text-zinc-100 prose-code:text-pink-300 prose-p:my-4">
+                    <div className="prose prose-invert prose-sm max-w-none 
+                        prose-p:text-zinc-200 prose-p:leading-relaxed prose-p:text-[15px] prose-p:my-3
+                        prose-headings:text-zinc-100 prose-headings:font-semibold prose-headings:mt-5 prose-headings:mb-2
+                        prose-h1:text-xl prose-h2:text-lg prose-h3:text-base
+                        prose-strong:text-zinc-100 
+                        prose-code:text-pink-300
+                        prose-ol:my-3 prose-ul:my-3 prose-li:my-1
+                        prose-hr:my-4 prose-hr:border-zinc-700/50
+                    ">
                         <ReactMarkdown
                             rehypePlugins={[rehypeHighlight, rehypeRaw]}
                             remarkPlugins={[remarkGfm]}
                             components={{
                                 pre: ({ children }) => (
-                                    <pre className="bg-[#1a1520]/80 backdrop-blur-sm rounded-xl p-5 overflow-x-auto my-6 border border-[#2d2235]/60 scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
+                                    <pre className="bg-[#1a1520]/80 backdrop-blur-sm rounded-xl p-5 overflow-x-auto my-4 border border-[#2d2235]/60 scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
                                         {children}
                                     </pre>
                                 ),
@@ -252,7 +271,7 @@ export function ChatMessage({
                                     );
                                 },
                                 li: ({ children }) => (
-                                    <li className="text-zinc-200/90 py-1">{children}</li>
+                                    <li className="text-zinc-200/90 my-1">{children}</li>
                                 ),
                             }}
                         >

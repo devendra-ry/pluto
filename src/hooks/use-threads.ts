@@ -3,6 +3,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Thread } from '@/lib/db';
 import { nanoid } from 'nanoid';
+import { type ReasoningEffort } from '@/lib/types';
 
 // Get all threads sorted by most recent
 export function useThreads() {
@@ -22,7 +23,7 @@ export function useThread(id: string | null) {
 }
 
 // Create a new thread
-export async function createThread(model: string, reasoningEffort?: 'low' | 'medium' | 'high'): Promise<Thread> {
+export async function createThread(model: string, reasoningEffort?: ReasoningEffort): Promise<Thread> {
     const now = new Date();
     const thread: Thread = {
         id: nanoid(),
@@ -47,7 +48,7 @@ export async function updateThreadModel(id: string, model: string) {
 }
 
 // Update thread reasoning effort
-export async function updateReasoningEffort(id: string, effort: 'low' | 'medium' | 'high') {
+export async function updateReasoningEffort(id: string, effort: ReasoningEffort) {
     await db.threads.update(id, { reasoningEffort: effort, updatedAt: new Date() });
 }
 

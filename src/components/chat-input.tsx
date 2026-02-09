@@ -8,17 +8,16 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowUp, Square, ChevronUp, ChevronDown, Paperclip, Check, Sparkles, Search, Globe, Brain } from 'lucide-react';
+import { ArrowUp, Square, ChevronDown, Paperclip, Check, Sparkles, Search, Globe, Brain } from 'lucide-react';
 import { AVAILABLE_MODELS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
-
-export type ReasoningEffort = 'low' | 'medium' | 'high';
+import { type ReasoningEffort } from '@/lib/types';
 
 interface ChatInputProps {
     value: string;
     onChange: (value: string) => void;
     onSubmit: () => void;
-    onStop: () => void;
+    onStop?: () => void;
     isLoading: boolean;
     currentModel: string;
     onModelChange: (model: string) => void;
@@ -44,8 +43,15 @@ export function ChatInput({
     onReasoningEffortChange,
 }: ChatInputProps) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const [modelSearch, setModelSearch] = useState('');
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
     const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
+
+    // Filter models based on search query
+    const filteredModels = AVAILABLE_MODELS.filter(model =>
+        model.name.toLowerCase().includes(modelSearch.toLowerCase()) ||
+        model.description.toLowerCase().includes(modelSearch.toLowerCase())
+    );
 
     useEffect(() => {
         if (textareaRef.current) {
@@ -107,6 +113,8 @@ export function ChatInput({
                                             <input
                                                 type="text"
                                                 placeholder="Search models..."
+                                                value={modelSearch}
+                                                onChange={(e) => setModelSearch(e.target.value)}
                                                 className="flex-1 bg-transparent text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none"
                                             />
                                         </div>
@@ -114,27 +122,33 @@ export function ChatInput({
 
                                     {/* Model List */}
                                     <div className="py-1">
-                                        {AVAILABLE_MODELS.map((model) => (
-                                            <DropdownMenuItem
-                                                key={model.id}
-                                                onClick={() => onModelChange(model.id)}
-                                                className={cn(
-                                                    'flex items-start gap-3 py-3 px-3 cursor-pointer focus:bg-[#2a2535]',
-                                                    model.id === currentModel && 'bg-[#2a2535]'
-                                                )}
-                                            >
-                                                <Sparkles className="h-4 w-4 text-emerald-400 mt-0.5 shrink-0" />
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="font-medium text-zinc-100">{model.name}</span>
-                                                        {model.id === currentModel && (
-                                                            <Check className="h-3.5 w-3.5 text-emerald-400" />
-                                                        )}
+                                        {filteredModels.length === 0 ? (
+                                            <div className="px-3 py-4 text-center text-sm text-zinc-500">
+                                                No models found
+                                            </div>
+                                        ) : (
+                                            filteredModels.map((model) => (
+                                                <DropdownMenuItem
+                                                    key={model.id}
+                                                    onClick={() => onModelChange(model.id)}
+                                                    className={cn(
+                                                        'flex items-start gap-3 py-3 px-3 cursor-pointer focus:bg-[#2a2535]',
+                                                        model.id === currentModel && 'bg-[#2a2535]'
+                                                    )}
+                                                >
+                                                    <Sparkles className="h-4 w-4 text-emerald-400 mt-0.5 shrink-0" />
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-medium text-zinc-100">{model.name}</span>
+                                                            {model.id === currentModel && (
+                                                                <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                                            )}
+                                                        </div>
+                                                        <span className="text-xs text-zinc-500 block">{model.description}</span>
                                                     </div>
-                                                    <span className="text-xs text-zinc-500 block">{model.description}</span>
-                                                </div>
-                                            </DropdownMenuItem>
-                                        ))}
+                                                </DropdownMenuItem>
+                                            ))
+                                        )}
                                     </div>
                                 </DropdownMenuContent>
                             </DropdownMenu>
@@ -162,17 +176,14 @@ export function ChatInput({
                                                     key={option.value}
                                                     onClick={() => onReasoningEffortChange(option.value)}
                                                     className={cn(
-                                                        'flex items-center gap-2 py-2.5 px-3 cursor-pointer focus:bg-[#2a2535]',
+                                                        'flex items-center gap-3 py-2 px-3 cursor-pointer focus:bg-[#2a2535]',
                                                         option.value === reasoningEffort && 'bg-[#2a2535]'
                                                     )}
                                                 >
-                                                    <Brain className="h-4 w-4 text-zinc-400" />
-                                                    <span className="text-zinc-100">{option.label}</span>
-                                                    {option.pro && (
-                                                        <span className="text-[10px] text-zinc-500 ml-auto">Pro</span>
-                                                    )}
+                                                    <Brain className="h-4 w-4 text-zinc-400 shrink-0" />
+                                                    <span className="text-zinc-100 flex-1">{option.label}</span>
                                                     {option.value === reasoningEffort && (
-                                                        <Check className="h-3.5 w-3.5 text-emerald-400 ml-auto" />
+                                                        <Check className="h-4 w-4 text-emerald-400 shrink-0" />
                                                     )}
                                                 </DropdownMenuItem>
                                             ))}
@@ -208,7 +219,7 @@ export function ChatInput({
                         </div>
 
                         {/* Right side - Send/Stop button */}
-                        {isLoading ? (
+                        {isLoading && onStop ? (
                             <Button
                                 type="button"
                                 size="icon"

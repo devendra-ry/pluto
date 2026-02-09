@@ -2,14 +2,15 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { ChatMessage } from '@/components/chat-message';
-import { ChatInput, type ReasoningEffort } from '@/components/chat-input';
+import { ChatInput } from '@/components/chat-input';
+import { type ReasoningEffort } from '@/lib/types';
 import { ChatLayout } from '@/components/chat-layout';
 import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort } from '@/hooks/use-threads';
 import { useMessages, addMessage, deleteMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, AVAILABLE_MODELS } from '@/lib/constants';
+import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
-import { Wand2, BookOpen, Code, GraduationCap, Brain, Settings, ChevronUp, ChevronDown, Loader2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { useToast } from '@/components/ui/toast';
+import { Wand2, BookOpen, Code, GraduationCap, Settings, ChevronDown, type LucideIcon } from 'lucide-react';
 
 interface ChatPageClientProps {
     chatId: string;
@@ -22,19 +23,16 @@ interface ChatMessageType {
     reasoning?: string;
 }
 
-const SUGGESTED_PROMPTS = [
-    "How does AI work?",
-    "Are black holes real?",
-    "How many Rs are in the word \"strawberry\"?",
-    "What is the meaning of life?",
-];
+// Regex to fix markdown headings without space after #
+const HEADING_FIX_REGEX = /^(#{1,6})([^#\s])/gm;
 
-const CATEGORIES = [
-    { icon: Wand2, label: 'Create' },
-    { icon: BookOpen, label: 'Explore' },
-    { icon: Code, label: 'Code' },
-    { icon: GraduationCap, label: 'Learn' },
-];
+// Map icon names to components
+const ICON_MAP: Record<string, LucideIcon> = {
+    Wand2,
+    BookOpen,
+    Code,
+    GraduationCap,
+};
 
 export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const thread = useThread(chatId);
@@ -50,6 +48,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const hasInitialized = useRef(false);
     const abortControllerRef = useRef<AbortController | null>(null);
     const generatingRef = useRef<string | null>(null);
+    const lastRequestFailed = useRef(false); // Prevent auto-retry after failures
+    const { showToast } = useToast();
 
     useEffect(() => {
         if (thread?.model) {
@@ -72,8 +72,10 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
     }, [storedMessages]);
 
+
     useEffect(() => {
         hasInitialized.current = false;
+        lastRequestFailed.current = false; // Reset on new chat
         setMessages([]);
         setInputValue('');
         setIsLoading(false);
@@ -130,14 +132,29 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (generatingRef.current === lastMsg.id) return;
         generatingRef.current = lastMsg.id;
 
-        setIsThinking(true);
+        // Check if model supports reasoning
+        const selectedModel = AVAILABLE_MODELS.find(m => m.id === model);
+        const supportsReasoning = selectedModel?.supportsReasoning ?? true;
+
+        // For models that use thinking param (like Kimi), disable thinking UI when reasoning is low
+        const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && reasoningEffort === 'low');
+
+        // Create assistant message immediately so loading indicator shows
+        const assistantMsgId = crypto.randomUUID();
+        const assistantMsg: ChatMessageType = {
+            id: assistantMsgId,
+            role: 'assistant',
+            content: '',
+            reasoning: '',
+        };
+        setMessages(prev => [...prev, assistantMsg]);
+
+        // Only set isThinking for models that will actually think
+        setIsThinking(willThink);
         setIsLoading(true);
         abortControllerRef.current = new AbortController();
 
         // Update title if it's a new chat and we have at least one message
-        const selectedModel = AVAILABLE_MODELS.find(m => m.id === model);
-        const supportsReasoning = selectedModel?.supportsReasoning ?? true;
-
         if (thread?.title === 'New Chat' && currentMessages.length > 0) {
             const firstUserMsg = currentMessages.find(m => m.role === 'user');
             if (firstUserMsg) {
@@ -161,15 +178,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             if (!response.ok) {
                 throw new Error('Failed to get response');
             }
-
-            const assistantMsgId = crypto.randomUUID();
-            const assistantMsg: ChatMessageType = {
-                id: assistantMsgId,
-                role: 'assistant',
-                content: '',
-                reasoning: '',
-            };
-            setMessages(prev => [...prev, assistantMsg]);
 
             const reader = response.body?.getReader();
             const decoder = new TextDecoder();
@@ -248,8 +256,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 // User stopped
             } else {
                 console.error('Chat error:', error);
+                showToast('Failed to generate response. Please try again.', 'error');
                 // Remove the empty assistant message if it failed
                 setMessages(currentMessages);
+                // Mark that the last request failed to prevent auto-retry
+                lastRequestFailed.current = true;
             }
         } finally {
             setIsLoading(false);
@@ -257,10 +268,14 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             generatingRef.current = null;
             abortControllerRef.current = null;
         }
-    }, [chatId, model, reasoningEffort, thread]);
+    }, [chatId, model, reasoningEffort, thread, showToast]);
 
     // Check for pending user message on load (e.g. new chat from home)
     useEffect(() => {
+        // Don't auto-retry if the last request failed
+        if (lastRequestFailed.current) {
+            return;
+        }
         if (hasInitialized.current && messages.length > 0 && !isLoading && !isThinking) {
             const lastMessage = messages[messages.length - 1];
             if (lastMessage.role === 'user') {
@@ -270,6 +285,9 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     }, [messages, isLoading, isThinking, generateResponse]);
 
     const sendMessage = useCallback(async (userMessage: string, existingMessages: ChatMessageType[]) => {
+        // Reset the failure flag when user manually sends a message
+        lastRequestFailed.current = false;
+
         const userMsg: ChatMessageType = {
             id: crypto.randomUUID(),
             role: 'user',
@@ -341,11 +359,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         await generateResponse(previousMessages);
     }, [messages, storedMessages, generateResponse]);
 
-    const handleDelete = useCallback(async (messageId: string) => {
-        await deleteMessage(messageId);
-        setMessages(prev => prev.filter(m => m.id !== messageId));
-    }, []);
-
     return (
         <ChatLayout>
             <div className="flex flex-col h-full bg-[#1a1520]">
@@ -374,16 +387,19 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
                             {/* Category buttons */}
                             <div className="flex gap-2 mb-8">
-                                {CATEGORIES.map((cat) => (
-                                    <Button
-                                        key={cat.label}
-                                        variant="ghost"
-                                        className="h-9 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-sm"
-                                    >
-                                        <cat.icon className="h-4 w-4" />
-                                        {cat.label}
-                                    </Button>
-                                ))}
+                                {CATEGORIES.map((cat) => {
+                                    const IconComponent = ICON_MAP[cat.icon];
+                                    return (
+                                        <Button
+                                            key={cat.label}
+                                            variant="ghost"
+                                            className="h-9 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-sm"
+                                        >
+                                            <IconComponent className="h-4 w-4" />
+                                            {cat.label}
+                                        </Button>
+                                    );
+                                })}
                             </div>
 
                             {/* Suggested prompts */}
@@ -418,14 +434,13 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                         key={message.id}
                                         id={message.id}
                                         role={message.role}
-                                        content={message.content.replace(/^(#{1,6})([^#\s])/gm, '$1 $2')}
+                                        content={message.content.replace(HEADING_FIX_REGEX, '$1 $2')}
                                         reasoning={message.reasoning}
                                         isStreaming={isLoading && i === messages.length - 1 && message.role === 'assistant'}
                                         isThinking={isThinking && i === messages.length - 1 && message.role === 'assistant'}
                                         modelName={message.role === 'assistant' ? selectedModel?.name : undefined}
                                         onEdit={message.role === 'user' ? handleEdit : undefined}
                                         onRetry={handleRetry}
-                                        onDelete={handleDelete}
                                     />
                                 );
                             })}

@@ -4,25 +4,20 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL } from '@/lib/constants';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES } from '@/lib/constants';
 import { ChatLayout } from '@/components/chat-layout';
-import { ChatInput, type ReasoningEffort } from '@/components/chat-input';
+import { ChatInput } from '@/components/chat-input';
+import { type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
-import { Wand2, BookOpen, Code, GraduationCap } from 'lucide-react';
+import { Wand2, BookOpen, Code, GraduationCap, type LucideIcon } from 'lucide-react';
 
-const SUGGESTED_PROMPTS = [
-  "How does AI work?",
-  "Are black holes real?",
-  "How many Rs are in the word \"strawberry\"?",
-  "What is the meaning of life?",
-];
-
-const CATEGORIES = [
-  { icon: Wand2, label: 'Create' },
-  { icon: BookOpen, label: 'Explore' },
-  { icon: Code, label: 'Code' },
-  { icon: GraduationCap, label: 'Learn' },
-];
+// Map icon names to components
+const ICON_MAP: Record<string, LucideIcon> = {
+  Wand2,
+  BookOpen,
+  Code,
+  GraduationCap,
+};
 
 export default function HomePage() {
   const router = useRouter();
@@ -55,6 +50,10 @@ export default function HomePage() {
     setInputValue(prompt);
   };
 
+  const handleCategoryClick = (prompt: string) => {
+    setInputValue(prompt);
+  };
+
   return (
     <ChatLayout>
       <div className="flex flex-col h-full bg-[#1a1520]">
@@ -67,16 +66,20 @@ export default function HomePage() {
 
             {/* Category buttons */}
             <div className="flex flex-wrap gap-2 mb-10">
-              {CATEGORIES.map((cat) => (
-                <Button
-                  key={cat.label}
-                  variant="ghost"
-                  className="h-10 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-sm font-medium transition-all hover:text-zinc-100"
-                >
-                  <cat.icon className="h-4 w-4" />
-                  {cat.label}
-                </Button>
-              ))}
+              {CATEGORIES.map((cat) => {
+                const IconComponent = ICON_MAP[cat.icon];
+                return (
+                  <Button
+                    key={cat.label}
+                    variant="ghost"
+                    onClick={() => handleCategoryClick(cat.prompt)}
+                    className="h-10 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-sm font-medium transition-all hover:text-zinc-100"
+                  >
+                    <IconComponent className="h-4 w-4" />
+                    {cat.label}
+                  </Button>
+                );
+              })}
             </div>
 
             {/* Suggested prompts */}
@@ -108,7 +111,6 @@ export default function HomePage() {
           value={inputValue}
           onChange={setInputValue}
           onSubmit={handleSend}
-          onStop={() => { }} // No-op here since navigation happens fast
           isLoading={isLoading}
           currentModel={model}
           onModelChange={setModel}
