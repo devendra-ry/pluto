@@ -12,6 +12,7 @@ import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES } from '
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { Wand2, BookOpen, Code, GraduationCap, Settings, ChevronDown, type LucideIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface ChatPageClientProps {
     chatId: string;
@@ -493,7 +494,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                         itemContent={(index, message) => {
                             const selectedModel = AVAILABLE_MODELS.find((m) => m.id === model);
                             return (
-                                <div className="max-w-3xl mx-auto pt-8">
+                                <div className={cn("max-w-3xl mx-auto", index === 0 ? "pt-12" : "pt-4")}>
                                     <ChatMessage
                                         key={message.id}
                                         id={message.id}

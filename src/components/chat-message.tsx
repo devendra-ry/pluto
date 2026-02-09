@@ -106,7 +106,7 @@ export const ChatMessage = memo(function ChatMessage({
         // User message - right aligned with bubble
         if (isUser) {
             return (
-                <div className="flex flex-col items-end py-3 px-4 group">
+                <div className="flex flex-col items-end py-1 px-4 group">
                     {isEditing ? (
                         <div className="w-full max-w-[75%] flex flex-col gap-2">
                             <textarea
@@ -135,11 +135,11 @@ export const ChatMessage = memo(function ChatMessage({
                         </div>
                     ) : (
                         <>
-                            <div className="max-w-[75%] rounded-2xl px-4 py-3 bg-[#2a2035]/80 backdrop-blur-sm border border-white/5 text-zinc-100 shadow-lg">
+                            <div className="max-w-[75%] rounded-2xl px-4 py-2 bg-[#2a2035]/80 backdrop-blur-sm border border-white/5 text-zinc-100 shadow-lg">
                                 <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">{content}</p>
                             </div>
                             {/* Action icons below message - same row */}
-                            <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity translate-x-1">
+                            <div className="flex items-center gap-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity translate-x-1">
                                 {onRetry && (
                                     <ActionIcon
                                         icon={RefreshCcw}
@@ -178,7 +178,7 @@ export const ChatMessage = memo(function ChatMessage({
         const showLoadingDots = isStreaming && !content && !reasoning && !isThinking;
 
         return (
-            <div className="py-3 px-4 group">
+            <div className="py-1 px-4 group">
                 <div className="max-w-3xl">
                     {/* Loading indicator for non-thinking models */}
                     {showLoadingDots && (
@@ -191,7 +191,7 @@ export const ChatMessage = memo(function ChatMessage({
 
                     {/* Reasoning section (collapsible) */}
                     {(reasoning || isThinking) && (
-                        <div className="mb-6">
+                        <div className="mb-4">
                             <div
                                 className={cn(
                                     "rounded-xl transition-all duration-300 ease-in-out overflow-hidden border",
@@ -253,12 +253,12 @@ export const ChatMessage = memo(function ChatMessage({
                     {/* Main content */}
                     {content && (
                         <div className="prose prose-invert prose-sm max-w-none 
-                            prose-p:text-zinc-200 prose-p:leading-relaxed prose-p:text-[15px] prose-p:my-3
-                            prose-headings:text-zinc-100 prose-headings:font-semibold prose-headings:mt-5 prose-headings:mb-2
+                            prose-p:text-zinc-200 prose-p:leading-relaxed prose-p:text-[15px] prose-p:my-1.5
+                            prose-headings:text-zinc-100 prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-2
                             prose-h1:text-xl prose-h2:text-lg prose-h3:text-base
                             prose-strong:text-zinc-100 
                             prose-code:text-pink-300
-                            prose-ol:my-3 prose-ul:my-3 prose-li:my-1
+                            prose-ol:my-2 prose-ul:my-2 prose-li:my-0.5
                             prose-hr:my-4 prose-hr:border-zinc-700/50
                             [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden
                         ">
@@ -296,7 +296,7 @@ export const ChatMessage = memo(function ChatMessage({
 
                     {/* Action icons below AI message */}
                     {!isStreaming && content && (
-                        <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity -ml-2">
+                        <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity -ml-2">
                             {onRetry && (
                                 <ActionIcon
                                     icon={RefreshCcw}
