@@ -14,6 +14,7 @@
     "@google/genai": "^1.40.0",
     "@lobehub/icons": "^4.2.0",
     "@openrouter/sdk": "^0.8.0",
+    "@radix-ui/react-tooltip": "^1.2.8",
     "@tailwindcss/typography": "^0.5.19",
     "@types/react-virtualized-auto-sizer": "^1.0.4",
     "@types/react-window": "^1.8.8",
