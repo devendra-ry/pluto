@@ -13,7 +13,7 @@ export function useMessages(threadId: string | null) {
                 : [],
         [threadId]
     );
-    return messages ?? [];
+    return messages;
 }
 
 // Add a new message to a thread

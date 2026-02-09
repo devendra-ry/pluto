@@ -61,68 +61,66 @@ export default function HomePage() {
   };
 
   return (
-    <ChatLayout>
-      <div className="flex flex-col h-full bg-[#1a1520]">
-        <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center p-4">
-          <div className="w-full max-w-3xl flex flex-col items-start px-4">
-            {/* Main heading */}
-            <h1 className="text-4xl font-semibold text-zinc-100 mb-8 tracking-tight">
-              How can I help you?
-            </h1>
+    <div className="flex flex-col h-full bg-[#1a1520]">
+      <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-3xl flex flex-col items-start px-4">
+          {/* Main heading */}
+          <h1 className="text-4xl font-semibold text-zinc-100 mb-8 tracking-tight">
+            How can I help you?
+          </h1>
 
-            {/* Category buttons */}
-            <div className="flex flex-wrap gap-2 mb-10">
-              {CATEGORIES.map((cat) => {
-                const IconComponent = ICON_MAP[cat.icon];
-                return (
-                  <Button
-                    key={cat.label}
-                    variant="ghost"
-                    onClick={() => handleCategoryClick(cat.prompt)}
-                    className="h-10 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-sm font-medium transition-all hover:text-zinc-100"
-                  >
-                    <IconComponent className="h-4 w-4" />
-                    {cat.label}
-                  </Button>
-                );
-              })}
-            </div>
-
-            {/* Suggested prompts */}
-            <div className="space-y-1 w-full text-left">
-              {SUGGESTED_PROMPTS.map((prompt, i) => (
-                <button
-                  key={i}
-                  onClick={() => handlePromptClick(prompt)}
-                  className="w-full text-left px-0 py-2.5 text-[15px] text-zinc-400/90 hover:text-zinc-200 transition-colors"
+          {/* Category buttons */}
+          <div className="flex flex-wrap gap-2 mb-10">
+            {CATEGORIES.map((cat) => {
+              const IconComponent = ICON_MAP[cat.icon];
+              return (
+                <Button
+                  key={cat.label}
+                  variant="ghost"
+                  onClick={() => handleCategoryClick(cat.prompt)}
+                  className="h-10 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-sm font-medium transition-all hover:text-zinc-100"
                 >
-                  {prompt}
-                </button>
-              ))}
-            </div>
+                  <IconComponent className="h-4 w-4" />
+                  {cat.label}
+                </Button>
+              );
+            })}
           </div>
 
-          {/* Terms and Privacy Policy */}
-          <div className="absolute bottom-24 left-0 right-0 text-center">
-            <p className="text-xs text-zinc-500">
-              Make sure you agree to our{' '}
-              <span className="underline cursor-pointer hover:text-zinc-400">Terms</span>
-              {' '}and our{' '}
-              <span className="underline cursor-pointer hover:text-zinc-400">Privacy Policy</span>
-            </p>
+          {/* Suggested prompts */}
+          <div className="space-y-1 w-full text-left">
+            {SUGGESTED_PROMPTS.map((prompt, i) => (
+              <button
+                key={i}
+                onClick={() => handlePromptClick(prompt)}
+                className="w-full text-left px-0 py-2.5 text-[15px] text-zinc-400/90 hover:text-zinc-200 transition-colors"
+              >
+                {prompt}
+              </button>
+            ))}
           </div>
         </div>
 
-        <ChatInput
-          ref={chatInputRef}
-          onSubmit={handleSend}
-          isLoading={isLoading}
-          currentModel={model}
-          onModelChange={setModel}
-          reasoningEffort={reasoningEffort}
-          onReasoningEffortChange={setReasoningEffort}
-        />
+        {/* Terms and Privacy Policy */}
+        <div className="absolute bottom-24 left-0 right-0 text-center">
+          <p className="text-xs text-zinc-500">
+            Make sure you agree to our{' '}
+            <span className="underline cursor-pointer hover:text-zinc-400">Terms</span>
+            {' '}and our{' '}
+            <span className="underline cursor-pointer hover:text-zinc-400">Privacy Policy</span>
+          </p>
+        </div>
       </div>
-    </ChatLayout>
+
+      <ChatInput
+        ref={chatInputRef}
+        onSubmit={handleSend}
+        isLoading={isLoading}
+        currentModel={model}
+        onModelChange={setModel}
+        reasoningEffort={reasoningEffort}
+        onReasoningEffortChange={setReasoningEffort}
+      />
+    </div>
   );
 }

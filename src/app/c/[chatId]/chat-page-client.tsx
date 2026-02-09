@@ -56,11 +56,21 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (thread?.model) {
             setModel(thread.model);
         }
-        setReasoningEffort(thread?.reasoningEffort ?? 'low');
+        if (thread?.reasoningEffort) {
+            setReasoningEffort(thread.reasoningEffort);
+        }
     }, [thread]);
 
     useEffect(() => {
-        if (!hasInitialized.current && storedMessages.length > 0) {
+        if (storedMessages === undefined) return;
+
+        // Reset if we've switched chats
+        if (hasInitialized.current && storedMessages.length === 0 && messages.length > 0) {
+            setMessages([]);
+            hasInitialized.current = false;
+        }
+
+        if (!hasInitialized.current) {
             hasInitialized.current = true;
             setMessages(
                 storedMessages.map((m) => ({
@@ -70,21 +80,37 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     reasoning: m.reasoning,
                 }))
             );
+        } else {
+            // Update messages if they change after initialization (e.g. from sync or outside update)
+            // But only if we aren't currently generating to avoid race conditions with local state
+            if (!isLoading && !isThinking) {
+                setMessages(
+                    storedMessages.map((m) => ({
+                        id: m.id,
+                        role: m.role,
+                        content: m.content,
+                        reasoning: m.reasoning,
+                    }))
+                );
+            }
         }
-    }, [storedMessages]);
+    }, [storedMessages, isLoading, isThinking, messages.length]);
 
 
     useEffect(() => {
+        // Prepare for new chat ID
+        lastRequestFailed.current = false;
         hasInitialized.current = false;
-        lastRequestFailed.current = false; // Reset on new chat
+
+        // Immediately clear messages to provide an "instant" wipe feel
         setMessages([]);
+
         if (chatInputRef.current) {
             chatInputRef.current.setValue('');
         }
         setIsLoading(false);
         setIsThinking(false);
         generatingRef.current = null;
-        // Reset reasoning effort only if it's not already 'low' or if we want to default to 'low' for new chats
         setReasoningEffort('low');
         setIsAtBottom(true);
     }, [chatId]);
@@ -319,7 +345,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (msgIndex === -1) return;
 
         const previousMessages = messages.slice(0, msgIndex);
-        const messagesToDelete = storedMessages.slice(msgIndex);
+        const messagesToDelete = (storedMessages ?? []).slice(msgIndex);
         for (const msg of messagesToDelete) {
             await deleteMessage(msg.id);
         }
@@ -350,7 +376,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
 
         const previousMessages = messages.slice(0, msgIndex + 1); // Include the user message
-        const messagesToDelete = storedMessages.slice(msgIndex + 1); // Delete responses after it
+        const messagesToDelete = (storedMessages ?? []).slice(msgIndex + 1); // Delete responses after it
 
         for (const msg of messagesToDelete) {
             await deleteMessage(msg.id);
@@ -361,125 +387,125 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     }, [messages, storedMessages, generateResponse]);
 
     return (
-        <ChatLayout>
-            <div className="flex flex-col h-full bg-[#1a1520]">
-                {/* Settings button in top right */}
-                <div className="absolute top-6 right-8 z-10">
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 text-zinc-500 hover:text-zinc-300 hover:bg-[#2a2035]/50 rounded-xl transition-all"
-                    >
-                        <Settings className="h-5 w-5" />
-                    </Button>
-                </div>
-
-                <div className="flex-1 min-h-0 relative">
-                    {messages.length === 0 && !isThinking ? (
-                        <div className="flex flex-col items-center justify-center h-full px-4 pt-8">
-                            {/* Main heading */}
-                            <h1 className="text-3xl font-bold text-zinc-100 mb-6">
-                                How can I help you?
-                            </h1>
-
-                            {/* Category buttons */}
-                            <div className="flex gap-2 mb-8">
-                                {CATEGORIES.map((cat) => {
-                                    const IconComponent = ICON_MAP[cat.icon];
-                                    return (
-                                        <Button
-                                            key={cat.label}
-                                            variant="ghost"
-                                            className="h-9 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-sm"
-                                        >
-                                            <IconComponent className="h-4 w-4" />
-                                            {cat.label}
-                                        </Button>
-                                    );
-                                })}
-                            </div>
-
-                            {/* Suggested prompts */}
-                            <div className="space-y-1 w-full max-w-md text-left">
-                                {SUGGESTED_PROMPTS.map((prompt, i) => (
-                                    <button
-                                        key={i}
-                                        onClick={() => handlePromptClick(prompt)}
-                                        className="w-full text-left px-1 py-2 text-sm text-pink-300/80 hover:text-pink-200 transition-colors"
-                                    >
-                                        {prompt}
-                                    </button>
-                                ))}
-                            </div>
-
-                            {/* Terms and Privacy Policy (at bottom) */}
-                            <div className="absolute bottom-12 left-0 right-0 text-center">
-                                <p className="text-xs text-zinc-500">
-                                    Make sure you agree to our{' '}
-                                    <span className="underline cursor-pointer hover:text-zinc-400">Terms</span>
-                                    {' '}and our{' '}
-                                    <span className="underline cursor-pointer hover:text-zinc-400">Privacy Policy</span>
-                                </p>
-                            </div>
-                        </div>
-                    ) : (
-                        <Virtuoso
-                            ref={virtuosoRef}
-                            className="scrollbar-none"
-                            data={messages}
-                            followOutput="auto"
-                            atBottomThreshold={60}
-                            atBottomStateChange={setIsAtBottom}
-                            initialTopMostItemIndex={messages.length - 1}
-                            itemContent={(index, message) => {
-                                const selectedModel = AVAILABLE_MODELS.find((m) => m.id === model);
-                                return (
-                                    <div className="max-w-3xl mx-auto pt-8">
-                                        <ChatMessage
-                                            key={message.id}
-                                            id={message.id}
-                                            role={message.role}
-                                            content={message.content.replace(HEADING_FIX_REGEX, '$1 $2')}
-                                            reasoning={message.reasoning}
-                                            isStreaming={isLoading && index === messages.length - 1 && message.role === 'assistant'}
-                                            isThinking={isThinking && index === messages.length - 1 && message.role === 'assistant'}
-                                            modelName={message.role === 'assistant' ? selectedModel?.name : undefined}
-                                            onEdit={message.role === 'user' ? handleEdit : undefined}
-                                            onRetry={handleRetry}
-                                        />
-                                    </div>
-                                );
-                            }}
-                        />
-                    )}
-                </div>
-
-                <div className="relative w-full max-w-3xl mx-auto px-4">
-                    {/* Floating Scroll to Bottom Button - Pill Style */}
-                    {!isAtBottom && messages.length > 0 && (
-                        <div className="absolute -top-14 left-1/2 -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                            <button
-                                onClick={scrollToBottom}
-                                className="h-9 px-4 rounded-full bg-zinc-900/60 backdrop-blur-lg border border-white/5 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/80 shadow-2xl transition-all flex items-center gap-2 group"
-                            >
-                                <span className="text-xs font-semibold tracking-tight">Scroll to bottom</span>
-                                <ChevronDown className="h-4 w-4 transition-transform group-hover:translate-y-0.5" />
-                            </button>
-                        </div>
-                    )}
-                </div>
-
-                <ChatInput
-                    ref={chatInputRef}
-                    onSubmit={handleSend}
-                    onStop={handleStop}
-                    isLoading={isLoading}
-                    currentModel={model}
-                    onModelChange={handleModelChange}
-                    reasoningEffort={reasoningEffort}
-                    onReasoningEffortChange={handleReasoningEffortChange}
-                />
+        <div className="flex flex-col h-full bg-[#1a1520]">
+            {/* Settings button in top right */}
+            <div className="absolute top-6 right-8 z-10">
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 text-zinc-500 hover:text-zinc-300 hover:bg-[#2a2035]/50 rounded-xl transition-all"
+                >
+                    <Settings className="h-5 w-5" />
+                </Button>
             </div>
-        </ChatLayout>
+
+            <div className="flex-1 min-h-0 relative">
+                {storedMessages === undefined || (storedMessages.length > 0 && messages.length === 0) ? (
+                    null // Render nothing while loading or syncing for an "instant" feel
+                ) : storedMessages.length === 0 && !isThinking ? (
+                    <div className="flex flex-col items-center justify-center h-full px-4 pt-8">
+                        {/* Main heading */}
+                        <h1 className="text-3xl font-bold text-zinc-100 mb-6">
+                            How can I help you?
+                        </h1>
+
+                        {/* Category buttons */}
+                        <div className="flex gap-2 mb-8">
+                            {CATEGORIES.map((cat) => {
+                                const IconComponent = ICON_MAP[cat.icon];
+                                return (
+                                    <Button
+                                        key={cat.label}
+                                        variant="ghost"
+                                        className="h-9 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-sm"
+                                    >
+                                        <IconComponent className="h-4 w-4" />
+                                        {cat.label}
+                                    </Button>
+                                );
+                            })}
+                        </div>
+
+                        {/* Suggested prompts */}
+                        <div className="space-y-1 w-full max-w-md text-left">
+                            {SUGGESTED_PROMPTS.map((prompt, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => handlePromptClick(prompt)}
+                                    className="w-full text-left px-1 py-2 text-sm text-pink-300/80 hover:text-pink-200 transition-colors"
+                                >
+                                    {prompt}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Terms and Privacy Policy (at bottom) */}
+                        <div className="absolute bottom-12 left-0 right-0 text-center">
+                            <p className="text-xs text-zinc-500">
+                                Make sure you agree to our{' '}
+                                <span className="underline cursor-pointer hover:text-zinc-400">Terms</span>
+                                {' '}and our{' '}
+                                <span className="underline cursor-pointer hover:text-zinc-400">Privacy Policy</span>
+                            </p>
+                        </div>
+                    </div>
+                ) : (
+                    <Virtuoso
+                        ref={virtuosoRef}
+                        className="scrollbar-none"
+                        data={messages}
+                        followOutput="auto"
+                        atBottomThreshold={60}
+                        atBottomStateChange={setIsAtBottom}
+                        initialTopMostItemIndex={messages.length - 1}
+                        itemContent={(index, message) => {
+                            const selectedModel = AVAILABLE_MODELS.find((m) => m.id === model);
+                            return (
+                                <div className="max-w-3xl mx-auto pt-8">
+                                    <ChatMessage
+                                        key={message.id}
+                                        id={message.id}
+                                        role={message.role}
+                                        content={message.content.replace(HEADING_FIX_REGEX, '$1 $2')}
+                                        reasoning={message.reasoning}
+                                        isStreaming={isLoading && index === messages.length - 1 && message.role === 'assistant'}
+                                        isThinking={isThinking && index === messages.length - 1 && message.role === 'assistant'}
+                                        modelName={message.role === 'assistant' ? selectedModel?.name : undefined}
+                                        onEdit={message.role === 'user' ? handleEdit : undefined}
+                                        onRetry={handleRetry}
+                                    />
+                                </div>
+                            );
+                        }}
+                    />
+                )}
+            </div>
+
+            <div className="relative w-full max-w-3xl mx-auto px-4">
+                {/* Floating Scroll to Bottom Button - Pill Style */}
+                {!isAtBottom && messages.length > 0 && (
+                    <div className="absolute -top-14 left-1/2 -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <button
+                            onClick={scrollToBottom}
+                            className="h-9 px-4 rounded-full bg-zinc-900/60 backdrop-blur-lg border border-white/5 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/80 shadow-2xl transition-all flex items-center gap-2 group"
+                        >
+                            <span className="text-xs font-semibold tracking-tight">Scroll to bottom</span>
+                            <ChevronDown className="h-4 w-4 transition-transform group-hover:translate-y-0.5" />
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            <ChatInput
+                ref={chatInputRef}
+                onSubmit={handleSend}
+                onStop={handleStop}
+                isLoading={isLoading}
+                currentModel={model}
+                onModelChange={handleModelChange}
+                reasoningEffort={reasoningEffort}
+                onReasoningEffortChange={handleReasoningEffortChange}
+            />
+        </div>
     );
 }
