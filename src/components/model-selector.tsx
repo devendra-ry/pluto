@@ -1,7 +1,7 @@
 'use client';
 
 import { Minimax, Qwen, Zhipu, NousResearch, Gemini, OpenRouter } from '@lobehub/icons';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -168,7 +168,7 @@ const PROVIDER_LOGOS: Record<string, React.ComponentType<{ className?: string }>
     'openrouter': OpenRouterLogo,
 };
 
-export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProps) {
+export const ModelSelector = memo(function ModelSelector({ currentModel, onModelChange }: ModelSelectorProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedProvider, setSelectedProvider] = useState<string | null>('all');
@@ -411,4 +411,4 @@ export function ModelSelector({ currentModel, onModelChange }: ModelSelectorProp
             </DropdownMenuContent>
         </DropdownMenu>
     );
-}
+});

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, memo, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -24,7 +24,7 @@ import { cn } from '@/lib/utils';
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
 
-export function Sidebar() {
+const Sidebar = memo(function Sidebar() {
     const [isCollapsed, setIsCollapsed] = useState(() => {
         if (typeof window !== 'undefined') {
             return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
@@ -87,17 +87,17 @@ export function Sidebar() {
         return 42; // Thread item height
     };
 
-    const handleNewChat = () => {
+    const handleNewChat = useCallback(() => {
         router.push('/');
-    };
+    }, [router]);
 
-    const handleDeleteClick = (e: React.MouseEvent, threadId: string) => {
+    const handleDeleteClick = useCallback((e: React.MouseEvent, threadId: string) => {
         e.preventDefault();
         e.stopPropagation();
         setDeleteConfirm(threadId);
-    };
+    }, []);
 
-    const handleDeleteConfirm = async (e: React.MouseEvent, threadId: string) => {
+    const handleDeleteConfirm = useCallback(async (e: React.MouseEvent, threadId: string) => {
         e.preventDefault();
         e.stopPropagation();
         await deleteThread(threadId);
@@ -105,22 +105,22 @@ export function Sidebar() {
         if (pathname === `/c/${threadId}`) {
             router.push('/');
         }
-    };
+    }, [pathname, router]);
 
-    const handleDeleteCancel = (e: React.MouseEvent) => {
+    const handleDeleteCancel = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
         setDeleteConfirm(null);
-    };
+    }, []);
 
-    const handleTogglePin = async (e: React.MouseEvent, threadId: string, isPinned: boolean) => {
+    const handleTogglePin = useCallback(async (e: React.MouseEvent, threadId: string, isPinned: boolean) => {
         e.preventDefault();
         e.stopPropagation();
         await toggleThreadPin(threadId, !isPinned);
-    };
+    }, []);
 
 
-    const renderThreadItem = (thread: Thread) => {
+    const renderThreadItem = useCallback((thread: Thread) => {
         const isActive = pathname === `/c/${thread.id}`;
         const isConfirmingDelete = deleteConfirm === thread.id;
 
@@ -210,7 +210,7 @@ export function Sidebar() {
                 )}
             </div>
         );
-    };
+    }, [pathname, deleteConfirm, handleDeleteConfirm, handleDeleteCancel, handleTogglePin, handleDeleteClick]);
 
     return (
         <>
@@ -364,4 +364,6 @@ export function Sidebar() {
             </AnimatePresence>
         </>
     );
-}
+});
+
+export { Sidebar };

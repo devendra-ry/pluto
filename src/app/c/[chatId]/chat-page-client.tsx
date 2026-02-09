@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { ChatMessage } from '@/components/chat-message';
 import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
 import { type ReasoningEffort } from '@/lib/types';
@@ -37,7 +38,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
 export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const thread = useThread(chatId);
     const storedMessages = useMessages(chatId);
-    const scrollRef = useRef<HTMLDivElement>(null);
+    const virtuosoRef = useRef<VirtuosoHandle>(null);
     const [model, setModel] = useState<string>(DEFAULT_MODEL);
     const chatInputRef = useRef<ChatInputHandle>(null);
     const [messages, setMessages] = useState<ChatMessageType[]>([]);
@@ -89,23 +90,15 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     }, [chatId]);
 
     const scrollToBottom = useCallback(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        if (virtuosoRef.current) {
+            virtuosoRef.current.scrollToIndex({ index: messages.length - 1, align: 'end', behavior: 'smooth' });
             setIsAtBottom(true);
         }
-    }, []);
-
-    const handleScroll = useCallback(() => {
-        if (scrollRef.current) {
-            const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-            const atBottom = scrollHeight - scrollTop - clientHeight < 50;
-            setIsAtBottom(atBottom);
-        }
-    }, []);
+    }, [messages.length]);
 
     useEffect(() => {
-        if (scrollRef.current && isAtBottom) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        if (virtuosoRef.current && isAtBottom) {
+            virtuosoRef.current.scrollToIndex({ index: messages.length - 1, align: 'end' });
         }
     }, [messages, isThinking, isAtBottom]);
 
@@ -381,13 +374,9 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     </Button>
                 </div>
 
-                <div
-                    ref={scrollRef}
-                    className="flex-1 overflow-y-auto scroll-smooth"
-                    onScroll={handleScroll}
-                >
+                <div className="flex-1 min-h-0 relative">
                     {messages.length === 0 && !isThinking ? (
-                        <div className="flex flex-col items-center justify-center h-full px-4">
+                        <div className="flex flex-col items-center justify-center h-full px-4 pt-8">
                             {/* Main heading */}
                             <h1 className="text-3xl font-bold text-zinc-100 mb-6">
                                 How can I help you?
@@ -424,7 +413,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                             </div>
 
                             {/* Terms and Privacy Policy (at bottom) */}
-                            <div className="absolute bottom-24 left-0 right-0 text-center">
+                            <div className="absolute bottom-12 left-0 right-0 text-center">
                                 <p className="text-xs text-zinc-500">
                                     Make sure you agree to our{' '}
                                     <span className="underline cursor-pointer hover:text-zinc-400">Terms</span>
@@ -434,31 +423,40 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                             </div>
                         </div>
                     ) : (
-                        <div className="max-w-3xl mx-auto pt-8 pb-4">
-                            {messages.map((message, i) => {
+                        <Virtuoso
+                            ref={virtuosoRef}
+                            className="scrollbar-none"
+                            data={messages}
+                            followOutput="auto"
+                            atBottomThreshold={60}
+                            atBottomStateChange={setIsAtBottom}
+                            initialTopMostItemIndex={messages.length - 1}
+                            itemContent={(index, message) => {
                                 const selectedModel = AVAILABLE_MODELS.find((m) => m.id === model);
                                 return (
-                                    <ChatMessage
-                                        key={message.id}
-                                        id={message.id}
-                                        role={message.role}
-                                        content={message.content.replace(HEADING_FIX_REGEX, '$1 $2')}
-                                        reasoning={message.reasoning}
-                                        isStreaming={isLoading && i === messages.length - 1 && message.role === 'assistant'}
-                                        isThinking={isThinking && i === messages.length - 1 && message.role === 'assistant'}
-                                        modelName={message.role === 'assistant' ? selectedModel?.name : undefined}
-                                        onEdit={message.role === 'user' ? handleEdit : undefined}
-                                        onRetry={handleRetry}
-                                    />
+                                    <div className="max-w-3xl mx-auto pt-8">
+                                        <ChatMessage
+                                            key={message.id}
+                                            id={message.id}
+                                            role={message.role}
+                                            content={message.content.replace(HEADING_FIX_REGEX, '$1 $2')}
+                                            reasoning={message.reasoning}
+                                            isStreaming={isLoading && index === messages.length - 1 && message.role === 'assistant'}
+                                            isThinking={isThinking && index === messages.length - 1 && message.role === 'assistant'}
+                                            modelName={message.role === 'assistant' ? selectedModel?.name : undefined}
+                                            onEdit={message.role === 'user' ? handleEdit : undefined}
+                                            onRetry={handleRetry}
+                                        />
+                                    </div>
                                 );
-                            })}
-                        </div>
+                            }}
+                        />
                     )}
                 </div>
 
                 <div className="relative w-full max-w-3xl mx-auto px-4">
                     {/* Floating Scroll to Bottom Button - Pill Style */}
-                    {!isAtBottom && scrollRef.current && scrollRef.current.scrollHeight > scrollRef.current.clientHeight && (
+                    {!isAtBottom && messages.length > 0 && (
                         <div className="absolute -top-14 left-1/2 -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 duration-300">
                             <button
                                 onClick={scrollToBottom}
