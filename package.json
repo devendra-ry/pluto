@@ -15,6 +15,7 @@
     "@tailwindcss/typography": "^0.5.19",
     "@types/react-virtualized-auto-sizer": "^1.0.4",
     "@types/react-window": "^1.8.8",
+    "@vercel/analytics": "^1.6.1",
     "ai": "^6.0.77",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
