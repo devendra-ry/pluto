@@ -50,6 +50,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const abortControllerRef = useRef<AbortController | null>(null);
     const generatingRef = useRef<string | null>(null);
     const lastRequestFailed = useRef(false); // Prevent auto-retry after failures
+    const currentMessagesChatId = useRef<string | null>(null);
     const { showToast } = useToast();
 
     useEffect(() => {
@@ -72,6 +73,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
         if (!hasInitialized.current) {
             hasInitialized.current = true;
+            currentMessagesChatId.current = chatId;
             setMessages(
                 storedMessages.map((m) => ({
                     id: m.id,
@@ -84,6 +86,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             // Update messages if they change after initialization (e.g. from sync or outside update)
             // But only if we aren't currently generating to avoid race conditions with local state
             if (!isLoading && !isThinking) {
+                currentMessagesChatId.current = chatId;
                 setMessages(
                     storedMessages.map((m) => ({
                         id: m.id,
@@ -94,13 +97,14 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 );
             }
         }
-    }, [storedMessages, isLoading, isThinking, messages.length]);
+    }, [storedMessages, isLoading, isThinking, messages.length, chatId]);
 
 
     useEffect(() => {
         // Prepare for new chat ID
         lastRequestFailed.current = false;
         hasInitialized.current = false;
+        currentMessagesChatId.current = null;
 
         // Immediately clear messages to provide an "instant" wipe feel
         setMessages([]);
@@ -298,8 +302,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
     // Check for pending user message on load (e.g. new chat from home)
     useEffect(() => {
-        // Don't auto-retry if the last request failed
-        if (lastRequestFailed.current) {
+        // Don't auto-retry if the last request failed or if messages don't belong to current chat
+        if (lastRequestFailed.current || currentMessagesChatId.current !== chatId) {
             return;
         }
         if (hasInitialized.current && messages.length > 0 && !isLoading && !isThinking) {
@@ -308,9 +312,10 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 generateResponse(messages);
             }
         }
-    }, [messages, isLoading, isThinking, generateResponse]);
+    }, [messages, isLoading, isThinking, generateResponse, chatId]);
 
     const sendMessage = useCallback(async (userMessage: string, existingMessages: ChatMessageType[]) => {
+        setIsLoading(true);
         // Reset the failure flag when user manually sends a message
         lastRequestFailed.current = false;
 
@@ -322,9 +327,14 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
         const updatedMessages = [...existingMessages, userMsg];
         setMessages(updatedMessages);
-        await addMessage(chatId, 'user', userMessage);
 
-        await generateResponse(updatedMessages);
+        try {
+            await addMessage(chatId, 'user', userMessage);
+            await generateResponse(updatedMessages);
+        } catch (error) {
+            setIsLoading(false);
+            console.error('Failed to send message:', error);
+        }
     }, [chatId, generateResponse]);
 
     const handleSend = useCallback(async (value: string) => {
@@ -341,49 +351,71 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     };
 
     const handleEdit = useCallback(async (messageId: string, newContent: string) => {
+        setIsLoading(true);
         const msgIndex = messages.findIndex(m => m.id === messageId);
-        if (msgIndex === -1) return;
+        if (msgIndex === -1) {
+            setIsLoading(false);
+            return;
+        }
 
         const previousMessages = messages.slice(0, msgIndex);
         const messagesToDelete = (storedMessages ?? []).slice(msgIndex);
-        for (const msg of messagesToDelete) {
-            await deleteMessage(msg.id);
+        try {
+            for (const msg of messagesToDelete) {
+                await deleteMessage(msg.id);
+            }
+
+            const userMsg: ChatMessageType = {
+                id: crypto.randomUUID(),
+                role: 'user',
+                content: newContent
+            };
+            const updatedMessages = [...previousMessages, userMsg];
+
+            setMessages(updatedMessages);
+            await addMessage(chatId, 'user', newContent);
+
+            await generateResponse(updatedMessages);
+        } catch (error) {
+            setIsLoading(false);
+            console.error('Failed to edit message:', error);
         }
-
-        const userMsg: ChatMessageType = {
-            id: crypto.randomUUID(),
-            role: 'user',
-            content: newContent
-        };
-        const updatedMessages = [...previousMessages, userMsg];
-
-        setMessages(updatedMessages);
-        await addMessage(chatId, 'user', newContent);
-
-        await generateResponse(updatedMessages);
     }, [messages, storedMessages, chatId, generateResponse]);
 
     const handleRetry = useCallback(async (messageId: string) => {
+        setIsLoading(true);
         let msgIndex = messages.findIndex(m => m.id === messageId);
-        if (msgIndex === -1) return;
+        if (msgIndex === -1) {
+            setIsLoading(false);
+            return;
+        }
 
         // If retrying an assistant message, find the preceding user message
         if (messages[msgIndex].role === 'assistant') {
             msgIndex = messages.slice(0, msgIndex).findLastIndex(m => m.role === 'user');
-            if (msgIndex === -1) return;
+            if (msgIndex === -1) {
+                setIsLoading(false);
+                return;
+            }
         } else if (messages[msgIndex].role !== 'user') {
+            setIsLoading(false);
             return;
         }
 
         const previousMessages = messages.slice(0, msgIndex + 1); // Include the user message
         const messagesToDelete = (storedMessages ?? []).slice(msgIndex + 1); // Delete responses after it
 
-        for (const msg of messagesToDelete) {
-            await deleteMessage(msg.id);
-        }
+        try {
+            for (const msg of messagesToDelete) {
+                await deleteMessage(msg.id);
+            }
 
-        setMessages(previousMessages);
-        await generateResponse(previousMessages);
+            setMessages(previousMessages);
+            await generateResponse(previousMessages);
+        } catch (error) {
+            setIsLoading(false);
+            console.error('Failed to retry message:', error);
+        }
     }, [messages, storedMessages, generateResponse]);
 
     return (

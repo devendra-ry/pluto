@@ -107,9 +107,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         onChange={handleChange}
                         onKeyDown={handleKeyDown}
                         placeholder="Type your message here..."
-                        disabled={isLoading}
-                        rows={1}
-                        className="w-full px-5 pt-4 pb-14 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none disabled:opacity-50 min-h-[60px] text-[15px] leading-relaxed"
+                        className="w-full px-5 pt-4 pb-14 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-[15px] leading-relaxed"
                     />
 
                     {/* Bottom Bar */}
@@ -177,14 +175,19 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 <span className="">Search</span>
                             </Button>
 
-                            {/* Attachment - Pill style */}
-                            <Button
-                                variant="ghost"
-                                className="h-8 w-11 p-0 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-full transition-all flex items-center justify-center"
-                                title="Attach file"
-                            >
-                                <Paperclip className="h-4 w-4" />
-                            </Button>
+                            <div className="group/attach relative flex flex-col items-center">
+                                <Button
+                                    variant="ghost"
+                                    className="h-8 w-11 p-0 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-full transition-all flex items-center justify-center"
+                                >
+                                    <Paperclip className="h-4 w-4" />
+                                </Button>
+                                <div className="absolute bottom-full mb-2 hidden group-hover/attach:block z-50 pointer-events-none">
+                                    <div className="bg-[#1a1520]/95 backdrop-blur-md text-[11px] px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
+                                        <span className="text-[#fce7ef]">Attach file</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         {/* Right side - Send/Stop button */}
