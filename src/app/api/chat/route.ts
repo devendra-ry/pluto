@@ -101,8 +101,22 @@ export async function POST(req: Request) {
 
 // Helper to handle Google GenAI models
 async function handleGoogleModel(model: string, messages: ChatMessage[]) {
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    // Debug logging for Vercel
+    if (!apiKey) {
+        console.error('GEMINI_API_KEY is missing');
+        return new Response(
+            JSON.stringify({ error: 'Gemini API key is not configured' }),
+            { status: 500, headers: { 'Content-Type': 'application/json' } }
+        );
+    } else {
+        const maskedKey = apiKey.substring(0, 10) + '...' + apiKey.substring(apiKey.length - 4);
+        console.log(`Using Gemini API Key: ${maskedKey}`);
+    }
+
     const ai = new GoogleGenAI({
-        apiKey: process.env.GEMINI_API_KEY || '',
+        apiKey: apiKey,
     });
 
     // Convert messages to Google format
@@ -162,8 +176,21 @@ async function handleGoogleModel(model: string, messages: ChatMessage[]) {
 
 // Helper to handle OpenRouter models
 async function handleOpenRouterModel(model: string, messages: ChatMessage[]) {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+
+    // Debug logging for Vercel
+    if (!apiKey) {
+        console.error('OPENROUTER_API_KEY is missing');
+    } else {
+        const maskedKey = apiKey.substring(0, 10) + '...' + apiKey.substring(apiKey.length - 4);
+        console.log(`Using OpenRouter API Key: ${maskedKey}`);
+    }
+
     const openRouter = new OpenRouter({
-        apiKey: process.env.OPENROUTER_API_KEY || '',
+        apiKey: apiKey || '',
+        // OpenRouter recommends these headers for site rankings and to avoid some 401/403 errors
+        httpReferer: process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000",
+        xTitle: "Pluto Chat",
     });
 
     const response = await openRouter.chat.send({
