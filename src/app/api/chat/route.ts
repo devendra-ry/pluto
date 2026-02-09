@@ -41,6 +41,7 @@ export async function POST(req: Request) {
             stream: true,
             temperature: 1.0,
             top_p: 0.95,
+            max_tokens: 65536, // Allow long reasoning chains
         };
 
         // Add reasoning effort if specified (for models that support it)
@@ -120,7 +121,9 @@ async function handleGoogleModel(model: string, messages: ChatMessage[], reasoni
         parts: [{ text: msg.content }]
     }));
 
-    const config: any = {};
+    const config: any = {
+        maxOutputTokens: 65536, // Allow long reasoning chains
+    };
     const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
 
     if (modelConfig?.supportsReasoning) {
@@ -219,6 +222,7 @@ async function handleOpenRouterModel(model: string, messages: ChatMessage[], rea
                 content: msg.content
             })),
             stream: true,
+            maxTokens: 65536, // Allow long reasoning chains
             reasoning: {
                 effort: reasoningEffort as any
             }
