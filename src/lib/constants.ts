@@ -214,7 +214,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
     },
     {
         id: 'gemini-3-flash-preview',
-        name: 'Gemini 3 Flash Thinking',
+        name: 'Gemini 3 Flash',
         description: 'Google\'s latest reasoning model',
         provider: 'google',
         supportsReasoning: true,
