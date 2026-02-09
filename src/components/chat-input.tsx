@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, forwardRef, useState, useImperativeHandle } from 'react';
 import { Button } from '@/components/ui/button';
 import {
     DropdownMenu,
@@ -14,10 +14,15 @@ import { cn } from '@/lib/utils';
 import { type ReasoningEffort } from '@/lib/types';
 import { ModelSelector } from '@/components/model-selector';
 
+export interface ChatInputHandle {
+    setValue: (value: string) => void;
+    focus: () => void;
+}
+
 interface ChatInputProps {
-    value: string;
-    onChange: (value: string) => void;
-    onSubmit: () => void;
+    initialValue?: string;
+    onInputChange?: (value: string) => void; // Optional callback if parent needs current value
+    onSubmit: (value: string) => void;
     onStop?: () => void;
     isLoading: boolean;
     currentModel: string;
@@ -32,9 +37,9 @@ const REASONING_OPTIONS: { value: ReasoningEffort; label: string; pro?: boolean 
     { value: 'high', label: 'High' },
 ];
 
-export function ChatInput({
-    value,
-    onChange,
+export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
+    initialValue = '',
+    onInputChange,
     onSubmit,
     onStop,
     isLoading,
@@ -42,10 +47,25 @@ export function ChatInput({
     onModelChange,
     reasoningEffort,
     onReasoningEffortChange,
-}: ChatInputProps) {
+}, ref) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const [value, setValue] = useState(initialValue);
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
     const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
+
+    useImperativeHandle(ref, () => ({
+        setValue: (newValue: string) => {
+            setValue(newValue);
+            // Adjust height after setting value
+            requestAnimationFrame(() => {
+                if (textareaRef.current) {
+                    textareaRef.current.style.height = 'auto';
+                    textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
+                }
+            });
+        },
+        focus: () => textareaRef.current?.focus(),
+    }));
 
     useEffect(() => {
         if (textareaRef.current) {
@@ -58,9 +78,21 @@ export function ChatInput({
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             if (!isLoading && value?.trim()) {
-                onSubmit();
+                handleSubmit();
             }
         }
+    };
+
+    const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const newValue = e.target.value;
+        setValue(newValue);
+        onInputChange?.(newValue);
+    };
+
+    const handleSubmit = () => {
+        if (!value.trim()) return;
+        onSubmit(value);
+        setValue('');
     };
 
     return (
@@ -72,7 +104,7 @@ export function ChatInput({
                     <textarea
                         ref={textareaRef}
                         value={value}
-                        onChange={(e) => onChange(e.target.value)}
+                        onChange={handleChange}
                         onKeyDown={handleKeyDown}
                         placeholder="Type your message here..."
                         disabled={isLoading}
@@ -169,7 +201,7 @@ export function ChatInput({
                             <Button
                                 type="button"
                                 size="icon"
-                                onClick={onSubmit}
+                                onClick={handleSubmit}
                                 disabled={!value?.trim()}
                                 className="h-8 w-8 rounded-lg bg-[#3a283e] hover:bg-[#4a354e] text-pink-300/80 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -181,4 +213,5 @@ export function ChatInput({
             </div>
         </div>
     );
-}
+});
+ChatInput.displayName = 'ChatInput';

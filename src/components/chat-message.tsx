@@ -5,7 +5,7 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
 import { Copy, RefreshCcw, SquarePen, GitBranch, ChevronDown, Brain, Loader2, type LucideIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
@@ -51,7 +51,7 @@ interface ChatMessageProps {
     onDelete?: (id: string) => void;
 }
 
-export function ChatMessage({
+export const ChatMessage = memo(function ChatMessage({
     id,
     role,
     content,
@@ -309,3 +309,4 @@ export function ChatMessage({
         </div>
     );
 }
+);

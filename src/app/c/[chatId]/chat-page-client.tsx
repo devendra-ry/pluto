@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { ChatMessage } from '@/components/chat-message';
-import { ChatInput } from '@/components/chat-input';
+import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
 import { type ReasoningEffort } from '@/lib/types';
 import { ChatLayout } from '@/components/chat-layout';
 import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort } from '@/hooks/use-threads';
@@ -39,7 +39,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const storedMessages = useMessages(chatId);
     const scrollRef = useRef<HTMLDivElement>(null);
     const [model, setModel] = useState<string>(DEFAULT_MODEL);
-    const [inputValue, setInputValue] = useState('');
+    const chatInputRef = useRef<ChatInputHandle>(null);
     const [messages, setMessages] = useState<ChatMessageType[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isThinking, setIsThinking] = useState(false);
@@ -77,7 +77,9 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         hasInitialized.current = false;
         lastRequestFailed.current = false; // Reset on new chat
         setMessages([]);
-        setInputValue('');
+        if (chatInputRef.current) {
+            chatInputRef.current.setValue('');
+        }
         setIsLoading(false);
         setIsThinking(false);
         generatingRef.current = null;
@@ -306,16 +308,17 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         await generateResponse(updatedMessages);
     }, [chatId, generateResponse]);
 
-    const handleSend = useCallback(async () => {
-        if (!inputValue.trim() || isLoading) return;
-        const userMessage = inputValue.trim();
-        setInputValue('');
+    const handleSend = useCallback(async (value: string) => {
+        if (!value.trim() || isLoading) return;
         setIsAtBottom(true);
-        await sendMessage(userMessage, messages);
-    }, [inputValue, isLoading, messages, sendMessage]);
+        await sendMessage(value, messages);
+    }, [isLoading, messages, sendMessage]);
 
     const handlePromptClick = (prompt: string) => {
-        setInputValue(prompt);
+        if (chatInputRef.current) {
+            chatInputRef.current.setValue(prompt);
+            chatInputRef.current.focus();
+        }
     };
 
     const handleEdit = useCallback(async (messageId: string, newContent: string) => {
@@ -469,8 +472,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 </div>
 
                 <ChatInput
-                    value={inputValue}
-                    onChange={setInputValue}
+                    ref={chatInputRef}
                     onSubmit={handleSend}
                     onStop={handleStop}
                     isLoading={isLoading}

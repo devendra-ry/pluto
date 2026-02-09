@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
 import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES } from '@/lib/constants';
 import { ChatLayout } from '@/components/chat-layout';
-import { ChatInput } from '@/components/chat-input';
+import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
 import { type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Wand2, BookOpen, Code, GraduationCap, type LucideIcon } from 'lucide-react';
@@ -21,13 +21,13 @@ const ICON_MAP: Record<string, LucideIcon> = {
 
 export default function HomePage() {
   const router = useRouter();
-  const [inputValue, setInputValue] = useState('');
+  const chatInputRef = useRef<ChatInputHandle>(null);
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('low');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSend = async () => {
-    if (!inputValue.trim()) return;
+  const handleSend = async (value: string) => {
+    if (!value.trim()) return;
 
     setIsLoading(true);
     try {
@@ -35,7 +35,7 @@ export default function HomePage() {
       const thread = await createThread(model, reasoningEffort);
 
       // 2. Add the user message
-      await addMessage(thread.id, 'user', inputValue.trim());
+      await addMessage(thread.id, 'user', value.trim());
 
       // 3. Navigate to the new chat
       // The ChatPageClient will pick up the user message and start generating
@@ -47,11 +47,17 @@ export default function HomePage() {
   };
 
   const handlePromptClick = (prompt: string) => {
-    setInputValue(prompt);
+    if (chatInputRef.current) {
+      chatInputRef.current.setValue(prompt);
+      chatInputRef.current.focus();
+    }
   };
 
   const handleCategoryClick = (prompt: string) => {
-    setInputValue(prompt);
+    if (chatInputRef.current) {
+      chatInputRef.current.setValue(prompt);
+      chatInputRef.current.focus();
+    }
   };
 
   return (
@@ -108,8 +114,7 @@ export default function HomePage() {
         </div>
 
         <ChatInput
-          value={inputValue}
-          onChange={setInputValue}
+          ref={chatInputRef}
           onSubmit={handleSend}
           isLoading={isLoading}
           currentModel={model}
