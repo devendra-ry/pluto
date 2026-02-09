@@ -142,7 +142,9 @@ export function Sidebar() {
                             : 'text-zinc-400 group-hover:text-zinc-200'
                     )}
                 >
-                    <span className="truncate flex-1 min-w-0 break-all">{thread.title}</span>
+                    <span className="truncate flex-1 min-w-0 break-all transition-all duration-300 group-hover:text-clip group-hover:[mask-image:linear-gradient(to_right,black_0%,black_calc(100%-150px),transparent_calc(100%-50px))]">
+                        {thread.title}
+                    </span>
                 </Link>
 
                 {/* Delete Confirmation Overlay */}
@@ -170,7 +172,7 @@ export function Sidebar() {
                 {/* Hover Actions */}
                 {!isConfirmingDelete && (
                     <div
-                        className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-zinc-500"
+                        className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 h-full pr-1"
                     >
                         {/* Pin Button */}
                         <div className="relative group/tooltip">
@@ -179,7 +181,7 @@ export function Sidebar() {
                                 size="icon"
                                 className={cn(
                                     "h-7 w-7 transition-colors rounded-md",
-                                    thread.isPinned ? "text-pink-500 hover:bg-pink-500/10" : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/50"
+                                    thread.isPinned ? "text-pink-500 hover:bg-pink-500/10" : "text-zinc-500 hover:text-zinc-100"
                                 )}
                                 onClick={(e) => handleTogglePin(e, thread.id, !!thread.isPinned)}
                             >
@@ -195,7 +197,7 @@ export function Sidebar() {
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-7 w-7 text-zinc-500 hover:text-red-400 hover:bg-red-900/20 rounded-md"
+                                className="h-8 w-8 text-zinc-400 hover:text-zinc-100 hover:bg-[#63253e] rounded-xl transition-all"
                                 onClick={(e) => handleDeleteClick(e, thread.id)}
                             >
                                 <X className="h-3.5 w-3.5" />
