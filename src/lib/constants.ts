@@ -253,7 +253,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         capabilities: ['reasoning'],
     },
     {
-        id: 'google/gemini-2.5-pro',
+        id: 'gemini-2.5-pro',
         name: 'Gemini 2.5 Pro',
         description: 'Google\'s most powerful reasoning model',
         provider: 'google',
@@ -261,7 +261,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         capabilities: ['reasoning', 'vision', 'toolCalling'],
     },
     {
-        id: 'google/gemini-2.5-flash',
+        id: 'gemini-2.5-flash',
         name: 'Gemini 2.5 Flash',
         description: 'Fast and capable multimodal reasoning model',
         provider: 'google',
@@ -269,7 +269,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         capabilities: ['reasoning', 'vision', 'toolCalling', 'fast'],
     },
     {
-        id: 'google/gemini-2.5-flash-lite',
+        id: 'gemini-2.5-flash-lite',
         name: 'Gemini 2.5 Flash Lite',
         description: 'Ultra-fast lightweight reasoning model',
         provider: 'google',
@@ -277,7 +277,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         capabilities: ['reasoning', 'vision', 'toolCalling', 'fast'],
     },
     {
-        id: 'google/gemma-3-27b-it',
+        id: 'gemma-3-27b-it',
         name: 'Gemma 3 27B IT',
         description: 'Google\'s latest open-source multimodal model',
         provider: 'google',
