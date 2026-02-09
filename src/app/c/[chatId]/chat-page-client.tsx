@@ -52,6 +52,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const generatingRef = useRef<string | null>(null);
     const lastRequestFailed = useRef(false); // Prevent auto-retry after failures
     const currentMessagesChatId = useRef<string | null>(null);
+    const justAddedMessageIdRef = useRef<string | null>(null);
     const { showToast } = useToast();
 
     useEffect(() => {
@@ -87,6 +88,16 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             // Update messages if they change after initialization (e.g. from sync or outside update)
             // But only if we aren't currently generating to avoid race conditions with local state
             if (!isLoading && !isThinking) {
+                // If we just added a message, wait for it to appear in storedMessages before syncing
+                // This prevents the UI from reverting to a previous state and causing a loop
+                if (justAddedMessageIdRef.current) {
+                    const found = storedMessages.find(m => m.id === justAddedMessageIdRef.current);
+                    if (!found) {
+                        return;
+                    }
+                    justAddedMessageIdRef.current = null;
+                }
+
                 currentMessagesChatId.current = chatId;
                 setMessages(
                     storedMessages.map((m) => ({
@@ -147,9 +158,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
             abortControllerRef.current = null;
-            setIsLoading(false);
-            setIsThinking(false);
-            generatingRef.current = null;
         }
     }, []);
 
@@ -194,6 +202,10 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         };
         updateTitleIfNeeded();
 
+        const decoder = new TextDecoder();
+        let fullContent = '';
+        let fullReasoning = '';
+
         try {
             const response = await fetch('/api/chat', {
                 method: 'POST',
@@ -211,9 +223,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             }
 
             const reader = response.body?.getReader();
-            const decoder = new TextDecoder();
-            let fullContent = '';
-            let fullReasoning = '';
 
             if (reader) {
                 let buffer = '';
@@ -280,11 +289,24 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 }
             }
 
-            await addMessage(chatId, 'assistant', fullContent, fullReasoning);
+            const newMsg = await addMessage(chatId, 'assistant', fullContent, fullReasoning);
+            justAddedMessageIdRef.current = newMsg.id;
             await touchThread(chatId);
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
                 // User stopped
+                // If we have some content, save it so we don't lose the partial response
+                if (fullContent || fullReasoning) {
+                    const newMsg = await addMessage(chatId, 'assistant', fullContent, fullReasoning);
+                    justAddedMessageIdRef.current = newMsg.id;
+                    await touchThread(chatId);
+                } else {
+                    // If no content handling yet, mark as failed so we don't loop retry
+                    lastRequestFailed.current = true;
+                    // Also revert messages to remove empty bubble if needed, 
+                    // though sync effect usually handles this.
+                    setMessages(currentMessages);
+                }
             } else {
                 console.error('Chat error:', error);
                 showToast('Failed to generate response. Please try again.', 'error');
