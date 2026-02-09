@@ -155,13 +155,18 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         abortControllerRef.current = new AbortController();
 
         // Update title if it's a new chat and we have at least one message
-        if (thread?.title === 'New Chat' && currentMessages.length > 0) {
-            const firstUserMsg = currentMessages.find(m => m.role === 'user');
-            if (firstUserMsg) {
-                const title = firstUserMsg.content.slice(0, 50) + (firstUserMsg.content.length > 50 ? '...' : '');
-                updateThreadTitle(chatId, title);
+        // Use async check to handle cases where thread hook hasn't loaded yet
+        const updateTitleIfNeeded = async () => {
+            const currentThread = thread ?? await import('@/lib/db').then(m => m.db.threads.get(chatId));
+            if (currentThread?.title === 'New Chat' && currentMessages.length > 0) {
+                const firstUserMsg = currentMessages.find(m => m.role === 'user');
+                if (firstUserMsg) {
+                    const title = firstUserMsg.content.slice(0, 50) + (firstUserMsg.content.length > 50 ? '...' : '');
+                    updateThreadTitle(chatId, title);
+                }
             }
-        }
+        };
+        updateTitleIfNeeded();
 
         try {
             const response = await fetch('/api/chat', {

@@ -69,3 +69,17 @@ export async function deleteThread(id: string) {
         await db.threads.delete(id);
     });
 }
+
+// Cleanup empty threads (titled "New Chat" and have no messages)
+export async function cleanupEmptyThreads(excludeId?: string) {
+    const emptyThreads = await db.threads
+        .filter(t => t.title === 'New Chat' && t.id !== excludeId)
+        .toArray();
+
+    for (const thread of emptyThreads) {
+        const messageCount = await db.messages.where('threadId').equals(thread.id).count();
+        if (messageCount === 0) {
+            await db.threads.delete(thread.id);
+        }
+    }
+}

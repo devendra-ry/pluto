@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import {
     DropdownMenu,
@@ -8,10 +8,11 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowUp, Square, ChevronDown, Paperclip, Check, Sparkles, Search, Globe, Brain } from 'lucide-react';
+import { ArrowUp, Square, Paperclip, Check, Globe, Brain } from 'lucide-react';
 import { AVAILABLE_MODELS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { type ReasoningEffort } from '@/lib/types';
+import { ModelSelector } from '@/components/model-selector';
 
 interface ChatInputProps {
     value: string;
@@ -43,15 +44,8 @@ export function ChatInput({
     onReasoningEffortChange,
 }: ChatInputProps) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const [modelSearch, setModelSearch] = useState('');
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
     const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
-
-    // Filter models based on search query
-    const filteredModels = AVAILABLE_MODELS.filter(model =>
-        model.name.toLowerCase().includes(modelSearch.toLowerCase()) ||
-        model.description.toLowerCase().includes(modelSearch.toLowerCase())
-    );
 
     useEffect(() => {
         if (textareaRef.current) {
@@ -90,68 +84,11 @@ export function ChatInput({
                     <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-4 pb-3">
                         {/* Left side - Model selector and tools */}
                         <div className="flex items-center gap-3">
-                            {/* Model Selector - Plain text style */}
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        className="h-8 pl-0 pr-2 gap-2 text-zinc-100 hover:text-white hover:bg-transparent p-0 text-sm font-bold tracking-tight"
-                                    >
-                                        <span className="">{selectedModel.name}</span>
-                                        <ChevronDown className="h-3 w-3 opacity-50" />
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent
-                                    align="start"
-                                    side="top"
-                                    className="w-80 bg-[#1a1520] border-[#3a3045] shadow-2xl mb-2 max-h-[400px] overflow-y-auto"
-                                >
-                                    {/* Search */}
-                                    <div className="p-2 border-b border-[#2a2535]">
-                                        <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-[#252030]">
-                                            <Search className="h-4 w-4 text-zinc-500" />
-                                            <input
-                                                type="text"
-                                                placeholder="Search models..."
-                                                value={modelSearch}
-                                                onChange={(e) => setModelSearch(e.target.value)}
-                                                className="flex-1 bg-transparent text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    {/* Model List */}
-                                    <div className="py-1">
-                                        {filteredModels.length === 0 ? (
-                                            <div className="px-3 py-4 text-center text-sm text-zinc-500">
-                                                No models found
-                                            </div>
-                                        ) : (
-                                            filteredModels.map((model) => (
-                                                <DropdownMenuItem
-                                                    key={model.id}
-                                                    onClick={() => onModelChange(model.id)}
-                                                    className={cn(
-                                                        'flex items-start gap-3 py-3 px-3 cursor-pointer focus:bg-[#2a2535]',
-                                                        model.id === currentModel && 'bg-[#2a2535]'
-                                                    )}
-                                                >
-                                                    <Sparkles className="h-4 w-4 text-emerald-400 mt-0.5 shrink-0" />
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="font-medium text-zinc-100">{model.name}</span>
-                                                            {model.id === currentModel && (
-                                                                <Check className="h-3.5 w-3.5 text-emerald-400" />
-                                                            )}
-                                                        </div>
-                                                        <span className="text-xs text-zinc-500 block">{model.description}</span>
-                                                    </div>
-                                                </DropdownMenuItem>
-                                            ))
-                                        )}
-                                    </div>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
+                            {/* Model Selector */}
+                            <ModelSelector
+                                currentModel={currentModel}
+                                onModelChange={onModelChange}
+                            />
 
                             {/* Reasoning Effort Selector - Pill style */}
                             {selectedModel.supportsReasoning && (
