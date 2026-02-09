@@ -156,10 +156,11 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
     {
         id: 'Qwen/Qwen3-32B',
         name: 'Qwen 3 32B',
-        description: 'Efficient medium-sized model',
+        description: 'Efficient medium-sized model (Thinking)',
         provider: 'Qwen',
-        supportsReasoning: false,
-        capabilities: [],
+        supportsReasoning: true,
+        usesThinkingParam: true,
+        capabilities: ['reasoning'],
     },
     {
         id: 'Qwen/Qwen3-Next-80B-A3B-Instruct',
@@ -289,8 +290,8 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         name: 'Gemma 3 27B IT',
         description: 'Google\'s latest open-source multimodal model',
         provider: 'google',
-        supportsReasoning: true,
-        capabilities: ['reasoning', 'vision'],
+        supportsReasoning: false,
+        capabilities: ['vision'],
     },
 ];
 
