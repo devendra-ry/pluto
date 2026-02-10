@@ -16,7 +16,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "dev.chat",
+  title: "dev Chat",
   description: "Local-first AI chat interface powered by Chutes API",
 };
 

@@ -12,12 +12,17 @@ import {
     Search,
     Pin,
     X,
+    LogIn,
+    User,
+    LogOut,
 } from 'lucide-react';
+import { createClient } from '@/utils/supabase/client';
+import { type User as SupabaseUser } from '@supabase/supabase-js';
 import { List } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useThreads, deleteThread, toggleThreadPin, cleanupEmptyThreads } from '@/hooks/use-threads';
-import { type Thread } from '@/lib/db';
+import { type Thread } from '@/hooks/use-threads';
 import { groupThreadsByDate } from '@/lib/date-utils';
 import { useDebouncedValue } from '@/hooks/use-debounce';
 import { cn } from '@/lib/utils';
@@ -33,8 +38,24 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
 
     const [searchQuery, setSearchQuery] = useState('');
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+    const [user, setUser] = useState<SupabaseUser | null>(null);
     const debouncedSearch = useDebouncedValue(searchQuery, 300);
     const threads = useThreads();
+    const supabase = createClient();
+
+    useEffect(() => {
+        const getUser = async () => {
+            const { data: authData } = await supabase.auth.getUser();
+            setUser(authData?.user ?? null);
+        };
+        getUser();
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setUser(session?.user ?? null);
+        });
+
+        return () => subscription.unsubscribe();
+    }, [supabase]);
 
     // Load collapsed state on mount
     useEffect(() => {
@@ -44,8 +65,8 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
         }
     }, []);
     // Memoize thread lists and groupings
-    const pinnedThreads = useMemo(() => threads.filter(t => t.isPinned), [threads]);
-    const unpinnedThreads = useMemo(() => threads.filter(t => !t.isPinned), [threads]);
+    const pinnedThreads = useMemo(() => threads.filter(t => t.is_pinned), [threads]);
+    const unpinnedThreads = useMemo(() => threads.filter(t => !t.is_pinned), [threads]);
     const groupedThreads = useMemo(() => groupThreadsByDate(unpinnedThreads), [unpinnedThreads]);
     const pathname = usePathname();
     const router = useRouter();
@@ -199,14 +220,14 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
                                 size="icon"
                                 className={cn(
                                     "h-7 w-7 transition-colors rounded-md",
-                                    thread.isPinned ? "text-pink-500 hover:bg-pink-500/10" : "text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
+                                    thread.is_pinned ? "text-pink-500 hover:bg-pink-500/10" : "text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
                                 )}
-                                onClick={(e) => handleTogglePin(e, thread.id, !!thread.isPinned)}
+                                onClick={(e) => handleTogglePin(e, thread.id, !!thread.is_pinned)}
                             >
-                                <Pin className={cn("h-3.5 w-3.5 transform rotate-45", thread.isPinned && "fill-current")} />
+                                <Pin className={cn("h-3.5 w-3.5 transform rotate-45", thread.is_pinned && "fill-current")} />
                             </Button>
                             <div className="absolute bottom-full right-0 mb-2 px-2 py-1 bg-black text-[10px] text-white rounded whitespace-nowrap opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity z-50">
-                                {thread.isPinned ? 'Unpin Thread' : 'Pin Thread'}
+                                {thread.is_pinned ? 'Unpin Thread' : 'Pin Thread'}
                             </div>
                         </div>
 
@@ -282,7 +303,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
                         >
                             <PanelLeftClose className="h-5 w-5" />
                         </Button>
-                        <span className="font-bold text-zinc-100 text-2xl px-1">dev.chat</span>
+                        <span className="font-bold text-zinc-100 text-2xl px-1">dev Chat</span>
                         <div className="w-9" />
                     </div>
 
@@ -353,6 +374,35 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
                             )}
                         </div>
                     </ScrollArea>
+
+                    {/* Footer / Login */}
+                    <div className="mt-auto border-t border-[#2a1f2f] p-4">
+                        {user ? (
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                    <div className="w-8 h-8 rounded-full bg-pink-500/20 flex items-center justify-center shrink-0">
+                                        <User className="h-4 w-4 text-pink-500" />
+                                    </div>
+                                    <span className="text-sm text-zinc-300 truncate">
+                                        {user.email}
+                                    </span>
+                                </div>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-zinc-500 hover:text-zinc-200"
+                                    onClick={() => supabase.auth.signOut()}
+                                >
+                                    <LogOut className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        ) : (
+                            <Link href="/login" className="flex items-center gap-3 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f] rounded-lg transition-colors">
+                                <LogIn className="h-5 w-5" />
+                                <span className="text-sm font-medium">Sign in</span>
+                            </Link>
+                        )}
+                    </div>
                 </div>
             </motion.aside>
 

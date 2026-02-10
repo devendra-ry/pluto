@@ -59,8 +59,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (thread?.model) {
             setModel(thread.model);
         }
-        if (thread?.reasoningEffort) {
-            setReasoningEffort(thread.reasoningEffort);
+        if (thread?.reasoning_effort) {
+            setReasoningEffort(thread.reasoning_effort);
         }
     }, [thread]);
 
@@ -68,12 +68,12 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (storedMessages === undefined) return;
 
         // Reset if we've switched chats
-        if (hasInitialized.current && storedMessages.length === 0 && messages.length > 0) {
+        if (hasInitialized.current && storedMessages && storedMessages.length === 0 && messages.length > 0) {
             setMessages([]);
             hasInitialized.current = false;
         }
 
-        if (!hasInitialized.current) {
+        if (!hasInitialized.current && storedMessages) {
             hasInitialized.current = true;
             currentMessagesChatId.current = chatId;
             setMessages(
@@ -87,7 +87,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         } else {
             // Update messages if they change after initialization (e.g. from sync or outside update)
             // But only if we aren't currently generating to avoid race conditions with local state
-            if (!isLoading && !isThinking) {
+            if (!isLoading && !isThinking && storedMessages) {
                 // If we just added a message, wait for it to appear in storedMessages before syncing
                 // This prevents the UI from reverting to a previous state and causing a loop
                 if (justAddedMessageIdRef.current) {
@@ -192,7 +192,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         // Update title if it's a new chat and we have at least one message
         // Use async check to handle cases where thread hook hasn't loaded yet
         const updateTitleIfNeeded = async () => {
-            const currentThread = thread ?? await import('@/lib/db').then(m => m.db.threads.get(chatId));
+            const currentThread = thread;
             if (currentThread?.title === 'New Chat' && currentMessages.length > 0) {
                 const firstUserMsg = currentMessages.find(m => m.role === 'user');
                 if (firstUserMsg) {
@@ -447,9 +447,9 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
 
             <div className="flex-1 min-h-0 relative">
-                {storedMessages === undefined || (storedMessages.length > 0 && messages.length === 0) ? (
+                {storedMessages === null || (storedMessages && storedMessages.length > 0 && messages.length === 0) ? (
                     null // Render nothing while loading or syncing for an "instant" feel
-                ) : storedMessages.length === 0 && !isThinking ? (
+                ) : (storedMessages && storedMessages.length === 0 && !isThinking) ? (
                     <div className="flex flex-col items-center justify-center h-full px-4 pt-8">
                         {/* Main heading */}
                         <h1 className="text-2xl md:text-3xl font-bold text-zinc-100 mb-6 text-center">

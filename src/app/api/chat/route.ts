@@ -127,10 +127,10 @@ async function getGoogleStream(model: string, messages: ChatMessage[], reasoning
         parts: [{ text: msg.content }]
     }));
 
-    const config: any = { maxOutputTokens: 65536 };
+    const config: { maxOutputTokens: number, thinkingConfig?: { includeThoughts: boolean, thinkingLevel?: string, thinkingBudget?: number } } = { maxOutputTokens: 65536 };
     const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
 
-    if (modelConfig?.supportsReasoning) {
+    if (modelConfig?.supportsReasoning && reasoningEffort) {
         config.thinkingConfig = { includeThoughts: true };
         const isGemini3 = model.startsWith('gemini-3');
         if (isGemini3) {
@@ -288,8 +288,8 @@ async function processAndTransformStream(sourceStream: ReadableStream, controlle
                     const parsed = JSON.parse(dataStr);
                     const choice = parsed.choices?.[0];
                     const delta = choice?.delta;
-                    let content = delta?.content || '';
-                    let reasoning = delta?.reasoning_content || '';
+                    const content = delta?.content || '';
+                    const reasoning = delta?.reasoning_content || '';
 
                     if (content) {
                         let newContent = '';

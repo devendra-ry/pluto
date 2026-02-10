@@ -5,7 +5,7 @@ import {
     isThisMonth,
     format,
 } from 'date-fns';
-import type { Thread } from '@/lib/db';
+import type { Thread } from '@/hooks/use-threads';
 
 export interface GroupedThreads {
     label: string;
@@ -23,7 +23,7 @@ export function groupThreadsByDate(threads: Thread[]): GroupedThreads[] {
     };
 
     for (const thread of threads) {
-        const date = new Date(thread.updatedAt);
+        const date = new Date(thread.updated_at);
 
         if (isToday(date)) {
             groups['Today'].push(thread);

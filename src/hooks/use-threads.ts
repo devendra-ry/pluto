@@ -1,85 +1,174 @@
 'use client';
 
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Thread } from '@/lib/db';
-import { nanoid } from 'nanoid';
+import { useState, useEffect } from 'react';
+import { createClient } from '@/utils/supabase/client';
 import { type ReasoningEffort } from '@/lib/types';
+
+export interface Thread {
+    id: string;
+    title: string;
+    model: string;
+    reasoning_effort?: ReasoningEffort;
+    is_pinned?: boolean;
+    created_at: string;
+    updated_at: string;
+    user_id?: string;
+}
 
 // Get all threads sorted by most recent
 export function useThreads() {
-    const threads = useLiveQuery(
-        () => db.threads.orderBy('updatedAt').reverse().toArray(),
-        []
-    );
-    return threads ?? [];
+    const [threads, setThreads] = useState<Thread[]>([]);
+    const supabase = createClient();
+
+    useEffect(() => {
+        const fetchThreads = async () => {
+            const { data } = await supabase
+                .from('threads')
+                .select('*')
+                .order('updated_at', { ascending: false });
+            if (data) setThreads(data);
+        };
+
+        fetchThreads();
+
+        // Realtime subscription
+        const channel = supabase
+            .channel('threads_changes')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'threads' }, () => {
+                fetchThreads();
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [supabase]);
+
+    return threads;
 }
 
 // Get a single thread by ID
 export function useThread(id: string | null) {
-    return useLiveQuery(
-        () => (id ? db.threads.get(id) : undefined),
-        [id]
-    );
+    const [thread, setThread] = useState<Thread | undefined>(undefined);
+    const supabase = createClient();
+
+    useEffect(() => {
+        if (!id) return;
+        const fetchThread = async () => {
+            const { data } = await supabase
+                .from('threads')
+                .select('*')
+                .eq('id', id)
+                .single();
+            if (data) setThread(data);
+        };
+
+        fetchThread();
+    }, [id, supabase]);
+
+    return thread;
 }
 
 // Create a new thread
 export async function createThread(model: string, reasoningEffort?: ReasoningEffort): Promise<Thread> {
-    const now = new Date();
-    const thread: Thread = {
-        id: nanoid(),
-        title: 'New Chat',
-        model,
-        reasoningEffort,
-        createdAt: now,
-        updatedAt: now,
-    };
-    await db.threads.add(thread);
-    return thread;
+    const supabase = createClient();
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !authData?.user) {
+        throw new Error('You must be signed in to create a chat.');
+    }
+
+    const user = authData.user;
+
+    const { data, error } = await supabase
+        .from('threads')
+        .insert({
+            title: 'New Chat',
+            model,
+            reasoning_effort: reasoningEffort,
+            user_id: user?.id
+        })
+        .select()
+        .single();
+
+    if (error) throw error;
+    return data;
 }
 
 // Update thread title
 export async function updateThreadTitle(id: string, title: string) {
-    await db.threads.update(id, { title, updatedAt: new Date() });
+    const supabase = createClient();
+    await supabase
+        .from('threads')
+        .update({ title, updated_at: new Date().toISOString() })
+        .eq('id', id);
 }
 
 // Update thread model
 export async function updateThreadModel(id: string, model: string) {
-    await db.threads.update(id, { model, updatedAt: new Date() });
+    const supabase = createClient();
+    await supabase
+        .from('threads')
+        .update({ model, updated_at: new Date().toISOString() })
+        .eq('id', id);
 }
 
 // Update thread reasoning effort
 export async function updateReasoningEffort(id: string, effort: ReasoningEffort) {
-    await db.threads.update(id, { reasoningEffort: effort, updatedAt: new Date() });
+    const supabase = createClient();
+    await supabase
+        .from('threads')
+        .update({ reasoning_effort: effort, updated_at: new Date().toISOString() })
+        .eq('id', id);
 }
 
 // Toggle thread pin
 export async function toggleThreadPin(id: string, isPinned: boolean) {
-    await db.threads.update(id, { isPinned, updatedAt: new Date() });
+    const supabase = createClient();
+    await supabase
+        .from('threads')
+        .update({ is_pinned: isPinned, updated_at: new Date().toISOString() })
+        .eq('id', id);
 }
 
 // Update thread timestamp (for sorting)
 export async function touchThread(id: string) {
-    await db.threads.update(id, { updatedAt: new Date() });
+    const supabase = createClient();
+    await supabase
+        .from('threads')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', id);
 }
 
 // Delete a thread and all its messages
 export async function deleteThread(id: string) {
-    await db.transaction('rw', [db.threads, db.messages], async () => {
-        await db.messages.where('threadId').equals(id).delete();
-        await db.threads.delete(id);
-    });
+    const supabase = createClient();
+    // Cascade delete should be handled in Supabase schema (on delete cascade)
+    await supabase.from('threads').delete().eq('id', id);
 }
 
 // Cleanup empty threads (titled "New Chat" and have no messages)
 export async function cleanupEmptyThreads(excludeId?: string) {
-    const emptyThreads = await db.threads
-        .filter(t => t.title === 'New Chat' && t.id !== excludeId)
-        .toArray();
+    const supabase = createClient();
 
-    for (const thread of emptyThreads) {
-        const messageCount = await db.messages.where('threadId').equals(thread.id).count();
-        if (messageCount === 0) {
-            await db.threads.delete(thread.id);
+    // This is a bit more complex in Supabase without a custom RPC or heavy client logic.
+    // For now, let's just get threads with title 'New Chat' and check them.
+    const { data: threads } = await supabase
+        .from('threads')
+        .select('id, title')
+        .eq('title', 'New Chat')
+        .neq('id', excludeId);
+
+    if (threads) {
+        for (const thread of threads) {
+            const { count } = await supabase
+                .from('messages')
+                .select('*', { count: 'exact', head: true })
+                .eq('thread_id', thread.id);
+
+            if (count === 0) {
+                await supabase.from('threads').delete().eq('id', thread.id);
+            }
         }
     }
 }
