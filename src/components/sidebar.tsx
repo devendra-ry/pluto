@@ -31,6 +31,7 @@ const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
 
 interface SidebarProps {
     isMobileSize?: boolean;
+    initialUser: SupabaseUser | null;
 }
 
 interface SidebarRowProps {
@@ -63,24 +64,18 @@ const SidebarRow = memo(({ index, style, virtualItems, renderThreadItem }: any) 
 
 SidebarRow.displayName = 'SidebarRow';
 
-const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
+const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: SidebarProps) {
     const [isCollapsed, setIsCollapsed] = useState(false);
 
     const [searchQuery, setSearchQuery] = useState('');
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-    const [user, setUser] = useState<SupabaseUser | null>(null);
+    const [user, setUser] = useState<SupabaseUser | null>(initialUser);
     const debouncedSearch = useDebouncedValue(searchQuery, 300);
     const { threads, refreshThreads } = useThreads();
 
     const [supabase] = useState(() => createClient());
 
     useEffect(() => {
-        const getUser = async () => {
-            const { data: authData } = await supabase.auth.getUser();
-            setUser(authData?.user ?? null);
-        };
-        getUser();
-
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             setUser(session?.user ?? null);
         });
