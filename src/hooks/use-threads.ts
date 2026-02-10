@@ -15,6 +15,8 @@ export interface Thread {
     user_id?: string;
 }
 
+export const REFRESH_THREADS_EVENT = 'pluto:refresh_threads';
+
 // Get all threads sorted by most recent
 export function useThreads() {
     const [threads, setThreads] = useState<Thread[]>([]);
@@ -22,41 +24,56 @@ export function useThreads() {
     const [supabase] = useState(() => createClient());
 
     const fetchThreads = async () => {
-        // Check auth state
-        const { data: { user } } = await supabase.auth.getUser();
+        try {
+            // Check auth state
+            const { data: { user } } = await supabase.auth.getUser();
 
-        const { data, error } = await supabase
-            .from('threads')
-            .select('*')
-            .order('updated_at', { ascending: false });
+            const { data, error } = await supabase
+                .from('threads')
+                .select('*')
+                .order('updated_at', { ascending: false });
 
-        if (error) {
-            console.error('[useThreads] Error fetching threads:', error);
-            return;
-        }
+            if (error) {
+                console.error('[useThreads] Error fetching threads:', error);
+                return;
+            }
 
-        if (data) {
-            setThreads(data);
+            if (data) {
+                setThreads(data);
+            }
+        } catch (err) {
+            console.error('[useThreads] Unexpected error in fetchThreads:', err);
         }
     };
 
     useEffect(() => {
         fetchThreads();
 
-        // Realtime subscription
+        // 1. Realtime subscription
         const channel = supabase
             .channel('threads_changes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'threads' }, () => {
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'threads' }, (payload) => {
+                console.log('[useThreads] Realtime change detected:', payload);
                 fetchThreads();
             })
             .subscribe((status) => {
                 if (status === 'CHANNEL_ERROR') {
                     console.error('[useThreads] Realtime channel error');
+                } else {
+                    console.log('[useThreads] Realtime subscription status:', status);
                 }
             });
 
+        // 2. Local CustomEvent sync for immediate updates
+        const handleRefresh = () => {
+            console.log('[useThreads] Refresh event received');
+            fetchThreads();
+        };
+        window.addEventListener(REFRESH_THREADS_EVENT, handleRefresh);
+
         return () => {
             supabase.removeChannel(channel);
+            window.removeEventListener(REFRESH_THREADS_EVENT, handleRefresh);
         };
     }, [supabase]);
 
@@ -84,6 +101,11 @@ export function useThread(id: string | null) {
 
     return thread;
 }
+
+// Helper to trigger thread refresh
+const triggerRefresh = () => {
+    window.dispatchEvent(new CustomEvent(REFRESH_THREADS_EVENT));
+};
 
 // Create a new thread
 export async function createThread(model: string, reasoningEffort?: ReasoningEffort): Promise<Thread> {
@@ -117,74 +139,85 @@ export async function createThread(model: string, reasoningEffort?: ReasoningEff
         throw error;
     }
 
+    triggerRefresh();
     return data;
 }
 
 // Update thread title
 export async function updateThreadTitle(id: string, title: string) {
     const supabase = createClient();
-    await supabase
+    const { error } = await supabase
         .from('threads')
         .update({ title, updated_at: new Date().toISOString() })
         .eq('id', id);
+
+    if (!error) triggerRefresh();
 }
 
 // Update thread model
 export async function updateThreadModel(id: string, model: string) {
     const supabase = createClient();
-    await supabase
+    const { error } = await supabase
         .from('threads')
         .update({ model, updated_at: new Date().toISOString() })
         .eq('id', id);
+
+    if (!error) triggerRefresh();
 }
 
 // Update thread reasoning effort
 export async function updateReasoningEffort(id: string, effort: ReasoningEffort) {
     const supabase = createClient();
-    await supabase
+    const { error } = await supabase
         .from('threads')
         .update({ reasoning_effort: effort, updated_at: new Date().toISOString() })
         .eq('id', id);
+
+    if (!error) triggerRefresh();
 }
 
 // Toggle thread pin
 export async function toggleThreadPin(id: string, isPinned: boolean) {
     const supabase = createClient();
-    await supabase
+    const { error } = await supabase
         .from('threads')
         .update({ is_pinned: isPinned, updated_at: new Date().toISOString() })
         .eq('id', id);
+
+    if (!error) triggerRefresh();
 }
 
 // Update thread timestamp (for sorting)
 export async function touchThread(id: string) {
     const supabase = createClient();
-    await supabase
+    const { error } = await supabase
         .from('threads')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', id);
+
+    if (!error) triggerRefresh();
 }
 
 // Delete a thread and all its messages
 export async function deleteThread(id: string) {
     const supabase = createClient();
-    // Cascade delete should be handled in Supabase schema (on delete cascade)
-    await supabase.from('threads').delete().eq('id', id);
+    const { error } = await supabase.from('threads').delete().eq('id', id);
+
+    if (!error) triggerRefresh();
 }
 
 // Cleanup empty threads (titled "New Chat" and have no messages)
 export async function cleanupEmptyThreads(excludeId?: string) {
     const supabase = createClient();
 
-    // This is a bit more complex in Supabase without a custom RPC or heavy client logic.
-    // For now, let's just get threads with title 'New Chat' and check them.
     const { data: threads } = await supabase
         .from('threads')
         .select('id, title')
         .eq('title', 'New Chat')
         .neq('id', excludeId);
 
-    if (threads) {
+    if (threads && threads.length > 0) {
+        let deletedAny = false;
         for (const thread of threads) {
             const { count } = await supabase
                 .from('messages')
@@ -193,7 +226,10 @@ export async function cleanupEmptyThreads(excludeId?: string) {
 
             if (count === 0) {
                 await supabase.from('threads').delete().eq('id', thread.id);
+                deletedAny = true;
             }
         }
+        if (deletedAny) triggerRefresh();
     }
 }
+

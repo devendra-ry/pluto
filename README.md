@@ -10,7 +10,7 @@ Pluto is a modern, local-first AI chat interface built with Next.js 15, designed
   - **Qwen**: Qwen 3 (Thinking & Instruct variants).
   - **Other Top Models**: Kimi K2.5, MiniMax M2.1, GLM 4.7, and Hermes 4.
 - **Visualized Reasoning**: specialized UI for "Thinking" models (like DeepSeek R1 and Gemini Flash Thinking), allowing you to expand/collapse the model's internal chain of thought.
-- **Local-First History**: Your chat history is stored entirely in your browser using **IndexedDB** (via Dexie.js). No data is sent to a central server—only to the AI provider you choose.
+- **Supabase-Powered History**: Your chat history is stored securely in **Supabase**. This ensures your conversations are available across devices and stay in sync in real-time.
 - **Rich Text Rendering**:
   - **Markdown Support**: Full GFM (GitHub Flavored Markdown) support.
   - **LaTeX Math**: Beautifully renders mathematical equations using KaTeX.
@@ -32,18 +32,18 @@ Pluto operates as a client-heavy application with a lightweight API proxy.
     -   It detects `<think>` tags (generic or provider-specific) and standardizes them into a `reasoning_content` field.
 6.  **Real-time Update**: The client receives these standardized chunks and updates the message in real-time, separating "thought" from "response".
 
-### Local Storage
-Pluto uses **Dexie.js** to manage `threads` and `messages` in your browser's IndexedDB. This means:
--   **Privacy**: Your conversations don't leave your device (except to generate the response).
--   **Speed**: Loading history is instantaneous.
--   **Offline Capable**: You can view past chats without an internet connection.
+### Database
+Pluto uses **Supabase** to manage `threads` and `messages`. This means:
+-   **Sync**: Your conversations are synchronized across all your devices.
+-   **Real-time**: The UI updates instantly when changes occur, powerd by Supabase Realtime.
+-   **Persistence**: Your chats are safely stored in the cloud.
 
 ## 🛠️ Tech Stack
 
 - **Framework**: [Next.js 15](https://nextjs.org/) (App Router)
 - **Language**: [TypeScript](https://www.typescriptlang.org/)
 - **UI Library**: [React 19](https://react.dev/), [Shadcn UI](https://ui.shadcn.com/), [Tailwind CSS v4](https://tailwindcss.com/)
-- **State/Database**: [Dexie.js](https://dexie.org/) (IndexedDB wrapper)
+- **State/Database**: [Supabase](https://supabase.com/)
 - **AI Integration**: [Vercel AI SDK](https://sdk.vercel.ai/docs), [Google GenAI SDK](https://github.com/google/google-api-nodejs-client), [OpenRouter SDK](https://openrouter.ai/docs)
 - **Markdown/Math**: `react-markdown`, `rehype-katex`, `remark-math`
 
