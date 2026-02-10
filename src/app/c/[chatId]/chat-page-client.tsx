@@ -11,7 +11,7 @@ import { useMessages, addMessage, deleteMessage } from '@/hooks/use-messages';
 import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
-import { Wand2, BookOpen, Code, GraduationCap, Settings, ChevronDown, type LucideIcon } from 'lucide-react';
+import { Wand2, BookOpen, Code, GraduationCap, ChevronDown, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface ChatPageClientProps {
@@ -443,16 +443,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
     return (
         <div className="flex flex-col h-full bg-[#1a1520]">
-            {/* Settings button in top right */}
-            <div className="absolute top-6 right-8 z-10">
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 text-zinc-500 hover:text-zinc-300 hover:bg-[#2a2035]/50 rounded-xl transition-all"
-                >
-                    <Settings className="h-5 w-5" />
-                </Button>
-            </div>
+
 
             <div className="flex-1 min-h-0 relative">
                 {storedMessages === undefined || (storedMessages.length > 0 && messages.length === 0) ? (
