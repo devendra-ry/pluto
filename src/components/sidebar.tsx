@@ -24,8 +24,13 @@ import { cn } from '@/lib/utils';
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
 
-const Sidebar = memo(function Sidebar() {
+interface SidebarProps {
+    isMobileSize?: boolean;
+}
+
+const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
     const [isCollapsed, setIsCollapsed] = useState(false);
+
     const [searchQuery, setSearchQuery] = useState('');
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
     const debouncedSearch = useDebouncedValue(searchQuery, 300);
@@ -45,10 +50,20 @@ const Sidebar = memo(function Sidebar() {
     const pathname = usePathname();
     const router = useRouter();
 
-    // Persist collapsed state to localStorage
+    // Clear collapsed state on mobile or small screens
     useEffect(() => {
-        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(isCollapsed));
-    }, [isCollapsed]);
+        if (isMobileSize) {
+            setIsCollapsed(true);
+        }
+    }, [isMobileSize]);
+
+    // Persist collapsed state to localStorage (only if not on mobile)
+    useEffect(() => {
+        if (!isMobileSize) {
+            localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(isCollapsed));
+        }
+    }, [isCollapsed, isMobileSize]);
+
 
     // Cleanup empty threads on mount
     useEffect(() => {
@@ -217,6 +232,19 @@ const Sidebar = memo(function Sidebar() {
 
     return (
         <>
+            {/* Mobile Backdrop */}
+            <AnimatePresence>
+                {isMobileSize && !isCollapsed && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={() => setIsCollapsed(true)}
+                        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30"
+                    />
+                )}
+            </AnimatePresence>
+
             {/* Animated Sidebar */}
             <motion.aside
                 initial={isCollapsed ? "collapsed" : "expanded"}
@@ -225,18 +253,24 @@ const Sidebar = memo(function Sidebar() {
                     expanded: {
                         width: 260,
                         opacity: 1,
+                        x: 0,
                         borderRightWidth: 1,
-                        transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] }
+                        transition: { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
                     },
                     collapsed: {
-                        width: 0,
-                        opacity: 0,
+                        width: isMobileSize ? 0 : 0,
+                        opacity: isMobileSize ? 1 : 0,
+                        x: isMobileSize ? -260 : 0,
                         borderRightWidth: 0,
-                        transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] }
+                        transition: { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
                     }
                 }}
-                className="h-screen flex flex-col bg-[#0f0a12] border-[#2a1f2f] overflow-hidden whitespace-nowrap z-40"
+                className={cn(
+                    "h-screen flex flex-col bg-[#0f0a12] border-[#2a1f2f] overflow-hidden whitespace-nowrap z-40 transition-shadow",
+                    isMobileSize ? "fixed left-0 top-0 shadow-2xl" : "relative"
+                )}
             >
+
                 <div className="w-[260px] flex flex-col h-full shrink-0">
                     {/* Header */}
                     <div className="flex items-center justify-between p-4 pb-2">

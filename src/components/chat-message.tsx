@@ -110,13 +110,14 @@ export const ChatMessage = memo(function ChatMessage({
             return (
                 <div className="flex flex-col items-end py-1 px-4 group">
                     {isEditing ? (
-                        <div className="w-full max-w-[75%] flex flex-col gap-2">
+                        <div className="w-full max-w-[90%] md:max-w-[75%] flex flex-col gap-2">
                             <textarea
                                 value={editContent}
                                 onChange={(e) => setEditContent(e.target.value)}
-                                className="w-full min-h-[80px] p-3 bg-[#2a2035] text-zinc-100 rounded-2xl border border-[#3a2a4a] focus:border-pink-500/50 focus:outline-none resize-none"
+                                className="w-full min-h-[80px] p-3 bg-[#2a2035] text-zinc-100 rounded-2xl border border-[#3a2a4a] focus:border-pink-500/50 focus:outline-none resize-none text-[15px]"
                                 autoFocus
                             />
+
                             <div className="flex gap-2 justify-end">
                                 <Button
                                     size="sm"
@@ -137,9 +138,10 @@ export const ChatMessage = memo(function ChatMessage({
                         </div>
                     ) : (
                         <>
-                            <div className="max-w-[75%] rounded-2xl px-4 py-2 bg-[#2a2035]/80 backdrop-blur-sm border border-white/5 text-zinc-100 shadow-lg">
+                            <div className="max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-2 bg-[#2a2035]/80 backdrop-blur-sm border border-white/5 text-zinc-100 shadow-lg">
                                 <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">{content}</p>
                             </div>
+
                             {/* Action icons below message - same row */}
                             <div className="flex items-center gap-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity translate-x-1">
                                 {onRetry && (

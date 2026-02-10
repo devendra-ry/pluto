@@ -111,9 +111,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                     />
 
                     {/* Bottom Bar */}
-                    <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-4 pb-3">
+                    <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 md:px-4 pb-3">
                         {/* Left side - Model selector and tools */}
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1.5 md:gap-3">
+
                             {/* Model Selector */}
                             <ModelSelector
                                 currentModel={currentModel}
@@ -127,17 +128,19 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                         <DropdownMenuTrigger asChild>
                                             <Button
                                                 variant="ghost"
-                                                className="h-8 px-3 gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-full transition-all text-xs font-semibold"
+                                                className="h-8 px-2 md:px-3 gap-1.5 md:gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all text-xs font-semibold"
                                             >
-                                                <Brain className="h-4 w-4" />
-                                                <span className="capitalize">{selectedReasoning.label}</span>
+                                                <Brain className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                                                <span className="capitalize hidden md:inline">{selectedReasoning.label}</span>
                                             </Button>
+
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent
                                             align="start"
                                             side="top"
                                             className="w-44 bg-[#1a1520] border-[#3a3045] shadow-2xl mb-2"
                                         >
+
                                             {REASONING_OPTIONS.map((option) => (
                                                 <DropdownMenuItem
                                                     key={option.value}
@@ -169,19 +172,22 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                             {/* Search Button - Pill style */}
                             <Button
                                 variant="ghost"
-                                className="h-8 px-3 gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-full transition-all text-xs font-semibold"
+                                className="h-8 px-2 md:px-3 gap-1.5 md:gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all text-xs font-semibold"
                             >
-                                <Globe className="h-4 w-4" />
-                                <span className="">Search</span>
+                                <Globe className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                                <span className="hidden md:inline">Search</span>
                             </Button>
+
+
 
                             <div className="group/attach relative flex flex-col items-center">
                                 <Button
                                     variant="ghost"
-                                    className="h-8 w-11 p-0 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-full transition-all flex items-center justify-center"
+                                    className="h-8 w-8 md:w-11 p-0 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all flex items-center justify-center"
                                 >
-                                    <Paperclip className="h-4 w-4" />
+                                    <Paperclip className="h-3.5 w-3.5 md:h-4 md:w-4" />
                                 </Button>
+
                                 <div className="absolute bottom-full mb-2 hidden group-hover/attach:block z-50 pointer-events-none">
                                     <div className="bg-[#1a1520]/95 backdrop-blur-md text-[11px] px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
                                         <span className="text-[#fce7ef]">Attach file</span>

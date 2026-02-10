@@ -65,12 +65,13 @@ export default function HomePage() {
       <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center p-4">
         <div className="w-full max-w-3xl flex flex-col items-start px-4">
           {/* Main heading */}
-          <h1 className="text-4xl font-semibold text-zinc-100 mb-8 tracking-tight">
+          <h1 className="text-3xl md:text-4xl font-semibold text-zinc-100 mb-8 tracking-tight text-center md:text-left">
             How can I help you?
           </h1>
 
           {/* Category buttons */}
-          <div className="flex flex-wrap gap-2 mb-10">
+          <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-10">
+
             {CATEGORIES.map((cat) => {
               const IconComponent = ICON_MAP[cat.icon];
               return (

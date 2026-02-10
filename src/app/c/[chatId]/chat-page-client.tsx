@@ -142,7 +142,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (virtuosoRef.current && isAtBottom) {
             virtuosoRef.current.scrollToIndex({ index: messages.length - 1, align: 'end' });
         }
-    }, [messages, isThinking, isAtBottom]);
+    }, [messages.length, isThinking, isAtBottom]); // Optimized dependency
+
 
     const handleModelChange = async (newModel: string) => {
         setModel(newModel);
@@ -451,12 +452,13 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 ) : storedMessages.length === 0 && !isThinking ? (
                     <div className="flex flex-col items-center justify-center h-full px-4 pt-8">
                         {/* Main heading */}
-                        <h1 className="text-3xl font-bold text-zinc-100 mb-6">
+                        <h1 className="text-2xl md:text-3xl font-bold text-zinc-100 mb-6 text-center">
                             How can I help you?
                         </h1>
 
                         {/* Category buttons */}
-                        <div className="flex gap-2 mb-8">
+                        <div className="flex flex-wrap justify-center gap-2 mb-8">
+
                             {CATEGORIES.map((cat) => {
                                 const IconComponent = ICON_MAP[cat.icon];
                                 return (

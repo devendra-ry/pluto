@@ -152,12 +152,18 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
         <TooltipProvider>
             <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="h-8 pl-0 pr-2 gap-2 text-zinc-100 hover:text-white hover:bg-transparent p-0 text-sm font-bold tracking-tight">
-                        <span>{selectedModel.name}</span>
-                        <ChevronDown className="h-3 w-3 opacity-50" />
+                    <Button variant="ghost" className="h-8 pl-0 pr-2 gap-2 text-zinc-100 hover:text-white hover:bg-transparent p-0 text-sm font-bold tracking-tight max-w-[120px] md:max-w-none justify-start">
+                        <span className="truncate">{selectedModel.name}</span>
+                        <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
                     </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="top" className="w-[580px] h-[500px] p-0 bg-[#1a1520] border-[#2a2535]/80 shadow-2xl mb-2 rounded-xl">
+                <DropdownMenuContent
+                    align="center"
+                    side="top"
+                    sideOffset={8}
+                    className="w-[calc(100vw-32px)] md:w-[580px] h-[80vh] md:h-[500px] p-0 bg-[#1a1520] border-[#2a2535]/80 shadow-2xl mb-2 rounded-xl overflow-hidden"
+                >
+
                     <div className="flex h-full">
                         {/* Provider Sidebar */}
                         <div className="w-[52px] bg-[#14101a] border-r border-[#2a2535]/50 flex flex-col py-3 h-full rounded-l-xl">
@@ -280,7 +286,8 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                                             handleModelSelect(model.id);
                                                         }
                                                     }}
-                                                    className={cn('w-full flex items-start gap-3 px-4 py-3 transition-colors text-left group cursor-pointer outline-none focus-visible:bg-[#2a2040]', isSelected ? 'bg-[#2a2040]' : 'hover:bg-[#1f1a28]')}
+                                                    className={cn('w-full flex items-start gap-2 md:gap-3 px-3 md:px-4 py-3 transition-colors text-left group cursor-pointer outline-none focus-visible:bg-[#2a2040]', isSelected ? 'bg-[#2a2040]' : 'hover:bg-[#1f1a28]')}
+
                                                 >
                                                     {ProviderLogo ? (
                                                         <ProviderLogo className={cn('h-4 w-4 mt-1 shrink-0', isSelected ? 'text-purple-400' : 'text-zinc-500')} />
@@ -288,8 +295,9 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                                         <Sparkles className={cn('h-4 w-4 mt-1 shrink-0 pointer-events-none', isSelected ? 'text-purple-400' : 'text-zinc-500')} />
                                                     )}
                                                     <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="font-semibold text-zinc-100 text-[15px]">{model.name}</span>
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <span className="font-semibold text-zinc-100 text-[15px] truncate">{model.name}</span>
+
                                                             <button
                                                                 onClick={(e) => toggleStarred(e, model.id)}
                                                                 className="p-1 -m-1 hover:text-yellow-400 transition-colors"
