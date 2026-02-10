@@ -227,7 +227,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         description: 'Advanced reasoning and creative model',
         provider: 'openrouter',
         supportsReasoning: true,
-        capabilities: ['reasoning', 'fast'],
+        capabilities: ['reasoning'],
     },
     {
         id: 'stepfun/step-3.5-flash:free',
@@ -235,7 +235,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         description: 'High-speed reasoning model from Stepfun',
         provider: 'openrouter',
         supportsReasoning: true,
-        capabilities: ['reasoning', 'fast', 'vision'],
+        capabilities: ['reasoning'],
     },
     {
         id: 'arcee-ai/trinity-large-preview:free',
@@ -243,7 +243,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         description: 'Large-scale preview model from Arcee AI',
         provider: 'openrouter',
         supportsReasoning: false,
-        capabilities: ['fast'],
+        capabilities: [],
     },
     {
         id: 'arcee-ai/trinity-mini:free',
@@ -291,7 +291,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         description: 'Google\'s latest open-source multimodal model',
         provider: 'google',
         supportsReasoning: false,
-        capabilities: ['vision'],
+        capabilities: [],
     },
 ];
 

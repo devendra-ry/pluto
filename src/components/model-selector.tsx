@@ -152,15 +152,16 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
         <TooltipProvider>
             <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="h-8 pl-0 pr-2 gap-2 text-zinc-100 hover:text-white hover:bg-transparent p-0 text-sm font-bold tracking-tight max-w-[120px] md:max-w-none justify-start">
+                    <Button variant="ghost" className="h-8 md:h-9 px-2 md:px-3 gap-2 text-zinc-100 hover:text-white hover:bg-white/5 transition-all text-sm font-semibold tracking-tight max-w-[120px] md:max-w-[200px] rounded-xl">
                         <span className="truncate">{selectedModel.name}</span>
                         <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
-                    align="center"
+                    align="start"
                     side="top"
-                    sideOffset={8}
+                    sideOffset={12}
+                    collisionPadding={20}
                     className="w-[calc(100vw-32px)] md:w-[580px] h-[80vh] md:h-[500px] p-0 bg-[#1a1520] border-[#2a2535]/80 shadow-2xl mb-2 rounded-xl overflow-hidden"
                 >
 
