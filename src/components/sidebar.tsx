@@ -234,7 +234,10 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
                             : 'text-zinc-400 group-hover:text-zinc-200'
                     )}
                 >
-                    <span className="truncate flex-1 min-w-0 break-all transition-all duration-300 group-hover:text-clip group-hover:[mask-image:linear-gradient(to_right,black_0%,black_calc(100%-150px),transparent_calc(100%-50px))]">
+                    <span className={cn(
+                        "truncate flex-1 min-w-0 break-all transition-all duration-300",
+                        "mask-thread-title md:mask-none md:group-hover:mask-thread-title"
+                    )}>
                         {thread.title}
                     </span>
                 </Link>
@@ -264,7 +267,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
                 {/* Hover Actions */}
                 {!isConfirmingDelete && (
                     <div
-                        className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 h-full pr-1 z-10"
+                        className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-300 h-full pr-1 z-10"
                     >
                         {/* Pin Button */}
                         <div className="relative group/tooltip">

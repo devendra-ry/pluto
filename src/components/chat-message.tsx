@@ -143,7 +143,7 @@ export const ChatMessage = memo(function ChatMessage({
                             </div>
 
                             {/* Action icons below message - same row */}
-                            <div className="flex items-center gap-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity translate-x-1">
+                            <div className="flex items-center gap-1 mt-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity translate-x-1">
                                 {onRetry && (
                                     <ActionIcon
                                         icon={RefreshCcw}
@@ -301,7 +301,7 @@ export const ChatMessage = memo(function ChatMessage({
 
                     {/* Action icons below AI message */}
                     {!isStreaming && content && (
-                        <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity -ml-2">
+                        <div className="flex items-center gap-1 mt-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity -ml-2">
                             {onRetry && (
                                 <ActionIcon
                                     icon={RefreshCcw}
