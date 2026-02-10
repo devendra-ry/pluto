@@ -25,16 +25,19 @@ import { cn } from '@/lib/utils';
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
 
 const Sidebar = memo(function Sidebar() {
-    const [isCollapsed, setIsCollapsed] = useState(() => {
-        if (typeof window !== 'undefined') {
-            return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
-        }
-        return false;
-    });
+    const [isCollapsed, setIsCollapsed] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
     const debouncedSearch = useDebouncedValue(searchQuery, 300);
     const threads = useThreads();
+
+    // Load collapsed state on mount
+    useEffect(() => {
+        const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+        if (saved !== null) {
+            setIsCollapsed(saved === 'true');
+        }
+    }, []);
     // Memoize thread lists and groupings
     const pinnedThreads = useMemo(() => threads.filter(t => t.isPinned), [threads]);
     const unpinnedThreads = useMemo(() => threads.filter(t => !t.isPinned), [threads]);
@@ -181,7 +184,7 @@ const Sidebar = memo(function Sidebar() {
                                 size="icon"
                                 className={cn(
                                     "h-7 w-7 transition-colors rounded-md",
-                                    thread.isPinned ? "text-pink-500 hover:bg-pink-500/10" : "text-zinc-500 hover:text-zinc-100"
+                                    thread.isPinned ? "text-pink-500 hover:bg-pink-500/10" : "text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
                                 )}
                                 onClick={(e) => handleTogglePin(e, thread.id, !!thread.isPinned)}
                             >
@@ -197,7 +200,7 @@ const Sidebar = memo(function Sidebar() {
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-8 w-8 text-zinc-400 hover:text-zinc-100 hover:bg-[#63253e] rounded-xl transition-all"
+                                className="h-8 w-8 text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all"
                                 onClick={(e) => handleDeleteClick(e, thread.id)}
                             >
                                 <X className="h-3.5 w-3.5" />

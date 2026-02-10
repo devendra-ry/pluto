@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { Copy, RefreshCcw, SquarePen, GitBranch, ChevronDown, Brain, Loader2, type LucideIcon } from 'lucide-react';
-import { useState, memo, useRef, useEffect } from 'react';
+import { useState, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
@@ -50,7 +50,6 @@ interface ChatMessageProps {
     reasoning?: string;
     onEdit?: (id: string, newContent: string) => void;
     onRetry?: (id: string) => void;
-    onDelete?: (id: string) => void;
 }
 
 export const ChatMessage = memo(function ChatMessage({
