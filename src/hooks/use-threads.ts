@@ -18,17 +18,29 @@ export interface Thread {
 // Get all threads sorted by most recent
 export function useThreads() {
     const [threads, setThreads] = useState<Thread[]>([]);
-    const supabase = createClient();
+    // Use useState to ensure client is created once and stable
+    const [supabase] = useState(() => createClient());
+
+    const fetchThreads = async () => {
+        // Check auth state
+        const { data: { user } } = await supabase.auth.getUser();
+
+        const { data, error } = await supabase
+            .from('threads')
+            .select('*')
+            .order('updated_at', { ascending: false });
+
+        if (error) {
+            console.error('[useThreads] Error fetching threads:', error);
+            return;
+        }
+
+        if (data) {
+            setThreads(data);
+        }
+    };
 
     useEffect(() => {
-        const fetchThreads = async () => {
-            const { data } = await supabase
-                .from('threads')
-                .select('*')
-                .order('updated_at', { ascending: false });
-            if (data) setThreads(data);
-        };
-
         fetchThreads();
 
         // Realtime subscription
@@ -37,20 +49,24 @@ export function useThreads() {
             .on('postgres_changes', { event: '*', schema: 'public', table: 'threads' }, () => {
                 fetchThreads();
             })
-            .subscribe();
+            .subscribe((status) => {
+                if (status === 'CHANNEL_ERROR') {
+                    console.error('[useThreads] Realtime channel error');
+                }
+            });
 
         return () => {
             supabase.removeChannel(channel);
         };
     }, [supabase]);
 
-    return threads;
+    return { threads, refreshThreads: fetchThreads };
 }
 
 // Get a single thread by ID
 export function useThread(id: string | null) {
     const [thread, setThread] = useState<Thread | undefined>(undefined);
-    const supabase = createClient();
+    const [supabase] = useState(() => createClient());
 
     useEffect(() => {
         if (!id) return;
@@ -72,26 +88,35 @@ export function useThread(id: string | null) {
 // Create a new thread
 export async function createThread(model: string, reasoningEffort?: ReasoningEffort): Promise<Thread> {
     const supabase = createClient();
-    const { data: authData, error: authError } = await supabase.auth.getUser();
 
-    if (authError || !authData?.user) {
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError) {
+        throw authError;
+    }
+
+    if (!authData?.user) {
         throw new Error('You must be signed in to create a chat.');
     }
 
     const user = authData.user;
 
+    const insertData = {
+        title: 'New Chat',
+        model,
+        reasoning_effort: reasoningEffort,
+        user_id: user.id
+    };
+
     const { data, error } = await supabase
         .from('threads')
-        .insert({
-            title: 'New Chat',
-            model,
-            reasoning_effort: reasoningEffort,
-            user_id: user?.id
-        })
+        .insert(insertData)
         .select()
         .single();
 
-    if (error) throw error;
+    if (error) {
+        throw error;
+    }
+
     return data;
 }
 

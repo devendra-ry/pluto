@@ -33,6 +33,36 @@ interface SidebarProps {
     isMobileSize?: boolean;
 }
 
+interface SidebarRowProps {
+    index: number;
+    style: React.CSSProperties;
+    virtualItems: ({ type: 'header'; label: string } | { type: 'thread'; data: Thread })[];
+    renderThreadItem: (thread: Thread) => React.ReactNode;
+}
+
+const SidebarRow = memo(({ index, style, virtualItems, renderThreadItem }: any) => {
+    const item = virtualItems?.[index];
+    if (!item) return <div style={style} />;
+
+    if (item.type === 'header') {
+        return (
+            <div style={style}>
+                <h3 className="text-xs font-semibold text-pink-500/90 px-4 py-2 mt-4 mb-1 first:mt-0">
+                    {item.label}
+                </h3>
+            </div>
+        );
+    }
+
+    return (
+        <div style={style} className="px-2 space-y-0.5">
+            {renderThreadItem(item.data)}
+        </div>
+    );
+}) as any;
+
+SidebarRow.displayName = 'SidebarRow';
+
 const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
     const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -40,8 +70,9 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
     const [user, setUser] = useState<SupabaseUser | null>(null);
     const debouncedSearch = useDebouncedValue(searchQuery, 300);
-    const threads = useThreads();
-    const supabase = createClient();
+    const { threads, refreshThreads } = useThreads();
+
+    const [supabase] = useState(() => createClient());
 
     useEffect(() => {
         const getUser = async () => {
@@ -64,7 +95,6 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
             setIsCollapsed(saved === 'true');
         }
     }, []);
-    // Memoize thread lists and groupings
     const pinnedThreads = useMemo(() => threads.filter(t => t.is_pinned), [threads]);
     const unpinnedThreads = useMemo(() => threads.filter(t => !t.is_pinned), [threads]);
     const groupedThreads = useMemo(() => groupThreadsByDate(unpinnedThreads), [unpinnedThreads]);
@@ -131,32 +161,55 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
     }, [router]);
 
     const handleDeleteClick = useCallback((e: React.MouseEvent, threadId: string) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setDeleteConfirm(threadId);
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+            setDeleteConfirm(threadId);
+        } catch (err) {
+            console.error('[Sidebar] Error in handleDeleteClick:', err);
+        }
     }, []);
 
     const handleDeleteConfirm = useCallback(async (e: React.MouseEvent, threadId: string) => {
-        e.preventDefault();
-        e.stopPropagation();
-        await deleteThread(threadId);
-        setDeleteConfirm(null);
-        if (pathname === `/c/${threadId}`) {
-            router.push('/');
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+            await deleteThread(threadId);
+            setDeleteConfirm(null);
+
+            // Manually refresh threads as a fallback for realtime
+            await refreshThreads();
+
+            if (pathname === `/c/${threadId}`) {
+                router.push('/');
+            }
+        } catch (err) {
+            console.error('[Sidebar] Error in handleDeleteConfirm:', err);
         }
-    }, [pathname, router]);
+    }, [pathname, router, deleteThread, refreshThreads]);
 
     const handleDeleteCancel = useCallback((e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setDeleteConfirm(null);
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+            setDeleteConfirm(null);
+        } catch (err) {
+            console.error('[Sidebar] Error in handleDeleteCancel:', err);
+        }
     }, []);
 
     const handleTogglePin = useCallback(async (e: React.MouseEvent, threadId: string, isPinned: boolean) => {
-        e.preventDefault();
-        e.stopPropagation();
-        await toggleThreadPin(threadId, !isPinned);
-    }, []);
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+            await toggleThreadPin(threadId, !isPinned);
+
+            // Manually refresh threads as a fallback for realtime
+            await refreshThreads();
+        } catch (err) {
+            console.error('[Sidebar] Error in handleTogglePin:', err);
+        }
+    }, [toggleThreadPin, refreshThreads]);
 
 
     const renderThreadItem = useCallback((thread: Thread) => {
@@ -188,7 +241,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
 
                 {/* Delete Confirmation Overlay */}
                 {isConfirmingDelete && (
-                    <div className="absolute inset-0 bg-[#0f0a12]/95 rounded-lg flex items-center justify-center gap-2 z-10 animate-in fade-in duration-150">
+                    <div className="absolute inset-0 bg-[#0f0a12]/95 rounded-lg flex items-center justify-center gap-2 z-20 animate-in fade-in duration-150">
                         <span className="text-xs text-zinc-400 mr-1">Delete?</span>
                         <Button
                             size="sm"
@@ -211,7 +264,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
                 {/* Hover Actions */}
                 {!isConfirmingDelete && (
                     <div
-                        className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 h-full pr-1"
+                        className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 h-full pr-1 z-10"
                     >
                         {/* Pin Button */}
                         <div className="relative group/tooltip">
@@ -250,6 +303,11 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
             </div>
         );
     }, [pathname, deleteConfirm, handleDeleteConfirm, handleDeleteCancel, handleTogglePin, handleDeleteClick]);
+
+    const rowProps = useMemo(() => ({
+        virtualItems,
+        renderThreadItem
+    }), [virtualItems, renderThreadItem]);
 
     return (
         <>
@@ -332,8 +390,8 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
                     </div>
 
                     {/* Chat List */}
-                    <ScrollArea className="flex-1">
-                        <div className="p-2 pt-0">
+                    <div className="flex-1 min-h-0">
+                        <div className="h-full w-full relative px-2">
                             {virtualItems.length === 0 ? (
                                 <div className="text-center py-12">
                                     <p className="text-sm text-zinc-600">
@@ -341,39 +399,23 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false }: SidebarProps) {
                                     </p>
                                 </div>
                             ) : (
-                                <div style={{ height: 'calc(100vh - 200px)' }}>
+                                <div className="h-full w-full relative">
                                     <AutoSizer
                                         renderProp={({ height, width }) => (
                                             <List
                                                 rowCount={virtualItems.length}
-                                                rowHeight={getRowHeight}
-                                                style={{ height: height ?? 0, width: width ?? 0 }}
+                                                rowHeight={42}
                                                 className="scrollbar-none"
-                                                rowProps={{}}
-                                                rowComponent={({ index, style }) => {
-                                                    const item = virtualItems[index];
-                                                    if (item.type === 'header') {
-                                                        return (
-                                                            <div style={style}>
-                                                                <h3 className="text-xs font-semibold text-pink-500/90 px-4 py-2 mb-1">
-                                                                    {item.label}
-                                                                </h3>
-                                                            </div>
-                                                        );
-                                                    }
-                                                    return (
-                                                        <div style={style} className="px-2 space-y-0.5">
-                                                            {renderThreadItem(item.data)}
-                                                        </div>
-                                                    );
-                                                }}
+                                                rowComponent={SidebarRow}
+                                                rowProps={rowProps as any}
+                                                style={{ height: height || 400, width: width || 260 }}
                                             />
                                         )}
                                     />
                                 </div>
                             )}
                         </div>
-                    </ScrollArea>
+                    </div>
 
                     {/* Footer / Login */}
                     <div className="mt-auto border-t border-[#2a1f2f] p-4">

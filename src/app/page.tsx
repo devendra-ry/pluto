@@ -40,8 +40,31 @@ export default function HomePage() {
       // 3. Navigate to the new chat
       // The ChatPageClient will pick up the user message and start generating
       router.push(`/c/${thread.id}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create chat:', error);
+
+      const errorMessage = error?.message || error?.error_description || String(error);
+      const errorDetails = error?.details || '';
+      const errorHint = error?.hint || '';
+      const errorStack = error?.stack || '';
+
+      console.error('--- ERROR DEBUG START ---');
+      console.error('Message:', errorMessage);
+      console.error('Details:', errorDetails);
+      console.error('Hint:', errorHint);
+      console.error('Stack:', errorStack);
+      console.error('Raw Error Object:', error);
+      try {
+        console.error('Internal Properties:', Object.getOwnPropertyNames(error).reduce((acc: any, key) => {
+          acc[key] = error[key];
+          return acc;
+        }, {}));
+      } catch (e) {
+        console.error('Could not log internal properties');
+      }
+      console.error('--- ERROR DEBUG END ---');
+
+      alert(`Failed to create chat: ${errorMessage}`);
       setIsLoading(false);
     }
   };
