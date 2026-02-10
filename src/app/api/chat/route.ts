@@ -7,11 +7,25 @@ export const runtime = 'edge';
 
 export async function POST(req: Request) {
     const encoder = new TextEncoder();
+    const signal = req.signal;
+
+    // Helper to safely enqueue data without crashing if the stream is closed
+    const safeEnqueue = (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
+        try {
+            if (signal.aborted) return;
+            const encoded = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
+            controller.enqueue(encoded);
+        } catch (e) {
+            // Ignore closed controller errors
+        }
+    };
 
     // Create the stream first so we can return the Response immediately
     const stream = new ReadableStream({
         async start(controller) {
             let heartbeatInterval: any;
+
+            if (signal.aborted) return;
 
             try {
                 const body = await req.json();
@@ -19,7 +33,7 @@ export async function POST(req: Request) {
                 // Validate request body with Zod
                 const parseResult = ChatRequestSchema.safeParse(body);
                 if (!parseResult.success) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Invalid request' })}\n\n`));
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid request' })}\n\n`);
                     controller.close();
                     return;
                 }
@@ -29,31 +43,38 @@ export async function POST(req: Request) {
 
                 // Start heartbeat to keep connection alive while waiting for AI
                 heartbeatInterval = setInterval(() => {
-                    controller.enqueue(encoder.encode(': keep-alive\n\n'));
+                    safeEnqueue(controller, ': keep-alive\n\n');
                 }, 15000);
 
                 let sourceStream: ReadableStream;
 
                 if (modelConfig?.provider === 'google') {
-                    sourceStream = await getGoogleStream(model, messages, reasoningEffort);
+                    sourceStream = await getGoogleStream(model, messages, reasoningEffort, signal);
                 } else if (modelConfig?.provider === 'openrouter') {
-                    sourceStream = await getOpenRouterStream(model, messages, reasoningEffort);
+                    sourceStream = await getOpenRouterStream(model, messages, reasoningEffort, signal);
                 } else {
-                    sourceStream = await getChutesStream(model, messages, reasoningEffort || 'low', modelConfig);
+                    sourceStream = await getChutesStream(model, messages, reasoningEffort || 'low', modelConfig, signal);
                 }
 
                 // Clear heartbeat once we have the source stream
                 if (heartbeatInterval) clearInterval(heartbeatInterval);
 
                 // Process the stream with robust buffering and thinking-tag transformation
-                await processAndTransformStream(sourceStream, controller);
-                controller.close();
+                await processAndTransformStream(sourceStream, controller, signal);
+
+                if (!signal.aborted) {
+                    controller.close();
+                }
             } catch (error) {
                 if (heartbeatInterval) clearInterval(heartbeatInterval);
-                console.error('Chat API error:', error);
-                const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'AI service error', details: errorMsg })}\n\n`));
-                controller.close();
+
+                // Only log and send errors if the client hasn't already disconnected
+                if (!signal.aborted) {
+                    console.error('Chat API error:', error);
+                    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'AI service error', details: errorMsg })}\n\n`);
+                    try { controller.close(); } catch (e) { }
+                }
             }
         }
     });
@@ -67,7 +88,7 @@ export async function POST(req: Request) {
     });
 }
 
-async function getChutesStream(model: string, messages: ChatMessage[], reasoningEffort: string = 'low', modelConfig: any) {
+async function getChutesStream(model: string, messages: ChatMessage[], reasoningEffort: string = 'low', modelConfig: any, signal?: AbortSignal) {
     const requestBody: Record<string, unknown> = {
         model,
         messages,
@@ -89,13 +110,14 @@ async function getChutesStream(model: string, messages: ChatMessage[], reasoning
             'Authorization': `Bearer ${process.env.CHUTES_API_KEY}`,
         },
         body: JSON.stringify(requestBody),
+        signal,
     });
 
     if (!response.ok) throw new Error(`Chutes API error: ${response.statusText}`);
     return response.body as ReadableStream;
 }
 
-async function getGoogleStream(model: string, messages: ChatMessage[], reasoningEffort: string = 'low') {
+async function getGoogleStream(model: string, messages: ChatMessage[], reasoningEffort: string = 'low', signal?: AbortSignal) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error('Gemini API key missing');
 
@@ -129,6 +151,8 @@ async function getGoogleStream(model: string, messages: ChatMessage[], reasoning
         async start(controller) {
             try {
                 for await (const chunk of response) {
+                    if (signal?.aborted) break;
+
                     const candidate = chunk.candidates?.[0];
                     if (!candidate?.content?.parts) continue;
                     for (const part of candidate.content.parts) {
@@ -146,16 +170,20 @@ async function getGoogleStream(model: string, messages: ChatMessage[], reasoning
                         controller.enqueue(encoder.encode(`data: ${data}\n\n`));
                     }
                 }
-                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-                controller.close();
+                if (!signal?.aborted) {
+                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                    controller.close();
+                }
             } catch (e) {
-                controller.error(e);
+                if (!signal?.aborted) {
+                    controller.error(e);
+                }
             }
         }
     });
 }
 
-async function getOpenRouterStream(model: string, messages: ChatMessage[], reasoningEffort: string = 'low') {
+async function getOpenRouterStream(model: string, messages: ChatMessage[], reasoningEffort: string = 'low', signal?: AbortSignal) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     const openRouter = new OpenRouter({
         apiKey: apiKey || '',
@@ -178,6 +206,8 @@ async function getOpenRouterStream(model: string, messages: ChatMessage[], reaso
         async start(controller) {
             try {
                 for await (const chunk of response) {
+                    if (signal?.aborted) break;
+
                     const delta = chunk.choices?.[0]?.delta;
                     if (delta && (delta.content || delta.reasoning)) {
                         const data = JSON.stringify({
@@ -193,10 +223,14 @@ async function getOpenRouterStream(model: string, messages: ChatMessage[], reaso
                         controller.enqueue(encoder.encode(`data: ${data}\n\n`));
                     }
                 }
-                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-                controller.close();
+                if (!signal?.aborted) {
+                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                    controller.close();
+                }
             } catch (e) {
-                controller.error(e);
+                if (!signal?.aborted) {
+                    controller.error(e);
+                }
             }
         }
     });
@@ -206,15 +240,25 @@ async function getOpenRouterStream(model: string, messages: ChatMessage[], reaso
  * Processes a source SSE stream, handles chunk buffering to ensure lines aren't broken,
  * and transforms <think> tags into reasoning_content.
  */
-async function processAndTransformStream(sourceStream: ReadableStream, controller: ReadableStreamDefaultController) {
+async function processAndTransformStream(sourceStream: ReadableStream, controller: ReadableStreamDefaultController, signal?: AbortSignal) {
     const reader = sourceStream.getReader();
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
     let isThinking = false;
     let buffer = '';
 
+    const safeEnqueue = (chunk: string | Uint8Array) => {
+        try {
+            if (signal?.aborted) return;
+            const encoded = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
+            controller.enqueue(encoded);
+        } catch (e) { }
+    };
+
     try {
         while (true) {
+            if (signal?.aborted) break;
+
             const { done, value } = await reader.read();
             if (done) break;
 
@@ -224,17 +268,19 @@ async function processAndTransformStream(sourceStream: ReadableStream, controlle
             buffer = lines.pop() || '';
 
             for (const line of lines) {
+                if (signal?.aborted) break;
+
                 const trimmedLine = line.trim();
                 if (!trimmedLine) continue;
 
                 if (!trimmedLine.startsWith('data: ')) {
-                    controller.enqueue(encoder.encode(line + '\n'));
+                    safeEnqueue(line + '\n');
                     continue;
                 }
 
                 const dataStr = trimmedLine.slice(6);
                 if (dataStr === '[DONE]') {
-                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                    safeEnqueue('data: [DONE]\n\n');
                     continue;
                 }
 
@@ -285,13 +331,13 @@ async function processAndTransformStream(sourceStream: ReadableStream, controlle
                                 }
                             }]
                         });
-                        controller.enqueue(encoder.encode(`data: ${transformedData}\n\n`));
+                        safeEnqueue(`data: ${transformedData}\n\n`);
                     } else {
                         // Pass through non-content chunks (reasoning, metadata)
-                        controller.enqueue(encoder.encode(`data: ${dataStr}\n\n`));
+                        safeEnqueue(`data: ${dataStr}\n\n`);
                     }
                 } catch (e) {
-                    controller.enqueue(encoder.encode(line + '\n'));
+                    safeEnqueue(line + '\n');
                 }
             }
         }
@@ -299,3 +345,4 @@ async function processAndTransformStream(sourceStream: ReadableStream, controlle
         reader.releaseLock();
     }
 }
+

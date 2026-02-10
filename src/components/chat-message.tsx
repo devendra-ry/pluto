@@ -6,7 +6,7 @@ import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { Copy, RefreshCcw, SquarePen, GitBranch, ChevronDown, Brain, Loader2, type LucideIcon } from 'lucide-react';
+import { Copy, RefreshCcw, SquarePen, GitBranch, ChevronDown, Check, Brain, Loader2, type LucideIcon } from 'lucide-react';
 import { useState, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -67,6 +67,7 @@ export const ChatMessage = memo(function ChatMessage({
     const [editContent, setEditContent] = useState(content);
     // Collapsed by default
     const [reasoningExpanded, setReasoningExpanded] = useState(false);
+    const [copied, setCopied] = useState(false);
     const isUser = role === 'user';
     const { showToast } = useToast();
 
@@ -81,7 +82,9 @@ export const ChatMessage = memo(function ChatMessage({
 
     const handleCopy = async () => {
         await navigator.clipboard.writeText(content);
+        setCopied(true);
         showToast('Copied to clipboard!', 'success');
+        setTimeout(() => setCopied(false), 2000);
     };
 
     const handleEdit = () => {
@@ -158,9 +161,10 @@ export const ChatMessage = memo(function ChatMessage({
                                     />
                                 )}
                                 <ActionIcon
-                                    icon={Copy}
-                                    title="Copy message"
+                                    icon={copied ? Check : Copy}
+                                    title={copied ? "Copied!" : "Copy message"}
                                     onClick={handleCopy}
+                                    className={copied ? "text-emerald-400 hover:text-emerald-300" : ""}
                                 />
                             </div>
                         </>
@@ -308,9 +312,10 @@ export const ChatMessage = memo(function ChatMessage({
                                 title="Branch"
                             />
                             <ActionIcon
-                                icon={Copy}
-                                title="Copy message"
+                                icon={copied ? Check : Copy}
+                                title={copied ? "Copied!" : "Copy message"}
                                 onClick={handleCopy}
+                                className={copied ? "text-emerald-400 hover:text-emerald-300" : ""}
                             />
                             {modelName && (
                                 <span className="text-xs text-zinc-500/80 font-medium ml-3">{modelName}</span>
