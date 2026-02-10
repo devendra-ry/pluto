@@ -6,174 +6,133 @@ import { OpenRouter } from '@openrouter/sdk';
 export const runtime = 'edge';
 
 export async function POST(req: Request) {
-    try {
-        const body = await req.json();
+    const encoder = new TextEncoder();
 
-        // Validate request body with Zod
-        const parseResult = ChatRequestSchema.safeParse(body);
-        if (!parseResult.success) {
-            return new Response(
-                JSON.stringify({
-                    error: 'Invalid request',
-                    details: parseResult.error.flatten().fieldErrors
-                }),
-                { status: 400, headers: { 'Content-Type': 'application/json' } }
-            );
+    // Create the stream first so we can return the Response immediately
+    const stream = new ReadableStream({
+        async start(controller) {
+            let heartbeatInterval: any;
+
+            try {
+                const body = await req.json();
+
+                // Validate request body with Zod
+                const parseResult = ChatRequestSchema.safeParse(body);
+                if (!parseResult.success) {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Invalid request' })}\n\n`));
+                    controller.close();
+                    return;
+                }
+
+                const { messages, model, reasoningEffort } = parseResult.data;
+                const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
+
+                // Start heartbeat to keep connection alive while waiting for AI
+                heartbeatInterval = setInterval(() => {
+                    controller.enqueue(encoder.encode(': keep-alive\n\n'));
+                }, 15000);
+
+                let sourceStream: ReadableStream;
+
+                if (modelConfig?.provider === 'google') {
+                    sourceStream = await getGoogleStream(model, messages, reasoningEffort);
+                } else if (modelConfig?.provider === 'openrouter') {
+                    sourceStream = await getOpenRouterStream(model, messages, reasoningEffort);
+                } else {
+                    sourceStream = await getChutesStream(model, messages, reasoningEffort || 'low', modelConfig);
+                }
+
+                // Clear heartbeat once we have the source stream
+                if (heartbeatInterval) clearInterval(heartbeatInterval);
+
+                // Process the stream with robust buffering and thinking-tag transformation
+                await processAndTransformStream(sourceStream, controller);
+                controller.close();
+            } catch (error) {
+                if (heartbeatInterval) clearInterval(heartbeatInterval);
+                console.error('Chat API error:', error);
+                const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'AI service error', details: errorMsg })}\n\n`));
+                controller.close();
+            }
         }
-
-        const { messages, model, reasoningEffort } = parseResult.data;
-
-        // Find model config
-        const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
-
-        // Handle Google models
-        if (modelConfig?.provider === 'google') {
-            return handleGoogleModel(model, messages, reasoningEffort);
-        }
-
-        // Handle OpenRouter models
-        if (modelConfig?.provider === 'openrouter') {
-            return handleOpenRouterModel(model, messages, reasoningEffort);
-        }
-
-        // Build request body with optional reasoning effort
-        const requestBody: Record<string, unknown> = {
-            model,
-            messages,
-            stream: true,
-            temperature: 1.0,
-            top_p: 0.95,
-            max_tokens: 65536, // Allow long reasoning chains
-        };
-
-        // Add reasoning effort if specified (for models that support it)
-        if (reasoningEffort) {
-            requestBody.reasoning_effort = reasoningEffort;
-        }
-
-        // Handle Kimi model's special thinking parameter
-        if (modelConfig?.usesThinkingParam) {
-            const enableThinking = reasoningEffort !== 'low';
-            requestBody.chat_template_kwargs = { thinking: enableThinking };
-        }
-
-        // Check API key
-        if (!process.env.CHUTES_API_KEY) {
-            console.error('CHUTES_API_KEY is not configured');
-            return new Response(
-                JSON.stringify({ error: 'API configuration error' }),
-                { status: 500, headers: { 'Content-Type': 'application/json' } }
-            );
-        }
-
-        // Direct call to Chutes API (OpenAI-compatible endpoint)
-        const response = await fetch('https://llm.chutes.ai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.CHUTES_API_KEY}`,
-            },
-            body: JSON.stringify(requestBody),
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Chutes API error:', errorText);
-            return new Response(
-                JSON.stringify({ error: 'AI service unavailable' }),
-                { status: response.status, headers: { 'Content-Type': 'application/json' } }
-            );
-        }
-
-        // Stream the response and transform thinking tags
-        return new Response(transformThinkingStream(response.body as any), {
-            headers: {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-            },
-        });
-    } catch (error) {
-        console.error('Chat API error:', error);
-        return new Response(
-            JSON.stringify({ error: 'Failed to generate response' }),
-            { status: 500, headers: { 'Content-Type': 'application/json' } }
-        );
-    }
-}
-
-// Helper to handle Google GenAI models
-async function handleGoogleModel(model: string, messages: ChatMessage[], reasoningEffort: string = 'low') {
-    const apiKey = process.env.GEMINI_API_KEY;
-
-    if (!apiKey) {
-        return new Response(
-            JSON.stringify({ error: 'Gemini API key is not configured' }),
-            { status: 500, headers: { 'Content-Type': 'application/json' } }
-        );
-    }
-
-    const ai = new GoogleGenAI({
-        apiKey: apiKey,
     });
 
-    // Convert messages to Google format
+    return new Response(stream, {
+        headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        },
+    });
+}
+
+async function getChutesStream(model: string, messages: ChatMessage[], reasoningEffort: string = 'low', modelConfig: any) {
+    const requestBody: Record<string, unknown> = {
+        model,
+        messages,
+        stream: true,
+        temperature: 1.0,
+        top_p: 0.95,
+        max_tokens: 65536,
+    };
+
+    if (reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
+    if (modelConfig?.usesThinkingParam) {
+        requestBody.chat_template_kwargs = { thinking: reasoningEffort !== 'low' };
+    }
+
+    const response = await fetch('https://llm.chutes.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.CHUTES_API_KEY}`,
+        },
+        body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) throw new Error(`Chutes API error: ${response.statusText}`);
+    return response.body as ReadableStream;
+}
+
+async function getGoogleStream(model: string, messages: ChatMessage[], reasoningEffort: string = 'low') {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('Gemini API key missing');
+
+    const ai = new GoogleGenAI({ apiKey });
     const contents = messages.map(msg => ({
         role: msg.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: msg.content }]
     }));
 
-    const config: any = {
-        maxOutputTokens: 65536, // Allow long reasoning chains
-    };
+    const config: any = { maxOutputTokens: 65536 };
     const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
 
     if (modelConfig?.supportsReasoning) {
-        config.thinkingConfig = {
-            includeThoughts: true,
-        };
-
-        // Determine if we use thinkingLevel (Gemini 3) or thinkingBudget (Gemini 2.5)
+        config.thinkingConfig = { includeThoughts: true };
         const isGemini3 = model.startsWith('gemini-3');
-
         if (isGemini3) {
-            const levelMap: Record<string, string> = {
-                low: 'MINIMAL',
-                medium: 'LOW',
-                high: 'HIGH'
-            };
+            const levelMap: Record<string, string> = { low: 'MINIMAL', medium: 'LOW', high: 'HIGH' };
             config.thinkingConfig.thinkingLevel = (levelMap[reasoningEffort] || 'LOW') as any;
         } else {
             const isFlash = model.includes('flash');
             const maxBudget = isFlash ? 24576 : 32768;
-
-            const budgetMap: Record<string, number> = {
-                low: 0,
-                medium: -1, // Dynamic
-                high: maxBudget
-            };
+            const budgetMap: Record<string, number> = { low: 0, medium: -1, high: maxBudget };
             config.thinkingConfig.thinkingBudget = budgetMap[reasoningEffort] ?? -1;
         }
     }
 
-    // Use the pattern from the user's snippet
-    const response = await ai.models.generateContentStream({
-        model,
-        config,
-        contents,
-    });
+    const response = await ai.models.generateContentStream({ model, config, contents });
 
     const encoder = new TextEncoder();
-    const stream = new ReadableStream({
+    return new ReadableStream({
         async start(controller) {
             try {
                 for await (const chunk of response) {
                     const candidate = chunk.candidates?.[0];
                     if (!candidate?.content?.parts) continue;
-
                     for (const part of candidate.content.parts) {
                         if (!part.text) continue;
-
                         const data = JSON.stringify({
                             choices: [{
                                 delta: {
@@ -189,29 +148,17 @@ async function handleGoogleModel(model: string, messages: ChatMessage[], reasoni
                 }
                 controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                 controller.close();
-            } catch (error) {
-                console.error('Google stream error:', error);
-                controller.error(error);
+            } catch (e) {
+                controller.error(e);
             }
-        },
-    });
-
-    return new Response(stream, {
-        headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-        },
+        }
     });
 }
 
-// Helper to handle OpenRouter models
-async function handleOpenRouterModel(model: string, messages: ChatMessage[], reasoningEffort: string = 'low') {
+async function getOpenRouterStream(model: string, messages: ChatMessage[], reasoningEffort: string = 'low') {
     const apiKey = process.env.OPENROUTER_API_KEY;
-
     const openRouter = new OpenRouter({
         apiKey: apiKey || '',
-        // OpenRouter recommends these headers for site rankings and to avoid some 401/403 errors
         httpReferer: process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000",
         xTitle: "Pluto Chat",
     });
@@ -219,20 +166,15 @@ async function handleOpenRouterModel(model: string, messages: ChatMessage[], rea
     const response = await openRouter.chat.send({
         chatGenerationParams: {
             model,
-            messages: messages.map(msg => ({
-                role: msg.role,
-                content: msg.content
-            })),
+            messages: messages.map(msg => ({ role: msg.role, content: msg.content })),
             stream: true,
-            maxTokens: 65536, // Allow long reasoning chains
-            reasoning: {
-                effort: reasoningEffort as any
-            }
+            maxTokens: 65536,
+            reasoning: { effort: reasoningEffort as any }
         }
     });
 
     const encoder = new TextEncoder();
-    const stream = new ReadableStream({
+    return new ReadableStream({
         async start(controller) {
             try {
                 for await (const chunk of response) {
@@ -253,126 +195,107 @@ async function handleOpenRouterModel(model: string, messages: ChatMessage[], rea
                 }
                 controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                 controller.close();
-            } catch (error) {
-                console.error('OpenRouter stream error:', error);
-                controller.error(error);
+            } catch (e) {
+                controller.error(e);
             }
-        },
-    });
-
-    // Wrap OpenRouter stream to handle <think> tags if they exist in content
-    return new Response(transformThinkingStream(stream), {
-        headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-        },
+        }
     });
 }
 
 /**
- * Transforms an SSE stream by parsing <think> tags in the 'content' field
- * and moving them to 'reasoning_content'.
+ * Processes a source SSE stream, handles chunk buffering to ensure lines aren't broken,
+ * and transforms <think> tags into reasoning_content.
  */
-function transformThinkingStream(sourceStream: ReadableStream) {
-    const encoder = new TextEncoder();
+async function processAndTransformStream(sourceStream: ReadableStream, controller: ReadableStreamDefaultController) {
+    const reader = sourceStream.getReader();
     const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
     let isThinking = false;
     let buffer = '';
 
-    return new ReadableStream({
-        async start(controller) {
-            const reader = sourceStream.getReader();
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-            try {
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            // Keep the last partial line in the buffer
+            buffer = lines.pop() || '';
 
-                    const chunk = decoder.decode(value, { stream: true });
-                    const lines = chunk.split('\n');
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) continue;
 
-                    for (const line of lines) {
-                        if (!line.startsWith('data: ')) {
-                            if (line.trim()) controller.enqueue(encoder.encode(line + '\n'));
-                            continue;
-                        }
-
-                        const dataStr = line.slice(6).trim();
-                        if (dataStr === '[DONE]') {
-                            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-                            continue;
-                        }
-
-                        try {
-                            const parsed = JSON.parse(dataStr);
-                            const choice = parsed.choices?.[0];
-                            const delta = choice?.delta;
-                            let content = delta?.content || '';
-                            let reasoning = delta?.reasoning_content || '';
-
-                            if (content) {
-                                let newContent = '';
-                                let newReasoning = reasoning;
-
-                                // Very simple state-machine parsing for <think> tags across chunks
-                                let remaining = content;
-                                while (remaining.length > 0) {
-                                    if (!isThinking) {
-                                        const thinkStartIdx = remaining.indexOf('<think>');
-                                        if (thinkStartIdx !== -1) {
-                                            newContent += remaining.slice(0, thinkStartIdx);
-                                            isThinking = true;
-                                            remaining = remaining.slice(thinkStartIdx + 7);
-                                        } else {
-                                            newContent += remaining;
-                                            remaining = '';
-                                        }
-                                    } else {
-                                        const thinkEndIdx = remaining.indexOf('</think>');
-                                        if (thinkEndIdx !== -1) {
-                                            newReasoning += remaining.slice(0, thinkEndIdx);
-                                            isThinking = false;
-                                            remaining = remaining.slice(thinkEndIdx + 8);
-                                        } else {
-                                            newReasoning += remaining;
-                                            remaining = '';
-                                        }
-                                    }
-                                }
-
-                                // Re-emit JSON with swapped content/reasoning
-                                const transformedData = JSON.stringify({
-                                    ...parsed,
-                                    choices: [{
-                                        ...choice,
-                                        delta: {
-                                            ...delta,
-                                            content: newContent || undefined,
-                                            reasoning_content: newReasoning || undefined
-                                        }
-                                    }]
-                                });
-                                controller.enqueue(encoder.encode(`data: ${transformedData}\n\n`));
-                            } else if (reasoning) {
-                                // Already have reasoning, just pass through
-                                controller.enqueue(encoder.encode(`data: ${dataStr}\n\n`));
-                            } else {
-                                // Other metadata, pass through
-                                controller.enqueue(encoder.encode(`data: ${dataStr}\n\n`));
-                            }
-                        } catch (e) {
-                            // If JSON parsing fails, just pass the raw line
-                            controller.enqueue(encoder.encode(line + '\n'));
-                        }
-                    }
+                if (!trimmedLine.startsWith('data: ')) {
+                    controller.enqueue(encoder.encode(line + '\n'));
+                    continue;
                 }
-            } catch (err) {
-                controller.error(err);
-            } finally {
-                reader.releaseLock();
-                controller.close();
+
+                const dataStr = trimmedLine.slice(6);
+                if (dataStr === '[DONE]') {
+                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                    continue;
+                }
+
+                try {
+                    const parsed = JSON.parse(dataStr);
+                    const choice = parsed.choices?.[0];
+                    const delta = choice?.delta;
+                    let content = delta?.content || '';
+                    let reasoning = delta?.reasoning_content || '';
+
+                    if (content) {
+                        let newContent = '';
+                        let newReasoning = reasoning;
+                        let remaining = content;
+
+                        while (remaining.length > 0) {
+                            if (!isThinking) {
+                                const thinkStartIdx = remaining.indexOf('<think>');
+                                if (thinkStartIdx !== -1) {
+                                    newContent += remaining.slice(0, thinkStartIdx);
+                                    isThinking = true;
+                                    remaining = remaining.slice(thinkStartIdx + 7);
+                                } else {
+                                    newContent += remaining;
+                                    remaining = '';
+                                }
+                            } else {
+                                const thinkEndIdx = remaining.indexOf('</think>');
+                                if (thinkEndIdx !== -1) {
+                                    newReasoning += remaining.slice(0, thinkEndIdx);
+                                    isThinking = false;
+                                    remaining = remaining.slice(thinkEndIdx + 8);
+                                } else {
+                                    newReasoning += remaining;
+                                    remaining = '';
+                                }
+                            }
+                        }
+
+                        const transformedData = JSON.stringify({
+                            ...parsed,
+                            choices: [{
+                                ...choice,
+                                delta: {
+                                    ...delta,
+                                    content: newContent || undefined,
+                                    reasoning_content: newReasoning || undefined
+                                }
+                            }]
+                        });
+                        controller.enqueue(encoder.encode(`data: ${transformedData}\n\n`));
+                    } else {
+                        // Pass through non-content chunks (reasoning, metadata)
+                        controller.enqueue(encoder.encode(`data: ${dataStr}\n\n`));
+                    }
+                } catch (e) {
+                    controller.enqueue(encoder.encode(line + '\n'));
+                }
             }
         }
-    });
+    } finally {
+        reader.releaseLock();
+    }
 }
