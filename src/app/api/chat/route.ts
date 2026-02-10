@@ -1,6 +1,6 @@
 import { ChatRequestSchema, ChatMessage } from '@/lib/types';
 import { AVAILABLE_MODELS } from '@/lib/constants';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { OpenRouter } from '@openrouter/sdk';
 
 export const runtime = 'edge';
@@ -127,15 +127,19 @@ async function getGoogleStream(model: string, messages: ChatMessage[], reasoning
         parts: [{ text: msg.content }]
     }));
 
-    const config: { maxOutputTokens: number, thinkingConfig?: { includeThoughts: boolean, thinkingLevel?: string, thinkingBudget?: number } } = { maxOutputTokens: 65536 };
+    const config: any = { maxOutputTokens: 65536 };
     const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
 
     if (modelConfig?.supportsReasoning && reasoningEffort) {
         config.thinkingConfig = { includeThoughts: true };
-        const isGemini3 = model.startsWith('gemini-3');
+        const isGemini3 = model.includes('gemini-3');
         if (isGemini3) {
-            const levelMap: Record<string, string> = { low: 'MINIMAL', medium: 'LOW', high: 'HIGH' };
-            config.thinkingConfig.thinkingLevel = (levelMap[reasoningEffort] || 'LOW') as any;
+            const levelMap: Record<string, ThinkingLevel> = {
+                low: ThinkingLevel.LOW,
+                medium: ThinkingLevel.MEDIUM,
+                high: ThinkingLevel.HIGH
+            };
+            config.thinkingConfig.thinkingLevel = levelMap[reasoningEffort] || ThinkingLevel.MEDIUM;
         } else {
             const isFlash = model.includes('flash');
             const maxBudget = isFlash ? 24576 : 32768;
