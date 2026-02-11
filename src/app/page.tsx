@@ -102,7 +102,7 @@ export default function HomePage() {
                   key={cat.label}
                   variant="ghost"
                   onClick={() => handleCategoryClick(cat.prompt)}
-                  className="h-10 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-sm font-medium transition-all hover:text-zinc-100"
+                  className="h-10 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-[15px] font-medium transition-all hover:text-zinc-100"
                 >
                   <IconComponent className="h-4 w-4" />
                   {cat.label}
@@ -117,7 +117,7 @@ export default function HomePage() {
               <button
                 key={i}
                 onClick={() => handlePromptClick(prompt)}
-                className="w-full text-left px-0 py-2.5 text-[15px] text-zinc-400/90 hover:text-zinc-200 transition-colors"
+                className="w-full text-left px-0 py-2.5 text-base text-zinc-400/90 hover:text-zinc-200 transition-colors"
               >
                 {prompt}
               </button>

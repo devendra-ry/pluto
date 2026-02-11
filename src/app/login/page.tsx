@@ -81,7 +81,7 @@ export default function LoginPage() {
                     transition={{ delay: 0.3 }}
                     className="text-center"
                 >
-                    <p className="text-zinc-600 text-[13px]">
+                    <p className="text-zinc-600 text-sm">
                         Terms of Service and Privacy Policy
                     </p>
                 </motion.div>

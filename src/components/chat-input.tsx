@@ -107,7 +107,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         onChange={handleChange}
                         onKeyDown={handleKeyDown}
                         placeholder="Type your message here..."
-                        className="w-full px-5 pt-4 pb-14 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-[15px] leading-relaxed"
+                        className="w-full px-5 pt-4 pb-14 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-base leading-relaxed"
                     />
 
                     {/* Bottom Bar */}
@@ -128,7 +128,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                         <DropdownMenuTrigger asChild>
                                             <Button
                                                 variant="ghost"
-                                                className="h-8 px-2 md:px-3 gap-1.5 md:gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all text-xs font-semibold"
+                                                className="h-8 px-2 md:px-3 gap-1.5 md:gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all text-sm font-semibold"
                                             >
                                                 <Brain className="h-3.5 w-3.5 md:h-4 md:w-4" />
                                                 <span className="capitalize hidden md:inline">{selectedReasoning.label}</span>
@@ -162,7 +162,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
                                     {/* Custom Tooltip */}
                                     <div className="absolute bottom-full mb-2 hidden group-hover/reasoning:block z-50 pointer-events-none">
-                                        <div className="bg-[#1a1520]/95 backdrop-blur-md text-[11px] px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
+                                        <div className="bg-[#1a1520]/95 backdrop-blur-md text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
                                             <span className="text-[#fce7ef]">Reasoning Effort</span>
                                         </div>
                                     </div>
@@ -172,7 +172,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                             {/* Search Button - Pill style */}
                             <Button
                                 variant="ghost"
-                                className="h-8 px-2 md:px-3 gap-1.5 md:gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all text-xs font-semibold"
+                                className="h-8 px-2 md:px-3 gap-1.5 md:gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all text-sm font-semibold"
                             >
                                 <Globe className="h-3.5 w-3.5 md:h-4 md:w-4" />
                                 <span className="hidden md:inline">Search</span>
@@ -189,7 +189,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 </Button>
 
                                 <div className="absolute bottom-full mb-2 hidden group-hover/attach:block z-50 pointer-events-none">
-                                    <div className="bg-[#1a1520]/95 backdrop-blur-md text-[11px] px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
+                                    <div className="bg-[#1a1520]/95 backdrop-blur-md text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
                                         <span className="text-[#fce7ef]">Attach file</span>
                                     </div>
                                 </div>

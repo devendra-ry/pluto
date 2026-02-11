@@ -234,13 +234,13 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                         {/* Main Content */}
                         <div className="flex-1 flex flex-col min-h-0 overflow-hidden rounded-r-xl">
                             <div className="flex-none flex items-center gap-2 px-3 py-3 border-b border-[#2a2535]/50">
-                                <Search className="h-4 w-4 text-zinc-500 shrink-0" />
+                                <Search className="h-5 w-5 text-zinc-500 shrink-0" />
                                 <input
                                     type="text"
                                     placeholder="Search models..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="flex-1 bg-transparent text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none"
+                                    className="flex-1 bg-transparent text-base text-zinc-300 placeholder:text-zinc-600 focus:outline-none"
                                 />
                                 <DropdownMenu open={showFilterMenu} onOpenChange={setShowFilterMenu}>
                                     <DropdownMenuTrigger asChild>
@@ -261,7 +261,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                             );
                                         })}
                                         <div className="border-t border-[#2a2535] mt-1 pt-1">
-                                            <DropdownMenuItem onClick={() => setActiveFilters([])} className="text-xs text-zinc-500 hover:text-zinc-300">Show combined results</DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => setActiveFilters([])} className="text-sm text-zinc-500 hover:text-zinc-300">Show combined results</DropdownMenuItem>
                                         </div>
                                     </DropdownMenuContent>
                                 </DropdownMenu>
@@ -297,7 +297,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                                     )}
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex items-center gap-2 min-w-0">
-                                                            <span className="font-semibold text-zinc-100 text-[15px] truncate">{model.name}</span>
+                                                            <span className="font-semibold text-zinc-100 text-base truncate">{model.name}</span>
 
                                                             <button
                                                                 onClick={(e) => toggleStarred(e, model.id)}
@@ -313,7 +313,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                                                 />
                                                             </button>
                                                         </div>
-                                                        <span className="text-[13px] text-zinc-500 block truncate mt-0.5">{model.description}</span>
+                                                        <span className="text-sm text-zinc-500 block truncate mt-0.5">{model.description}</span>
                                                     </div>
                                                     <div className="flex items-center gap-1 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
                                                         {model.capabilities.slice(0, 3).map((cap) => {
@@ -344,7 +344,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                     )}
                                     {legacyModels.length > 0 && (
                                         <div className="mt-2 border-t border-[#2a2535]/50">
-                                            <button onClick={() => setShowLegacy(!showLegacy)} className="w-full flex items-center gap-2 px-4 py-3 text-sm text-zinc-500 hover:text-zinc-300 hover:bg-[#1f1a28] transition-colors">
+                                            <button onClick={() => setShowLegacy(!showLegacy)} className="w-full flex items-center gap-2 px-4 py-3 text-base text-zinc-500 hover:text-zinc-300 hover:bg-[#1f1a28] transition-colors">
                                                 <Folder className="h-4 w-4" />
                                                 <span>{legacyModels.length} legacy models</span>
                                                 {showLegacy ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}

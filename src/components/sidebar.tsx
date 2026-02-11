@@ -48,7 +48,7 @@ const SidebarRow = memo(({ index, style, virtualItems, renderThreadItem }: any) 
     if (item.type === 'header') {
         return (
             <div style={style}>
-                <h3 className="text-xs font-semibold text-pink-500/90 px-4 py-2 mt-4 mb-1 first:mt-0">
+                <h3 className="text-sm font-semibold text-pink-500/90 px-4 py-2 mt-4 mb-1 first:mt-0">
                     {item.label}
                 </h3>
             </div>
@@ -223,7 +223,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                 <Link
                     href={`/c/${thread.id}`}
                     className={cn(
-                        'flex items-center gap-2 px-3 py-2 text-[13px] transition-all rounded-lg outline-none min-w-0 relative overflow-hidden',
+                        'flex items-center gap-2 px-3 py-2 text-sm transition-all rounded-lg outline-none min-w-0 relative overflow-hidden',
                         isActive
                             ? 'text-zinc-100 font-medium'
                             : 'text-zinc-400 group-hover:text-zinc-200'
@@ -240,10 +240,10 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                 {/* Delete Confirmation Overlay */}
                 {isConfirmingDelete && (
                     <div className="absolute inset-0 bg-[#0f0a12]/95 rounded-lg flex items-center justify-center gap-2 z-20 animate-in fade-in duration-150">
-                        <span className="text-xs text-zinc-400 mr-1">Delete?</span>
+                        <span className="text-sm text-zinc-400 mr-1">Delete?</span>
                         <Button
                             size="sm"
-                            className="h-6 px-2 text-xs bg-red-600 hover:bg-red-500 text-white"
+                            className="h-6 px-2 text-sm bg-red-600 hover:bg-red-500 text-white"
                             onClick={(e) => handleDeleteConfirm(e, thread.id)}
                         >
                             Yes
@@ -251,7 +251,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         <Button
                             size="sm"
                             variant="ghost"
-                            className="h-6 px-2 text-xs text-zinc-400 hover:text-zinc-200"
+                            className="h-6 px-2 text-sm text-zinc-400 hover:text-zinc-200"
                             onClick={handleDeleteCancel}
                         >
                             No
@@ -367,7 +367,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                     <div className="px-3 pb-2 pt-2">
                         <Button
                             onClick={handleNewChat}
-                            className="w-full h-9 bg-gradient-to-r from-pink-700/90 to-pink-600/90 hover:from-pink-600/90 hover:to-pink-500/90 text-pink-100 font-medium rounded-lg border border-pink-500/20 shadow-pink-500/10 shadow-sm text-[13px] transition-all"
+                            className="w-full h-9 bg-gradient-to-r from-pink-700/90 to-pink-600/90 hover:from-pink-600/90 hover:to-pink-500/90 text-pink-100 font-medium rounded-lg border border-pink-500/20 shadow-pink-500/10 shadow-sm text-sm transition-all"
                         >
                             New Chat
                         </Button>
@@ -376,13 +376,13 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                     {/* Search */}
                     <div className="px-3 pb-4">
                         <div className="flex items-center gap-2 px-3 py-2 text-zinc-500 group bg-zinc-900/30 rounded-lg border border-white/[0.03]">
-                            <Search className="h-4 w-4 group-focus-within:text-zinc-300 transition-colors" />
+                            <Search className="h-5 w-5 text-zinc-500 group-focus-within:text-zinc-300 transition-colors shrink-0" />
                             <input
                                 type="text"
                                 placeholder="Search conversations..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="flex-1 bg-transparent text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none"
+                                className="flex-1 bg-transparent text-base text-zinc-300 placeholder:text-zinc-600 focus:outline-none"
                             />
                         </div>
                     </div>
@@ -423,7 +423,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                                     <div className="w-8 h-8 rounded-full bg-pink-500/20 flex items-center justify-center shrink-0">
                                         <User className="h-4 w-4 text-pink-500" />
                                     </div>
-                                    <span className="text-sm text-zinc-300 truncate">
+                                    <span className="text-base text-zinc-300 truncate">
                                         {user.email}
                                     </span>
                                 </div>
@@ -439,7 +439,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         ) : (
                             <Link href="/login" className="flex items-center gap-3 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f] rounded-lg transition-colors">
                                 <LogIn className="h-5 w-5" />
-                                <span className="text-sm font-medium">Sign in</span>
+                                <span className="text-base font-medium">Sign in</span>
                             </Link>
                         )}
                     </div>
@@ -473,7 +473,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                             onClick={() => setIsCollapsed(false)}
                             className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f] transition-all rounded-lg"
                         >
-                            <Search className="h-4.5 w-4.5" />
+                            <Search className="h-5 w-5" />
                         </Button>
 
                         <div className="w-px h-4 bg-[#2a1f2f] mx-0.5" />

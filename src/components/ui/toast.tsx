@@ -81,7 +81,7 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
             )}
         >
             {icons[toast.type]}
-            <span className="text-sm text-zinc-100">{toast.message}</span>
+            <span className="text-base text-zinc-100">{toast.message}</span>
             <button
                 onClick={onClose}
                 className="ml-2 p-1 rounded-lg hover:bg-white/10 text-zinc-400 hover:text-zinc-200 transition-colors"

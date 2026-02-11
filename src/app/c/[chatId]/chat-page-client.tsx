@@ -465,7 +465,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                     <Button
                                         key={cat.label}
                                         variant="ghost"
-                                        className="h-9 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-sm"
+                                        className="h-9 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-[15px]"
                                     >
                                         <IconComponent className="h-4 w-4" />
                                         {cat.label}
@@ -480,7 +480,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                 <button
                                     key={i}
                                     onClick={() => handlePromptClick(prompt)}
-                                    className="w-full text-left px-1 py-2 text-sm text-pink-300/80 hover:text-pink-200 transition-colors"
+                                    className="w-full text-left px-1 py-2 text-base text-pink-300/80 hover:text-pink-200 transition-colors"
                                 >
                                     {prompt}
                                 </button>
@@ -537,7 +537,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                             onClick={scrollToBottom}
                             className="h-9 px-4 rounded-full bg-zinc-900/60 backdrop-blur-lg border border-white/5 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/80 shadow-2xl transition-all flex items-center gap-2 group"
                         >
-                            <span className="text-xs font-semibold tracking-tight">Scroll to bottom</span>
+                            <span className="text-sm font-semibold tracking-tight">Scroll to bottom</span>
                             <ChevronDown className="h-4 w-4 transition-transform group-hover:translate-y-0.5" />
                         </button>
                     </div>

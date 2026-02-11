@@ -114,7 +114,7 @@ export const ChatMessage = memo(function ChatMessage({
                             <textarea
                                 value={editContent}
                                 onChange={(e) => setEditContent(e.target.value)}
-                                className="w-full min-h-[80px] p-3 bg-[#2a2035] text-zinc-100 rounded-2xl border border-[#3a2a4a] focus:border-pink-500/50 focus:outline-none resize-none text-[15px]"
+                                className="w-full min-h-[80px] p-3 bg-[#2a2035] text-zinc-100 rounded-2xl border border-[#3a2a4a] focus:border-pink-500/50 focus:outline-none resize-none text-base"
                                 autoFocus
                             />
 
@@ -139,7 +139,7 @@ export const ChatMessage = memo(function ChatMessage({
                     ) : (
                         <>
                             <div className="max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-2 bg-[#2a2035]/80 backdrop-blur-sm border border-white/5 text-zinc-100 shadow-lg">
-                                <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">{content}</p>
+                                <p className="whitespace-pre-wrap break-words text-base leading-relaxed">{content}</p>
                             </div>
 
                             {/* Action icons below message - same row */}
@@ -216,7 +216,7 @@ export const ChatMessage = memo(function ChatMessage({
                                         "h-4 w-4 shrink-0 transition-colors",
                                         reasoningExpanded ? "text-pink-400/80" : "text-zinc-500"
                                     )} />
-                                    <span className="text-[13px] font-medium tracking-tight text-zinc-400">Reasoning</span>
+                                    <span className="text-sm font-medium tracking-tight text-zinc-400">Reasoning</span>
                                     <ChevronDown className={cn(
                                         "h-3.5 w-3.5 text-zinc-600/80 shrink-0 transition-transform duration-300",
                                         reasoningExpanded && "rotate-180"
@@ -233,7 +233,7 @@ export const ChatMessage = memo(function ChatMessage({
                                     <div className="overflow-hidden">
                                         <div className="p-4 pt-1">
                                             {reasoning ? (
-                                                <div className="prose prose-invert prose-sm max-w-none prose-p:text-zinc-400 prose-p:leading-relaxed prose-headings:text-zinc-200 prose-headings:font-semibold prose-strong:text-zinc-200 prose-p:my-3">
+                                                <div className="prose prose-invert prose-base max-w-none prose-p:text-zinc-400 prose-p:leading-relaxed prose-headings:text-zinc-200 prose-headings:font-semibold prose-strong:text-zinc-200 prose-p:text-[15px] prose-p:my-3">
                                                     <ReactMarkdown
                                                         rehypePlugins={[rehypeHighlight, rehypeRaw, rehypeKatex]}
                                                         remarkPlugins={[remarkGfm, remarkMath]}
@@ -258,9 +258,9 @@ export const ChatMessage = memo(function ChatMessage({
                     {/* Main content */}
                     {content && (
                         <div className="prose prose-invert prose-sm max-w-none 
-                            prose-p:text-zinc-200 prose-p:leading-relaxed prose-p:text-[15px] prose-p:my-1.5
+                            prose-p:text-zinc-200 prose-p:leading-relaxed prose-p:text-base prose-p:my-1.5
                             prose-headings:text-zinc-100 prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-2
-                            prose-h1:text-xl prose-h2:text-lg prose-h3:text-base
+                            prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
                             prose-strong:text-zinc-100 
                             prose-code:text-pink-300
                             prose-ol:my-2 prose-ul:my-2 prose-li:my-0.5
@@ -279,11 +279,11 @@ export const ChatMessage = memo(function ChatMessage({
                                     code: ({ className, children, ...props }) => {
                                         const isInline = !className;
                                         return isInline ? (
-                                            <code className="bg-[#2a2035]/60 px-1.5 py-0.5 rounded-md text-sm text-pink-300 font-mono border border-white/5" {...props}>
+                                            <code className="bg-[#2a2035]/60 px-1.5 py-0.5 rounded-md text-[15px] text-pink-300 font-mono border border-white/5" {...props}>
                                                 {children}
                                             </code>
                                         ) : (
-                                            <code className={cn(className, "font-mono text-sm leading-relaxed")} {...props}>
+                                            <code className={cn(className, "font-mono text-[15px] leading-relaxed")} {...props}>
                                                 {children}
                                             </code>
                                         );
@@ -320,7 +320,7 @@ export const ChatMessage = memo(function ChatMessage({
                                 className={copied ? "text-emerald-400 hover:text-emerald-300" : ""}
                             />
                             {modelName && (
-                                <span className="text-xs text-zinc-500/80 font-medium ml-3">{modelName}</span>
+                                <span className="text-sm text-zinc-500/80 font-medium ml-3">{modelName}</span>
                             )}
                         </div>
                     )}
