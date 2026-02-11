@@ -233,7 +233,14 @@ export const ChatMessage = memo(function ChatMessage({
                                     <div className="overflow-hidden">
                                         <div className="p-4 pt-1">
                                             {reasoning ? (
-                                                <div className="prose prose-invert prose-base max-w-none prose-p:text-zinc-400 prose-p:leading-relaxed prose-headings:text-zinc-200 prose-headings:font-semibold prose-strong:text-zinc-200 prose-p:text-[15px] prose-p:my-3">
+                                                <div className="prose prose-invert prose-base max-w-none 
+                                                    prose-p:text-zinc-400 prose-p:leading-relaxed prose-p:text-[15px] prose-p:my-3
+                                                    prose-li:text-[15px] prose-li:text-zinc-400
+                                                    prose-headings:text-zinc-200 prose-headings:font-semibold
+                                                    prose-strong:text-zinc-200
+                                                    prose-blockquote:text-zinc-500 prose-blockquote:border-l-zinc-700
+                                                    [&_.katex]:text-[15px]
+                                                ">
                                                     <ReactMarkdown
                                                         rehypePlugins={[rehypeHighlight, rehypeRaw, rehypeKatex]}
                                                         remarkPlugins={[remarkGfm, remarkMath]}
@@ -257,14 +264,18 @@ export const ChatMessage = memo(function ChatMessage({
 
                     {/* Main content */}
                     {content && (
-                        <div className="prose prose-invert prose-sm max-w-none 
-                            prose-p:text-zinc-200 prose-p:leading-relaxed prose-p:text-base prose-p:my-1.5
-                            prose-headings:text-zinc-100 prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-2
-                            prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
-                            prose-strong:text-zinc-100 
-                            prose-code:text-pink-300
-                            prose-ol:my-2 prose-ul:my-2 prose-li:my-0.5
-                            prose-hr:my-4 prose-hr:border-zinc-700/50
+                        <div className="prose prose-invert prose-base max-w-none 
+                            prose-p:text-zinc-200 prose-p:leading-relaxed prose-p:text-base prose-p:my-1.5 
+                            prose-headings:text-zinc-100 prose-headings:font-bold 
+                            prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg 
+                            prose-li:text-base prose-li:text-zinc-200
+                            prose-strong:text-zinc-100 prose-a:text-pink-400 
+                            hover:prose-a:text-pink-300 prose-a:no-underline 
+                            prose-code:text-pink-300/90 prose-pre:bg-[#2a2035]/60 
+                            prose-pre:border prose-pre:border-white/5
+                            prose-blockquote:text-zinc-400 prose-blockquote:border-l-pink-500/50
+                            prose-table:text-base prose-th:text-zinc-100 prose-td:text-zinc-300
+                            [&_.katex]:text-base [&_.katex-display]:text-lg
                             [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden
                         ">
                             <ReactMarkdown
