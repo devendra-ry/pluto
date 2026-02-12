@@ -9,6 +9,7 @@ export interface Message {
     role: 'user' | 'assistant';
     content: string;
     reasoning?: string;
+    model_id?: string;
     created_at: string;
 }
 
@@ -60,7 +61,8 @@ export async function addMessage(
     threadId: string,
     role: 'user' | 'assistant',
     content: string,
-    reasoning?: string
+    reasoning?: string,
+    modelId?: string
 ): Promise<Message> {
     const supabase = createClient();
     const { data, error } = await supabase
@@ -70,6 +72,7 @@ export async function addMessage(
             role,
             content,
             reasoning,
+            model_id: modelId,
         })
         .select()
         .single();

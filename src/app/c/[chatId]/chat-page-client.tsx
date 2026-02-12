@@ -23,6 +23,7 @@ interface ChatMessageType {
     role: 'user' | 'assistant';
     content: string;
     reasoning?: string;
+    model_id?: string;
 }
 
 // Regex to fix markdown headings without space after #
@@ -82,6 +83,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     role: m.role,
                     content: m.content,
                     reasoning: m.reasoning,
+                    model_id: m.model_id,
                 }))
             );
         } else {
@@ -105,6 +107,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                         role: m.role,
                         content: m.content,
                         reasoning: m.reasoning,
+                        model_id: m.model_id,
                     }))
                 );
             }
@@ -181,6 +184,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             role: 'assistant',
             content: '',
             reasoning: '',
+            model_id: model,
         };
         setMessages(prev => [...prev, assistantMsg]);
 
@@ -255,6 +259,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                             updated[msgIdx] = {
                                                 ...updated[msgIdx],
                                                 reasoning: fullReasoning,
+                                                model_id: model,
                                             };
                                         }
                                         return updated;
@@ -277,6 +282,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                                 ...updated[msgIdx],
                                                 content: fullContent,
                                                 reasoning: fullReasoning,
+                                                model_id: model,
                                             };
                                         }
                                         return updated;
@@ -290,7 +296,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 }
             }
 
-            const newMsg = await addMessage(chatId, 'assistant', fullContent, fullReasoning);
+            const newMsg = await addMessage(chatId, 'assistant', fullContent, fullReasoning, model);
             justAddedMessageIdRef.current = newMsg.id;
             await touchThread(chatId);
         } catch (error) {
@@ -298,7 +304,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 // User stopped
                 // If we have some content, save it so we don't lose the partial response
                 if (fullContent || fullReasoning) {
-                    const newMsg = await addMessage(chatId, 'assistant', fullContent, fullReasoning);
+                    const newMsg = await addMessage(chatId, 'assistant', fullContent, fullReasoning, model);
                     justAddedMessageIdRef.current = newMsg.id;
                     await touchThread(chatId);
                 } else {
@@ -507,7 +513,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                         atBottomStateChange={setIsAtBottom}
                         initialTopMostItemIndex={messages.length - 1}
                         itemContent={(index, message) => {
-                            const selectedModel = AVAILABLE_MODELS.find((m) => m.id === model);
+                            const messageModelId = message.model_id || (message.role === 'assistant' ? model : undefined);
+                            const selectedModel = AVAILABLE_MODELS.find((m) => m.id === messageModelId);
                             return (
                                 <div className={cn("max-w-3xl mx-auto", index === 0 ? "pt-12" : "pt-4")}>
                                     <ChatMessage
