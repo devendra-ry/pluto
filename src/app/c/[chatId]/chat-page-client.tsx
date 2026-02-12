@@ -6,7 +6,7 @@ import { ChatMessage } from '@/components/chat-message';
 import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
 import { type ReasoningEffort } from '@/lib/types';
 import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort } from '@/hooks/use-threads';
-import { useMessages, addMessage, deleteMessage } from '@/hooks/use-messages';
+import { useMessages, addMessage, deleteMessagesByIds, getThreadMessages } from '@/hooks/use-messages';
 import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -215,6 +215,9 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             }
 
             const newMsg = await addMessage(chatId, 'assistant', fullContent, fullReasoning, model);
+            setMessages(prev =>
+                prev.map((m) => (m.id === assistantMsgId ? { ...m, id: newMsg.id } : m))
+            );
             justAddedMessageIdRef.current = newMsg.id;
             await touchThread(chatId);
             return true;
@@ -368,8 +371,12 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         setMessages(updatedMessages);
 
         try {
-            await addMessage(chatId, 'user', userMessage);
-            await generateResponse(updatedMessages);
+            const persistedUser = await addMessage(chatId, 'user', userMessage);
+            const persistedMessages = updatedMessages.map((m) =>
+                m.id === userMsg.id ? { ...m, id: persistedUser.id } : m
+            );
+            setMessages(persistedMessages);
+            await generateResponse(persistedMessages);
         } catch (error) {
             setIsLoading(false);
             console.error('Failed to send message:', error);
@@ -391,71 +398,108 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
     const handleEdit = useCallback(async (messageId: string, newContent: string) => {
         setIsLoading(true);
-        const msgIndex = messages.findIndex(m => m.id === messageId);
+        const localMessages = messages;
+        const msgIndex = localMessages.findIndex(m => m.id === messageId);
         if (msgIndex === -1) {
             setIsLoading(false);
             return;
         }
 
-        const previousMessages = messages.slice(0, msgIndex);
-        const messagesToDelete = (storedMessages ?? []).slice(msgIndex);
+        const anchorBeforeEditId = msgIndex > 0 ? localMessages[msgIndex - 1].id : null;
         try {
-            for (const msg of messagesToDelete) {
-                await deleteMessage(msg.id);
+            const canonicalMessages = await getThreadMessages(chatId);
+            const anchorDbIndex = anchorBeforeEditId
+                ? canonicalMessages.findIndex((m) => m.id === anchorBeforeEditId)
+                : -1;
+
+            const deleteStartIndex = anchorBeforeEditId ? anchorDbIndex + 1 : 0;
+            if (anchorBeforeEditId && anchorDbIndex === -1) {
+                setIsLoading(false);
+                showToast('Edit failed to align with saved history. Refresh and try again.', 'error');
+                return;
             }
 
-            const userMsg: ChatMessageType = {
-                id: crypto.randomUUID(),
-                role: 'user',
-                content: newContent
-            };
-            const updatedMessages = [...previousMessages, userMsg];
+            const deleteIds = canonicalMessages.slice(deleteStartIndex).map((m) => m.id);
+            await deleteMessagesByIds(deleteIds);
+
+            const persistedUser = await addMessage(chatId, 'user', newContent);
+
+            // Refetch canonical state after delete + insert so generation starts from DB truth.
+            const refreshedMessages = await getThreadMessages(chatId);
+            const updatedMessages: ChatMessageType[] = refreshedMessages.map((m) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                reasoning: m.reasoning,
+                model_id: m.model_id,
+            }));
 
             setMessages(updatedMessages);
-            await addMessage(chatId, 'user', newContent);
+            if (persistedUser.id) {
+                justAddedMessageIdRef.current = persistedUser.id;
+            }
 
             await generateResponse(updatedMessages);
         } catch (error) {
             setIsLoading(false);
             console.error('Failed to edit message:', error);
+            showToast('Failed to edit message history. Please try again.', 'error');
         }
-    }, [messages, storedMessages, chatId, generateResponse]);
+    }, [messages, chatId, showToast, generateResponse]);
 
     const handleRetry = useCallback(async (messageId: string) => {
         setIsLoading(true);
-        let msgIndex = messages.findIndex(m => m.id === messageId);
+        const localMessages = messages;
+        let msgIndex = localMessages.findIndex(m => m.id === messageId);
         if (msgIndex === -1) {
             setIsLoading(false);
             return;
         }
 
         // If retrying an assistant message, find the preceding user message
-        if (messages[msgIndex].role === 'assistant') {
-            msgIndex = messages.slice(0, msgIndex).findLastIndex(m => m.role === 'user');
+        if (localMessages[msgIndex].role === 'assistant') {
+            msgIndex = localMessages.slice(0, msgIndex).findLastIndex(m => m.role === 'user');
             if (msgIndex === -1) {
                 setIsLoading(false);
                 return;
             }
-        } else if (messages[msgIndex].role !== 'user') {
+        } else if (localMessages[msgIndex].role !== 'user') {
             setIsLoading(false);
             return;
         }
 
-        const previousMessages = messages.slice(0, msgIndex + 1); // Include the user message
-        const messagesToDelete = (storedMessages ?? []).slice(msgIndex + 1); // Delete responses after it
+        const anchorMessageId = localMessages[msgIndex].id;
 
         try {
-            for (const msg of messagesToDelete) {
-                await deleteMessage(msg.id);
+            const canonicalMessages = await getThreadMessages(chatId);
+            const anchorDbIndex = canonicalMessages.findIndex((m) => m.id === anchorMessageId);
+            if (anchorDbIndex === -1) {
+                setIsLoading(false);
+                showToast('Retry failed to align with saved history. Refresh and try again.', 'error');
+                return;
             }
+
+            const deleteIds = canonicalMessages.slice(anchorDbIndex + 1).map((m) => m.id);
+            await deleteMessagesByIds(deleteIds);
+
+            // Refetch canonical state after delete so we regenerate from DB truth.
+            const refreshedMessages = await getThreadMessages(chatId);
+            const previousMessages: ChatMessageType[] = refreshedMessages.map((m) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                reasoning: m.reasoning,
+                model_id: m.model_id,
+            }));
 
             setMessages(previousMessages);
             await generateResponse(previousMessages);
         } catch (error) {
             setIsLoading(false);
             console.error('Failed to retry message:', error);
+            showToast('Failed to delete previous responses. Please try again.', 'error');
         }
-    }, [messages, storedMessages, generateResponse]);
+    }, [messages, chatId, showToast, generateResponse]);
 
     return (
         <div className="flex flex-col h-full bg-[#1a1520]">
