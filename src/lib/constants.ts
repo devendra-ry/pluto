@@ -60,6 +60,22 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         capabilities: ['reasoning', 'effortControl'],
     },
     {
+        id: 'deepseek-ai/DeepSeek-R1-0528-TEE',
+        name: 'DeepSeek R1 0528 TEE',
+        description: 'DeepSeek R1 variant with TEE',
+        provider: 'deepseek-ai',
+        supportsReasoning: true,
+        capabilities: ['reasoning'],
+    },
+    {
+        id: 'deepseek-ai/DeepSeek-V3-0324-TEE',
+        name: 'DeepSeek V3 0324 TEE',
+        description: 'DeepSeek V3 variant with TEE',
+        provider: 'deepseek-ai',
+        supportsReasoning: false,
+        capabilities: [],
+    },
+    {
         id: 'openai/gpt-oss-120b-TEE',
         name: 'GPT-OSS 120B',
         description: 'Open source GPT 120B (toggle thinking)',
@@ -122,6 +138,15 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         capabilities: ['fast', 'reasoning', 'effortControl'],
     },
     {
+        id: 'zai-org/GLM-5-TEE',
+        name: 'GLM 5 TEE',
+        description: 'Latest GLM 5 with TEE security (toggle thinking)',
+        provider: 'zai-org',
+        supportsReasoning: true,
+        usesThinkingParam: true,
+        capabilities: ['reasoning', 'effortControl'],
+    },
+    {
         id: 'Qwen/Qwen3-Coder-Next',
         name: 'Qwen 3 Coder Next',
         description: 'Advanced coding model (Thinking)',
@@ -169,6 +194,14 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         provider: 'Qwen',
         supportsReasoning: false,
         capabilities: ['fast', 'toolCalling'],
+    },
+    {
+        id: 'Qwen/Qwen3-30B-A3B-Instruct-2507',
+        name: 'Qwen 3 30B Instruct',
+        description: 'Medium-sized Qwen 3 instruct model',
+        provider: 'Qwen',
+        supportsReasoning: false,
+        capabilities: ['toolCalling'],
     },
     {
         id: 'moonshotai/Kimi-K2-Thinking-TEE',
@@ -220,14 +253,6 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         provider: 'google',
         supportsReasoning: true,
         capabilities: ['reasoning', 'vision', 'fast'],
-    },
-    {
-        id: 'openrouter/pony-alpha',
-        name: 'Pony Alpha',
-        description: 'Advanced reasoning and creative model',
-        provider: 'openrouter',
-        supportsReasoning: true,
-        capabilities: ['reasoning'],
     },
     {
         id: 'stepfun/step-3.5-flash:free',
