@@ -11,6 +11,7 @@ export const runtime = 'edge';
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000;
 const DEFAULT_OUTPUT_RESERVE_TOKENS = 4096;
 const DEFAULT_SAFETY_MARGIN_TOKENS = 2048;
+const DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS = 65536;
 const MIN_INPUT_BUDGET_TOKENS = 2048;
 const CONTEXT_RETRY_SCALE = 0.7;
 const DEFAULT_LIMITS_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -60,6 +61,11 @@ function toPositiveInt(value: unknown): number | null {
         }
     }
     return null;
+}
+
+function resolveOutputTokenCap(maxOutputTokens: number | null | undefined) {
+    const parsed = toPositiveInt(maxOutputTokens);
+    return parsed ?? DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS;
 }
 
 function getCachedLimits(cacheKey: string): ResolvedModelLimits | null {
@@ -389,12 +395,12 @@ export async function POST(req: Request) {
 
                 const getSourceStream = async (contextMessages: ChatMessage[]) => {
                     if (modelConfig.provider === 'google') {
-                        return getGoogleStream(model, contextMessages, reasoningEffort ?? 'low', signal);
+                        return getGoogleStream(model, contextMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, signal);
                     }
                     if (modelConfig.provider === 'openrouter') {
-                        return getOpenRouterStream(model, contextMessages, reasoningEffort ?? 'low', signal);
+                        return getOpenRouterStream(model, contextMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, signal);
                     }
-                    return getChutesStream(model, contextMessages, reasoningEffort || 'low', modelConfig, signal);
+                    return getChutesStream(model, contextMessages, reasoningEffort || 'low', modelConfig, limits.maxOutputTokens, signal);
                 };
 
                 let sourceStream: ReadableStream;
@@ -453,7 +459,14 @@ export async function POST(req: Request) {
     });
 }
 
-async function getChutesStream(model: string, messages: ChatMessage[], reasoningEffort: ReasoningEffort = 'low', modelConfig: ModelConfig, signal?: AbortSignal) {
+async function getChutesStream(
+    model: string,
+    messages: ChatMessage[],
+    reasoningEffort: ReasoningEffort = 'low',
+    modelConfig: ModelConfig,
+    maxOutputTokens?: number | null,
+    signal?: AbortSignal
+) {
     const apiKey = process.env.CHUTES_API_KEY;
     if (!apiKey) throw new Error('Chutes API key missing');
 
@@ -463,7 +476,7 @@ async function getChutesStream(model: string, messages: ChatMessage[], reasoning
         stream: true,
         temperature: 1.0,
         top_p: 0.95,
-        max_tokens: 65536,
+        max_tokens: resolveOutputTokenCap(maxOutputTokens),
     };
 
     if (reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
@@ -488,7 +501,13 @@ async function getChutesStream(model: string, messages: ChatMessage[], reasoning
     return response.body as ReadableStream;
 }
 
-async function getGoogleStream(model: string, messages: ChatMessage[], reasoningEffort: ReasoningEffort = 'low', signal?: AbortSignal) {
+async function getGoogleStream(
+    model: string,
+    messages: ChatMessage[],
+    reasoningEffort: ReasoningEffort = 'low',
+    maxOutputTokens?: number | null,
+    signal?: AbortSignal
+) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error('Gemini API key missing');
 
@@ -505,7 +524,7 @@ async function getGoogleStream(model: string, messages: ChatMessage[], reasoning
             thinkingLevel?: ThinkingLevel;
             thinkingBudget?: number;
         };
-    } = { maxOutputTokens: 65536 };
+    } = { maxOutputTokens: resolveOutputTokenCap(maxOutputTokens) };
     const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
 
     if (modelConfig?.supportsReasoning && reasoningEffort) {
@@ -565,7 +584,13 @@ async function getGoogleStream(model: string, messages: ChatMessage[], reasoning
     });
 }
 
-async function getOpenRouterStream(model: string, messages: ChatMessage[], reasoningEffort: ReasoningEffort = 'low', signal?: AbortSignal) {
+async function getOpenRouterStream(
+    model: string,
+    messages: ChatMessage[],
+    reasoningEffort: ReasoningEffort = 'low',
+    maxOutputTokens?: number | null,
+    signal?: AbortSignal
+) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error('OpenRouter API key missing');
 
@@ -580,7 +605,7 @@ async function getOpenRouterStream(model: string, messages: ChatMessage[], reaso
             model,
             messages: messages.map(msg => ({ role: msg.role, content: msg.content })),
             stream: true,
-            maxTokens: 65536,
+            maxTokens: resolveOutputTokenCap(maxOutputTokens),
             reasoning: { effort: reasoningEffort }
         }
     });
