@@ -8,6 +8,317 @@ import { cookies } from 'next/headers';
 
 export const runtime = 'edge';
 
+const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000;
+const DEFAULT_OUTPUT_RESERVE_TOKENS = 4096;
+const DEFAULT_SAFETY_MARGIN_TOKENS = 2048;
+const MIN_INPUT_BUDGET_TOKENS = 2048;
+const CONTEXT_RETRY_SCALE = 0.7;
+const DEFAULT_LIMITS_CACHE_TTL_MS = 30 * 60 * 1000;
+
+type LimitsSource = 'google' | 'openrouter' | 'chutes' | 'fallback';
+
+interface ResolvedModelLimits {
+    contextWindowTokens: number;
+    maxOutputTokens: number | null;
+    source: LimitsSource;
+}
+
+interface CachedLimitsEntry {
+    value: ResolvedModelLimits;
+    expiresAt: number;
+}
+
+interface TrimmedContext {
+    messages: ChatMessage[];
+    trimmedCount: number;
+    estimatedTokens: number;
+    inputBudget: number;
+    contextWindow: number;
+    outputReserve: number;
+}
+
+const LIMITS_CACHE_TTL_MS = readPositiveInt(process.env.CHAT_LIMITS_CACHE_TTL_MS, DEFAULT_LIMITS_CACHE_TTL_MS);
+const limitsCache = new Map<string, CachedLimitsEntry>();
+
+function readPositiveInt(value: string | undefined, fallback: number) {
+    if (!value) return fallback;
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+    return parsed;
+}
+
+function toPositiveInt(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+        return Math.floor(value);
+    }
+    if (typeof value === 'string') {
+        const parsed = Number.parseInt(value, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return parsed;
+        }
+    }
+    return null;
+}
+
+function getCachedLimits(cacheKey: string): ResolvedModelLimits | null {
+    const cached = limitsCache.get(cacheKey);
+    if (!cached) return null;
+    if (cached.expiresAt <= Date.now()) {
+        limitsCache.delete(cacheKey);
+        return null;
+    }
+    return cached.value;
+}
+
+function setCachedLimits(cacheKey: string, value: ResolvedModelLimits) {
+    limitsCache.set(cacheKey, {
+        value,
+        expiresAt: Date.now() + LIMITS_CACHE_TTL_MS,
+    });
+}
+
+function getFallbackLimits(): ResolvedModelLimits {
+    return {
+        contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+        maxOutputTokens: null,
+        source: 'fallback',
+    };
+}
+
+async function resolveModelLimits(model: string, modelConfig: ModelConfig, signal?: AbortSignal): Promise<ResolvedModelLimits> {
+    const cacheKey = `${modelConfig.provider}:${model}`;
+    const cached = getCachedLimits(cacheKey);
+    if (cached) return cached;
+
+    let resolved: ResolvedModelLimits | null = null;
+    try {
+        if (modelConfig.provider === 'google') {
+            resolved = await resolveGoogleModelLimits(model, signal);
+        } else if (modelConfig.provider === 'openrouter') {
+            resolved = await resolveOpenRouterModelLimits(model, signal);
+        } else {
+            resolved = await resolveChutesModelLimits(model, signal);
+        }
+    } catch (error) {
+        console.warn(`[chat] failed to resolve provider limits for model=${model}`, error);
+    }
+
+    const finalLimits = resolved ?? getFallbackLimits();
+    setCachedLimits(cacheKey, finalLimits);
+    return finalLimits;
+}
+
+async function resolveGoogleModelLimits(model: string, signal?: AbortSignal): Promise<ResolvedModelLimits | null> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return null;
+
+    const modelId = model.startsWith('models/') ? model.slice('models/'.length) : model;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}?key=${encodeURIComponent(apiKey)}`;
+    const response = await fetch(url, { method: 'GET', signal });
+    if (!response.ok) return null;
+
+    const payload = await response.json() as Record<string, unknown>;
+    const contextWindowTokens = toPositiveInt(payload.inputTokenLimit);
+    if (!contextWindowTokens) return null;
+
+    return {
+        contextWindowTokens,
+        maxOutputTokens: toPositiveInt(payload.outputTokenLimit),
+        source: 'google',
+    };
+}
+
+async function resolveOpenRouterModelLimits(model: string, signal?: AbortSignal): Promise<ResolvedModelLimits | null> {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return null;
+
+    const response = await fetch('https://openrouter.ai/api/v1/models', {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+        },
+        signal,
+    });
+
+    if (!response.ok) return null;
+
+    const payload = await response.json() as Record<string, unknown>;
+    const data = payload.data;
+    if (!Array.isArray(data)) return null;
+
+    const modelEntry = data.find((item) => {
+        if (!item || typeof item !== 'object') return false;
+        const record = item as Record<string, unknown>;
+        return record.id === model;
+    }) as Record<string, unknown> | undefined;
+
+    if (!modelEntry) return null;
+
+    const topProvider = (modelEntry.top_provider && typeof modelEntry.top_provider === 'object')
+        ? modelEntry.top_provider as Record<string, unknown>
+        : null;
+
+    const contextWindowTokens =
+        toPositiveInt(modelEntry.context_length) ??
+        toPositiveInt(topProvider?.context_length);
+
+    if (!contextWindowTokens) return null;
+
+    return {
+        contextWindowTokens,
+        maxOutputTokens:
+            toPositiveInt(topProvider?.max_completion_tokens) ??
+            toPositiveInt(modelEntry.max_completion_tokens) ??
+            toPositiveInt(modelEntry.max_output_length),
+        source: 'openrouter',
+    };
+}
+
+async function resolveChutesModelLimits(model: string, signal?: AbortSignal): Promise<ResolvedModelLimits | null> {
+    const apiKey = process.env.CHUTES_API_KEY;
+    if (!apiKey) return null;
+
+    const response = await fetch('https://llm.chutes.ai/v1/models', {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+        },
+        signal,
+    });
+
+    if (!response.ok) return null;
+
+    const payload = await response.json() as Record<string, unknown>;
+    const data = payload.data;
+    if (!Array.isArray(data)) return null;
+
+    const modelEntry = data.find((item) => {
+        if (!item || typeof item !== 'object') return false;
+        const record = item as Record<string, unknown>;
+        return record.id === model;
+    }) as Record<string, unknown> | undefined;
+
+    if (!modelEntry) return null;
+
+    const contextWindowTokens =
+        toPositiveInt(modelEntry.context_length) ??
+        toPositiveInt(modelEntry.max_prompt_tokens) ??
+        toPositiveInt(modelEntry.input_token_limit);
+
+    if (!contextWindowTokens) return null;
+
+    return {
+        contextWindowTokens,
+        maxOutputTokens:
+            toPositiveInt(modelEntry.max_completion_tokens) ??
+            toPositiveInt(modelEntry.max_output_tokens) ??
+            toPositiveInt(modelEntry.output_token_limit) ??
+            toPositiveInt(modelEntry.max_output_length),
+        source: 'chutes',
+    };
+}
+
+function estimateMessageTokens(message: ChatMessage) {
+    // Simple, fast approximation for mixed text/markdown/code content.
+    return Math.ceil(message.content.length / 3.5) + 8;
+}
+
+function estimateConversationTokens(messages: ChatMessage[]) {
+    return messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
+}
+
+function findLastUserIndex(messages: ChatMessage[]) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') return i;
+    }
+    return -1;
+}
+
+function trimMessagesToInputBudget(
+    messages: ChatMessage[],
+    limits: ResolvedModelLimits,
+    budgetScale: number = 1
+): TrimmedContext {
+    const outputCeiling = limits.maxOutputTokens ?? DEFAULT_OUTPUT_RESERVE_TOKENS;
+    const outputReserve = Math.max(512, Math.min(DEFAULT_OUTPUT_RESERVE_TOKENS, outputCeiling));
+    const baseInputBudget = Math.max(
+        MIN_INPUT_BUDGET_TOKENS,
+        limits.contextWindowTokens - outputReserve - DEFAULT_SAFETY_MARGIN_TOKENS
+    );
+    const normalizedScale = Math.min(1, Math.max(0.2, budgetScale));
+    const inputBudget = Math.max(
+        MIN_INPUT_BUDGET_TOKENS,
+        Math.floor(baseInputBudget * normalizedScale)
+    );
+
+    if (messages.length === 0) {
+        return {
+            messages,
+            trimmedCount: 0,
+            estimatedTokens: 0,
+            inputBudget,
+            contextWindow: limits.contextWindowTokens,
+            outputReserve,
+        };
+    }
+
+    let usedTokens = 0;
+    let startIndex = messages.length;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const estimated = estimateMessageTokens(messages[i]);
+        if (usedTokens + estimated > inputBudget && startIndex < messages.length) {
+            break;
+        }
+        usedTokens += estimated;
+        startIndex = i;
+    }
+
+    let trimmedMessages = messages.slice(startIndex);
+    let estimatedTokens = usedTokens;
+
+    // Always retain at least one user turn for coherent continuation.
+    if (!trimmedMessages.some((message) => message.role === 'user')) {
+        const lastUserIndex = findLastUserIndex(messages);
+        if (lastUserIndex !== -1) {
+            trimmedMessages = messages.slice(lastUserIndex);
+            estimatedTokens = estimateConversationTokens(trimmedMessages);
+        } else {
+            trimmedMessages = [messages[messages.length - 1]];
+            estimatedTokens = estimateConversationTokens(trimmedMessages);
+        }
+    }
+
+    return {
+        messages: trimmedMessages,
+        trimmedCount: messages.length - trimmedMessages.length,
+        estimatedTokens,
+        inputBudget,
+        contextWindow: limits.contextWindowTokens,
+        outputReserve,
+    };
+}
+
+function isContextOverflowError(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    const normalized = message.toLowerCase();
+
+    const patterns = [
+        'context length',
+        'maximum context',
+        'max context',
+        'token limit',
+        'too many tokens',
+        'prompt is too long',
+        'input is too long',
+        'exceeds the maximum',
+        'context window',
+    ];
+
+    return patterns.some((pattern) => normalized.includes(pattern));
+}
+
 export async function POST(req: Request) {
     const cookieStore = await cookies();
     const supabase = createClient(cookieStore);
@@ -60,19 +371,54 @@ export async function POST(req: Request) {
                     return;
                 }
 
+                const limits = await resolveModelLimits(model, modelConfig, signal);
+                let trimmedContext = trimMessagesToInputBudget(messages, limits);
+                if (trimmedContext.trimmedCount > 0) {
+                    console.log(
+                        `[chat] context-trimmed model=${model} source=${limits.source} trimmed=${trimmedContext.trimmedCount} ` +
+                        `kept=${trimmedContext.messages.length} estTokens=${trimmedContext.estimatedTokens} ` +
+                        `inputBudget=${trimmedContext.inputBudget} outputReserve=${trimmedContext.outputReserve} ` +
+                        `window=${trimmedContext.contextWindow}`
+                    );
+                }
+
                 // Start heartbeat to keep connection alive while waiting for AI
                 heartbeatInterval = setInterval(() => {
                     safeEnqueue(controller, ': keep-alive\n\n');
                 }, 15000);
 
-                let sourceStream: ReadableStream;
+                const getSourceStream = async (contextMessages: ChatMessage[]) => {
+                    if (modelConfig.provider === 'google') {
+                        return getGoogleStream(model, contextMessages, reasoningEffort ?? 'low', signal);
+                    }
+                    if (modelConfig.provider === 'openrouter') {
+                        return getOpenRouterStream(model, contextMessages, reasoningEffort ?? 'low', signal);
+                    }
+                    return getChutesStream(model, contextMessages, reasoningEffort || 'low', modelConfig, signal);
+                };
 
-                if (modelConfig?.provider === 'google') {
-                    sourceStream = await getGoogleStream(model, messages, reasoningEffort ?? 'low', signal);
-                } else if (modelConfig?.provider === 'openrouter') {
-                    sourceStream = await getOpenRouterStream(model, messages, reasoningEffort ?? 'low', signal);
-                } else {
-                    sourceStream = await getChutesStream(model, messages, reasoningEffort || 'low', modelConfig, signal);
+                let sourceStream: ReadableStream;
+                try {
+                    sourceStream = await getSourceStream(trimmedContext.messages);
+                } catch (error) {
+                    const shouldRetry = isContextOverflowError(error);
+                    if (!shouldRetry || signal.aborted) {
+                        throw error;
+                    }
+
+                    const retryContext = trimMessagesToInputBudget(messages, limits, CONTEXT_RETRY_SCALE);
+                    const canTighten = retryContext.messages.length < trimmedContext.messages.length
+                        || retryContext.inputBudget < trimmedContext.inputBudget;
+                    if (!canTighten) {
+                        throw error;
+                    }
+
+                    console.warn(
+                        `[chat] context-overflow model=${model} source=${limits.source} retrying with tighter budget ` +
+                        `(inputBudget=${retryContext.inputBudget}, kept=${retryContext.messages.length})`
+                    );
+                    trimmedContext = retryContext;
+                    sourceStream = await getSourceStream(trimmedContext.messages);
                 }
 
                 // Clear heartbeat once we have the source stream
@@ -135,7 +481,10 @@ async function getChutesStream(model: string, messages: ChatMessage[], reasoning
         signal,
     });
 
-    if (!response.ok) throw new Error(`Chutes API error: ${response.statusText}`);
+    if (!response.ok) {
+        const responseText = await response.text().catch(() => '');
+        throw new Error(`Chutes API error ${response.status}: ${responseText || response.statusText}`);
+    }
     return response.body as ReadableStream;
 }
 
