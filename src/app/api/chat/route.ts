@@ -3,9 +3,23 @@ import { AVAILABLE_MODELS } from '@/lib/constants';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { OpenRouter } from '@openrouter/sdk';
 
+import { createClient } from '@/utils/supabase/server';
+import { cookies } from 'next/headers';
+
 export const runtime = 'edge';
 
 export async function POST(req: Request) {
+    const cookieStore = await cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+        });
+    }
+
     const encoder = new TextEncoder();
     const signal = req.signal;
 
