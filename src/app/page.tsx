@@ -4,7 +4,7 @@ import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES } from '@/lib/constants';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT } from '@/lib/constants';
 import { ChatLayout } from '@/components/chat-layout';
 import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
 import { type ReasoningEffort } from '@/lib/types';
@@ -23,7 +23,7 @@ export default function HomePage() {
   const router = useRouter();
   const chatInputRef = useRef<ChatInputHandle>(null);
   const [model, setModel] = useState(DEFAULT_MODEL);
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('low');
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSend = async (value: string) => {

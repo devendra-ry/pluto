@@ -8,7 +8,7 @@ import { type ReasoningEffort } from '@/lib/types';
 import { ChatLayout } from '@/components/chat-layout';
 import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort } from '@/hooks/use-threads';
 import { useMessages, addMessage, deleteMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES } from '@/lib/constants';
+import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { Wand2, BookOpen, Code, GraduationCap, ChevronDown, type LucideIcon } from 'lucide-react';
@@ -45,7 +45,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const [messages, setMessages] = useState<ChatMessageType[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isThinking, setIsThinking] = useState(false);
-    const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('low');
+    const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
     const [isAtBottom, setIsAtBottom] = useState(true);
     const hasInitialized = useRef(false);
     const abortControllerRef = useRef<AbortController | null>(null);
@@ -127,7 +127,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         setIsLoading(false);
         setIsThinking(false);
         generatingRef.current = null;
-        setReasoningEffort('low');
+        setReasoningEffort(DEFAULT_REASONING_EFFORT);
         setIsAtBottom(true);
     }, [chatId]);
 

@@ -321,6 +321,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
 ];
 
 export const DEFAULT_MODEL = 'moonshotai/Kimi-K2.5-TEE';
+export const DEFAULT_REASONING_EFFORT = 'high';
 
 export type ModelId = string;
 
