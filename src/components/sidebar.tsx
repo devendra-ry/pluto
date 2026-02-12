@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo, memo, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
     Plus,
     PanelLeftClose,
@@ -18,7 +17,7 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/utils/supabase/client';
 import { type User as SupabaseUser } from '@supabase/supabase-js';
-import { List } from 'react-window';
+import { List, type RowComponentProps } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useThreads, deleteThread, toggleThreadPin, cleanupEmptyThreads } from '@/hooks/use-threads';
@@ -34,20 +33,22 @@ interface SidebarProps {
     initialUser: SupabaseUser | null;
 }
 
-interface SidebarRowProps {
-    index: number;
-    style: React.CSSProperties;
-    virtualItems: ({ type: 'header'; label: string } | { type: 'thread'; data: Thread })[];
+type VirtualItem = { type: 'header'; label: string } | { type: 'thread'; data: Thread };
+
+interface SidebarRowData {
+    virtualItems: VirtualItem[];
     renderThreadItem: (thread: Thread) => React.ReactNode;
 }
 
-const SidebarRow = memo(({ index, style, virtualItems, renderThreadItem }: any) => {
+type SidebarRowProps = RowComponentProps<SidebarRowData>;
+
+function SidebarRow({ index, style, ariaAttributes, virtualItems, renderThreadItem }: SidebarRowProps) {
     const item = virtualItems?.[index];
-    if (!item) return <div style={style} />;
+    if (!item) return <div style={style} {...ariaAttributes} />;
 
     if (item.type === 'header') {
         return (
-            <div style={style}>
+            <div style={style} {...ariaAttributes}>
                 <h3 className="text-sm font-semibold text-pink-500/90 px-4 py-2 mt-4 mb-1 first:mt-0">
                     {item.label}
                 </h3>
@@ -56,16 +57,19 @@ const SidebarRow = memo(({ index, style, virtualItems, renderThreadItem }: any) 
     }
 
     return (
-        <div style={style} className="px-2 space-y-0.5">
+        <div style={style} className="px-2 space-y-0.5" {...ariaAttributes}>
             {renderThreadItem(item.data)}
         </div>
     );
-}) as any;
-
-SidebarRow.displayName = 'SidebarRow';
+}
 
 const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: SidebarProps) {
-    const [isCollapsed, setIsCollapsed] = useState(false);
+    const [desktopCollapsed, setDesktopCollapsed] = useState(() => {
+        if (typeof window === 'undefined') return false;
+        return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+    });
+    const [mobileOpen, setMobileOpen] = useState(false);
+    const isCollapsed = isMobileSize ? !mobileOpen : desktopCollapsed;
 
     const [searchQuery, setSearchQuery] = useState('');
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -83,32 +87,18 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         return () => subscription.unsubscribe();
     }, [supabase]);
 
-    // Load collapsed state on mount
-    useEffect(() => {
-        const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
-        if (saved !== null) {
-            setIsCollapsed(saved === 'true');
-        }
-    }, []);
     const pinnedThreads = useMemo(() => threads.filter(t => t.is_pinned), [threads]);
     const unpinnedThreads = useMemo(() => threads.filter(t => !t.is_pinned), [threads]);
     const groupedThreads = useMemo(() => groupThreadsByDate(unpinnedThreads), [unpinnedThreads]);
     const pathname = usePathname();
     const router = useRouter();
 
-    // Clear collapsed state on mobile or small screens
+    // Persist desktop collapsed state.
     useEffect(() => {
-        if (isMobileSize) {
-            setIsCollapsed(true);
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(desktopCollapsed));
         }
-    }, [isMobileSize]);
-
-    // Persist collapsed state to localStorage (only if not on mobile)
-    useEffect(() => {
-        if (!isMobileSize) {
-            localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(isCollapsed));
-        }
-    }, [isCollapsed, isMobileSize]);
+    }, [desktopCollapsed]);
 
 
     // Cleanup empty threads on mount
@@ -130,7 +120,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
 
     // Flatten filtered threads and headers into items for virtualization
     const virtualItems = useMemo(() => {
-        const items: (({ type: 'header'; label: string } | { type: 'thread'; data: Thread }))[] = [];
+        const items: VirtualItem[] = [];
 
         if (filteredPinned.length > 0) {
             items.push({ type: 'header', label: 'Pinned' });
@@ -145,11 +135,21 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         return items;
     }, [filteredPinned, filteredGroups]);
 
-    const getRowHeight = (index: number) => {
-        const item = virtualItems[index];
-        if (item.type === 'header') return 36; // Header height
-        return 42; // Thread item height
-    };
+    const collapseSidebar = useCallback(() => {
+        if (isMobileSize) {
+            setMobileOpen(false);
+        } else {
+            setDesktopCollapsed(true);
+        }
+    }, [isMobileSize]);
+
+    const expandSidebar = useCallback(() => {
+        if (isMobileSize) {
+            setMobileOpen(true);
+        } else {
+            setDesktopCollapsed(false);
+        }
+    }, [isMobileSize]);
 
     const handleNewChat = useCallback(() => {
         router.push('/');
@@ -181,7 +181,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         } catch (err) {
             console.error('[Sidebar] Error in handleDeleteConfirm:', err);
         }
-    }, [pathname, router, deleteThread, refreshThreads]);
+    }, [pathname, router, refreshThreads]);
 
     const handleDeleteCancel = useCallback((e: React.MouseEvent) => {
         try {
@@ -204,7 +204,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         } catch (err) {
             console.error('[Sidebar] Error in handleTogglePin:', err);
         }
-    }, [toggleThreadPin, refreshThreads]);
+    }, [refreshThreads]);
 
 
     const renderThreadItem = useCallback((thread: Thread) => {
@@ -302,7 +302,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         );
     }, [pathname, deleteConfirm, handleDeleteConfirm, handleDeleteCancel, handleTogglePin, handleDeleteClick]);
 
-    const rowProps = useMemo(() => ({
+    const rowProps = useMemo<SidebarRowData>(() => ({
         virtualItems,
         renderThreadItem
     }), [virtualItems, renderThreadItem]);
@@ -316,7 +316,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        onClick={() => setIsCollapsed(true)}
+                        onClick={collapseSidebar}
                         className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30"
                     />
                 )}
@@ -354,7 +354,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => setIsCollapsed(true)}
+                            onClick={collapseSidebar}
                             className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f]"
                         >
                             <PanelLeftClose className="h-5 w-5" />
@@ -405,7 +405,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                                                 rowHeight={42}
                                                 className="scrollbar-none"
                                                 rowComponent={SidebarRow}
-                                                rowProps={rowProps as any}
+                                                rowProps={rowProps}
                                                 style={{ height: height || 400, width: width || 260 }}
                                             />
                                         )}
@@ -459,7 +459,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => setIsCollapsed(false)}
+                            onClick={expandSidebar}
                             className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f] transition-all rounded-lg"
                         >
                             <PanelLeft className="h-5 w-5" />
@@ -470,7 +470,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => setIsCollapsed(false)}
+                            onClick={expandSidebar}
                             className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f] transition-all rounded-lg"
                         >
                             <Search className="h-5 w-5" />

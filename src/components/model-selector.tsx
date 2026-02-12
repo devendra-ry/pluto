@@ -1,7 +1,7 @@
 'use client';
 
 import { Minimax, Qwen, Zhipu, NousResearch, Gemini, OpenRouter, OpenAI, Kimi, DeepSeek } from '@lobehub/icons';
-import { useState, useEffect, useMemo, memo } from 'react';
+import { useState, useMemo, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -75,20 +75,20 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
     const [activeFilters, setActiveFilters] = useState<Capability[]>([]);
     const [showLegacy, setShowLegacy] = useState(false);
     const [showFilterMenu, setShowFilterMenu] = useState(false);
-    const [starredModelIds, setStarredModelIds] = useState<string[]>([]);
+    const [starredModelIds, setStarredModelIds] = useState<string[]>(() => {
+        if (typeof window === 'undefined') return [];
+        const saved = window.localStorage.getItem('starred-models');
+        if (!saved) return [];
 
-    // Load favorites from local storage
-    useEffect(() => {
-        const saved = localStorage.getItem('starred-models');
-        if (saved) {
-            try {
-                setStarredModelIds(JSON.parse(saved));
-            } catch (e) {
-                console.error('Failed to parse starred models', e);
-            }
+        try {
+            const parsed: unknown = JSON.parse(saved);
+            if (!Array.isArray(parsed)) return [];
+            return parsed.filter((item): item is string => typeof item === 'string');
+        } catch (error) {
+            console.error('Failed to parse starred models', error);
+            return [];
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    });
 
     // Save favorites to local storage
     const toggleStarred = (e: React.MouseEvent, modelId: string) => {

@@ -2,7 +2,6 @@
 
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
-import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -242,7 +241,7 @@ export const ChatMessage = memo(function ChatMessage({
                                                     [&_.katex]:text-[15px]
                                                 ">
                                                     <ReactMarkdown
-                                                        rehypePlugins={[rehypeHighlight, rehypeRaw, rehypeKatex]}
+                                                        rehypePlugins={[rehypeHighlight, rehypeKatex]}
                                                         remarkPlugins={[remarkGfm, remarkMath]}
                                                     >
                                                         {preprocessLaTeX(reasoning)}
@@ -279,7 +278,7 @@ export const ChatMessage = memo(function ChatMessage({
                             [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden
                         ">
                             <ReactMarkdown
-                                rehypePlugins={[rehypeHighlight, rehypeRaw, rehypeKatex]}
+                                rehypePlugins={[rehypeHighlight, rehypeKatex]}
                                 remarkPlugins={[remarkGfm, remarkMath]}
                                 components={{
                                     pre: ({ children }) => (

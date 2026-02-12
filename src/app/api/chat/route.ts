@@ -1,5 +1,5 @@
-import { ChatRequestSchema, ChatMessage } from '@/lib/types';
-import { AVAILABLE_MODELS } from '@/lib/constants';
+import { ChatRequestSchema, ChatMessage, type ReasoningEffort } from '@/lib/types';
+import { AVAILABLE_MODELS, type ModelConfig } from '@/lib/constants';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { OpenRouter } from '@openrouter/sdk';
 
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
             if (signal.aborted) return;
             const encoded = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
             controller.enqueue(encoded);
-        } catch (e) {
+        } catch {
             // Ignore closed controller errors
         }
     };
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     // Create the stream first so we can return the Response immediately
     const stream = new ReadableStream({
         async start(controller) {
-            let heartbeatInterval: any;
+            let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
 
             if (signal.aborted) return;
 
@@ -54,6 +54,11 @@ export async function POST(req: Request) {
 
                 const { messages, model, reasoningEffort } = parseResult.data;
                 const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
+                if (!modelConfig) {
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid model selection' })}\n\n`);
+                    controller.close();
+                    return;
+                }
 
                 // Start heartbeat to keep connection alive while waiting for AI
                 heartbeatInterval = setInterval(() => {
@@ -63,9 +68,9 @@ export async function POST(req: Request) {
                 let sourceStream: ReadableStream;
 
                 if (modelConfig?.provider === 'google') {
-                    sourceStream = await getGoogleStream(model, messages, reasoningEffort, signal);
+                    sourceStream = await getGoogleStream(model, messages, reasoningEffort ?? 'low', signal);
                 } else if (modelConfig?.provider === 'openrouter') {
-                    sourceStream = await getOpenRouterStream(model, messages, reasoningEffort, signal);
+                    sourceStream = await getOpenRouterStream(model, messages, reasoningEffort ?? 'low', signal);
                 } else {
                     sourceStream = await getChutesStream(model, messages, reasoningEffort || 'low', modelConfig, signal);
                 }
@@ -87,7 +92,7 @@ export async function POST(req: Request) {
                     console.error('Chat API error:', error);
                     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'AI service error', details: errorMsg })}\n\n`);
-                    try { controller.close(); } catch (e) { }
+                    try { controller.close(); } catch { }
                 }
             }
         }
@@ -102,7 +107,10 @@ export async function POST(req: Request) {
     });
 }
 
-async function getChutesStream(model: string, messages: ChatMessage[], reasoningEffort: string = 'low', modelConfig: any, signal?: AbortSignal) {
+async function getChutesStream(model: string, messages: ChatMessage[], reasoningEffort: ReasoningEffort = 'low', modelConfig: ModelConfig, signal?: AbortSignal) {
+    const apiKey = process.env.CHUTES_API_KEY;
+    if (!apiKey) throw new Error('Chutes API key missing');
+
     const requestBody: Record<string, unknown> = {
         model,
         messages,
@@ -121,7 +129,7 @@ async function getChutesStream(model: string, messages: ChatMessage[], reasoning
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.CHUTES_API_KEY}`,
+            'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify(requestBody),
         signal,
@@ -131,7 +139,7 @@ async function getChutesStream(model: string, messages: ChatMessage[], reasoning
     return response.body as ReadableStream;
 }
 
-async function getGoogleStream(model: string, messages: ChatMessage[], reasoningEffort: string = 'low', signal?: AbortSignal) {
+async function getGoogleStream(model: string, messages: ChatMessage[], reasoningEffort: ReasoningEffort = 'low', signal?: AbortSignal) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error('Gemini API key missing');
 
@@ -141,7 +149,14 @@ async function getGoogleStream(model: string, messages: ChatMessage[], reasoning
         parts: [{ text: msg.content }]
     }));
 
-    const config: any = { maxOutputTokens: 65536 };
+    const config: {
+        maxOutputTokens: number;
+        thinkingConfig?: {
+            includeThoughts: boolean;
+            thinkingLevel?: ThinkingLevel;
+            thinkingBudget?: number;
+        };
+    } = { maxOutputTokens: 65536 };
     const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
 
     if (modelConfig?.supportsReasoning && reasoningEffort) {
@@ -201,10 +216,12 @@ async function getGoogleStream(model: string, messages: ChatMessage[], reasoning
     });
 }
 
-async function getOpenRouterStream(model: string, messages: ChatMessage[], reasoningEffort: string = 'low', signal?: AbortSignal) {
+async function getOpenRouterStream(model: string, messages: ChatMessage[], reasoningEffort: ReasoningEffort = 'low', signal?: AbortSignal) {
     const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) throw new Error('OpenRouter API key missing');
+
     const openRouter = new OpenRouter({
-        apiKey: apiKey || '',
+        apiKey,
         httpReferer: process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000",
         xTitle: "Pluto Chat",
     });
@@ -215,7 +232,7 @@ async function getOpenRouterStream(model: string, messages: ChatMessage[], reaso
             messages: messages.map(msg => ({ role: msg.role, content: msg.content })),
             stream: true,
             maxTokens: 65536,
-            reasoning: { effort: reasoningEffort as any }
+            reasoning: { effort: reasoningEffort }
         }
     });
 
@@ -270,7 +287,7 @@ async function processAndTransformStream(sourceStream: ReadableStream, controlle
             if (signal?.aborted) return;
             const encoded = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
             controller.enqueue(encoded);
-        } catch (e) { }
+        } catch { }
     };
 
     try {
@@ -354,7 +371,7 @@ async function processAndTransformStream(sourceStream: ReadableStream, controlle
                         // Pass through non-content chunks (reasoning, metadata)
                         safeEnqueue(`data: ${dataStr}\n\n`);
                     }
-                } catch (e) {
+                } catch {
                     safeEnqueue(line + '\n');
                 }
             }

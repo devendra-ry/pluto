@@ -23,11 +23,8 @@ export function useThreads() {
     // Use useState to ensure client is created once and stable
     const [supabase] = useState(() => createClient());
 
-    const fetchThreads = async () => {
+    const refreshThreads = async () => {
         try {
-            // Check auth state
-            const { data: { user } } = await supabase.auth.getUser();
-
             const { data, error } = await supabase
                 .from('threads')
                 .select('*')
@@ -42,19 +39,41 @@ export function useThreads() {
                 setThreads(data);
             }
         } catch (err) {
-            console.error('[useThreads] Unexpected error in fetchThreads:', err);
+            console.error('[useThreads] Unexpected error in refreshThreads:', err);
         }
     };
 
     useEffect(() => {
-        fetchThreads();
+        let isActive = true;
+
+        const fetchThreads = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('threads')
+                    .select('*')
+                    .order('updated_at', { ascending: false });
+
+                if (error) {
+                    console.error('[useThreads] Error fetching threads:', error);
+                    return;
+                }
+
+                if (data && isActive) {
+                    setThreads(data);
+                }
+            } catch (err) {
+                console.error('[useThreads] Unexpected error in fetchThreads:', err);
+            }
+        };
+
+        void fetchThreads();
 
         // 1. Realtime subscription
         const channel = supabase
             .channel('threads_changes')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'threads' }, (payload) => {
                 console.log('[useThreads] Realtime change detected:', payload);
-                fetchThreads();
+                void fetchThreads();
             })
             .subscribe((status) => {
                 if (status === 'CHANNEL_ERROR') {
@@ -67,17 +86,18 @@ export function useThreads() {
         // 2. Local CustomEvent sync for immediate updates
         const handleRefresh = () => {
             console.log('[useThreads] Refresh event received');
-            fetchThreads();
+            void fetchThreads();
         };
         window.addEventListener(REFRESH_THREADS_EVENT, handleRefresh);
 
         return () => {
+            isActive = false;
             supabase.removeChannel(channel);
             window.removeEventListener(REFRESH_THREADS_EVENT, handleRefresh);
         };
     }, [supabase]);
 
-    return { threads, refreshThreads: fetchThreads };
+    return { threads, refreshThreads };
 }
 
 // Get a single thread by ID

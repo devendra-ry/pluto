@@ -5,7 +5,6 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { ChatMessage } from '@/components/chat-message';
 import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
 import { type ReasoningEffort } from '@/lib/types';
-import { ChatLayout } from '@/components/chat-layout';
 import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort } from '@/hooks/use-threads';
 import { useMessages, addMessage, deleteMessage } from '@/hooks/use-messages';
 import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT } from '@/lib/constants';
@@ -210,6 +209,16 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         const decoder = new TextDecoder();
         let fullContent = '';
         let fullReasoning = '';
+        const persistAssistantMessage = async () => {
+            if (!fullContent && !fullReasoning) {
+                return false;
+            }
+
+            const newMsg = await addMessage(chatId, 'assistant', fullContent, fullReasoning, model);
+            justAddedMessageIdRef.current = newMsg.id;
+            await touchThread(chatId);
+            return true;
+        };
 
         try {
             const response = await fetch('/api/chat', {
@@ -296,18 +305,18 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 }
             }
 
-            const newMsg = await addMessage(chatId, 'assistant', fullContent, fullReasoning, model);
-            justAddedMessageIdRef.current = newMsg.id;
-            await touchThread(chatId);
+            const persisted = await persistAssistantMessage();
+            if (!persisted) {
+                setMessages(currentMessages);
+                lastRequestFailed.current = true;
+                showToast('No response returned. Please try again.', 'error');
+            }
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
                 // User stopped
                 // If we have some content, save it so we don't lose the partial response
-                if (fullContent || fullReasoning) {
-                    const newMsg = await addMessage(chatId, 'assistant', fullContent, fullReasoning, model);
-                    justAddedMessageIdRef.current = newMsg.id;
-                    await touchThread(chatId);
-                } else {
+                const persisted = await persistAssistantMessage();
+                if (!persisted) {
                     // If no content handling yet, mark as failed so we don't loop retry
                     lastRequestFailed.current = true;
                     // Also revert messages to remove empty bubble if needed, 

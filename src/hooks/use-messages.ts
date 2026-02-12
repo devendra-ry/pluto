@@ -15,14 +15,15 @@ export interface Message {
 
 // Get all messages for a thread
 export function useMessages(threadId: string | null) {
-    const [messages, setMessages] = useState<Message[] | null>(null);
-    const supabase = createClient();
+    const [messages, setMessages] = useState<Message[] | null>(() => (threadId ? null : []));
+    const [supabase] = useState(() => createClient());
 
     useEffect(() => {
         if (!threadId) {
-            setMessages([]);
             return;
         }
+
+        let isActive = true;
 
         const fetchMessages = async () => {
             const { data } = await supabase
@@ -30,7 +31,9 @@ export function useMessages(threadId: string | null) {
                 .select('*')
                 .eq('thread_id', threadId)
                 .order('created_at', { ascending: true });
-            if (data) setMessages(data);
+            if (data && isActive) {
+                setMessages(data);
+            }
         };
 
         fetchMessages();
@@ -49,11 +52,12 @@ export function useMessages(threadId: string | null) {
             .subscribe();
 
         return () => {
+            isActive = false;
             supabase.removeChannel(channel);
         };
     }, [threadId, supabase]);
 
-    return messages;
+    return threadId ? messages : [];
 }
 
 // Add a new message to a thread

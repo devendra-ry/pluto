@@ -5,11 +5,14 @@ import { useRouter } from 'next/navigation';
 import { createThread } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
 import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT } from '@/lib/constants';
-import { ChatLayout } from '@/components/chat-layout';
 import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
 import { type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Wand2, BookOpen, Code, GraduationCap, type LucideIcon } from 'lucide-react';
+
+function toErrorRecord(error: unknown): Record<string, unknown> {
+  return (typeof error === 'object' && error !== null) ? (error as Record<string, unknown>) : {};
+}
 
 // Map icon names to components
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -40,13 +43,18 @@ export default function HomePage() {
       // 3. Navigate to the new chat
       // The ChatPageClient will pick up the user message and start generating
       router.push(`/c/${thread.id}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to create chat:', error);
+      const errorRecord = toErrorRecord(error);
 
-      const errorMessage = error?.message || error?.error_description || String(error);
-      const errorDetails = error?.details || '';
-      const errorHint = error?.hint || '';
-      const errorStack = error?.stack || '';
+      const errorMessage = typeof errorRecord.message === 'string'
+        ? errorRecord.message
+        : typeof errorRecord.error_description === 'string'
+          ? errorRecord.error_description
+          : String(error);
+      const errorDetails = typeof errorRecord.details === 'string' ? errorRecord.details : '';
+      const errorHint = typeof errorRecord.hint === 'string' ? errorRecord.hint : '';
+      const errorStack = typeof errorRecord.stack === 'string' ? errorRecord.stack : '';
 
       console.error('--- ERROR DEBUG START ---');
       console.error('Message:', errorMessage);
@@ -55,11 +63,11 @@ export default function HomePage() {
       console.error('Stack:', errorStack);
       console.error('Raw Error Object:', error);
       try {
-        console.error('Internal Properties:', Object.getOwnPropertyNames(error).reduce((acc: any, key) => {
-          acc[key] = error[key];
+        console.error('Internal Properties:', Object.getOwnPropertyNames(errorRecord).reduce<Record<string, unknown>>((acc, key) => {
+          acc[key] = errorRecord[key];
           return acc;
         }, {}));
-      } catch (e) {
+      } catch {
         console.error('Could not log internal properties');
       }
       console.error('--- ERROR DEBUG END ---');
