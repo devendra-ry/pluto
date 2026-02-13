@@ -72,9 +72,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
     const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
-    const isChutesBackedModel = selectedModel.provider !== 'google' && selectedModel.provider !== 'openrouter';
     const supportsImages = selectedModel.capabilities.includes('vision');
-    const supportsPdfs = selectedModel.capabilities.includes('pdf') || selectedModel.provider === 'google' || isChutesBackedModel;
+    const supportsPdfs = selectedModel.capabilities.includes('pdf') || selectedModel.provider === 'google';
     const supportsAttachments = supportsImages || supportsPdfs;
     const acceptedMimeTypes = supportsImages && supportsPdfs
         ? 'image/png,image/jpeg,image/webp,image/gif,application/pdf'
