@@ -17,6 +17,43 @@ export interface Thread {
 }
 
 export const REFRESH_THREADS_EVENT = 'pluto:refresh_threads';
+const THREAD_SELECT_COLUMNS = 'id,title,model,reasoning_effort,system_prompt,is_pinned,created_at,updated_at,user_id';
+
+function sortThreadsByUpdatedAt(threads: Thread[]) {
+    return [...threads].sort((a, b) => {
+        const byUpdatedAt = b.updated_at.localeCompare(a.updated_at);
+        if (byUpdatedAt !== 0) return byUpdatedAt;
+        return b.id.localeCompare(a.id);
+    });
+}
+
+function toThread(value: unknown): Thread | null {
+    if (!value || typeof value !== 'object') return null;
+    const record = value as Record<string, unknown>;
+    if (
+        typeof record.id !== 'string' ||
+        typeof record.title !== 'string' ||
+        typeof record.model !== 'string' ||
+        typeof record.created_at !== 'string' ||
+        typeof record.updated_at !== 'string'
+    ) {
+        return null;
+    }
+
+    return {
+        id: record.id,
+        title: record.title,
+        model: record.model,
+        reasoning_effort: typeof record.reasoning_effort === 'string'
+            ? record.reasoning_effort as ReasoningEffort
+            : undefined,
+        system_prompt: typeof record.system_prompt === 'string' ? record.system_prompt : null,
+        is_pinned: typeof record.is_pinned === 'boolean' ? record.is_pinned : undefined,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        user_id: typeof record.user_id === 'string' ? record.user_id : undefined,
+    };
+}
 
 // Get all threads sorted by most recent
 export function useThreads() {
@@ -28,7 +65,7 @@ export function useThreads() {
         try {
             const { data, error } = await supabase
                 .from('threads')
-                .select('*')
+                .select(THREAD_SELECT_COLUMNS)
                 .order('updated_at', { ascending: false });
 
             if (error) {
@@ -37,7 +74,7 @@ export function useThreads() {
             }
 
             if (data) {
-                setThreads(data);
+                setThreads(data as Thread[]);
             }
         } catch (err) {
             console.error('[useThreads] Unexpected error in refreshThreads:', err);
@@ -51,7 +88,7 @@ export function useThreads() {
             try {
                 const { data, error } = await supabase
                     .from('threads')
-                    .select('*')
+                    .select(THREAD_SELECT_COLUMNS)
                     .order('updated_at', { ascending: false });
 
                 if (error) {
@@ -60,7 +97,7 @@ export function useThreads() {
                 }
 
                 if (data && isActive) {
-                    setThreads(data);
+                    setThreads(data as Thread[]);
                 }
             } catch (err) {
                 console.error('[useThreads] Unexpected error in fetchThreads:', err);
@@ -73,20 +110,37 @@ export function useThreads() {
         const channel = supabase
             .channel('threads_changes')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'threads' }, (payload) => {
-                console.log('[useThreads] Realtime change detected:', payload);
-                void fetchThreads();
+                if (!isActive) return;
+
+                if (payload.eventType === 'DELETE') {
+                    const deletedId = typeof payload.old?.id === 'string' ? payload.old.id : null;
+                    if (!deletedId) return;
+                    setThreads((prev) => prev.filter((thread) => thread.id !== deletedId));
+                    return;
+                }
+
+                const nextThread = toThread(payload.new);
+                if (!nextThread) return;
+
+                setThreads((prev) => {
+                    const existingIndex = prev.findIndex((thread) => thread.id === nextThread.id);
+                    if (existingIndex === -1) {
+                        return sortThreadsByUpdatedAt([...prev, nextThread]);
+                    }
+
+                    const updated = [...prev];
+                    updated[existingIndex] = nextThread;
+                    return sortThreadsByUpdatedAt(updated);
+                });
             })
             .subscribe((status) => {
                 if (status === 'CHANNEL_ERROR') {
                     console.error('[useThreads] Realtime channel error');
-                } else {
-                    console.log('[useThreads] Realtime subscription status:', status);
                 }
             });
 
         // 2. Local CustomEvent sync for immediate updates
         const handleRefresh = () => {
-            console.log('[useThreads] Refresh event received');
             void fetchThreads();
         };
         window.addEventListener(REFRESH_THREADS_EVENT, handleRefresh);
@@ -111,7 +165,7 @@ export function useThread(id: string | null) {
         const fetchThread = async () => {
             const { data } = await supabase
                 .from('threads')
-                .select('*')
+                .select(THREAD_SELECT_COLUMNS)
                 .eq('id', id)
                 .single();
             if (data) setThread(data);

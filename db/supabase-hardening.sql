@@ -141,8 +141,17 @@ using (
 create index if not exists messages_thread_created_idx
   on public.messages (thread_id, created_at);
 
+create index if not exists messages_thread_created_id_desc_idx
+  on public.messages (thread_id, created_at desc, id desc);
+
+create index if not exists messages_created_id_desc_idx
+  on public.messages (created_at desc, id desc);
+
 create index if not exists threads_user_updated_idx
   on public.threads (user_id, updated_at desc);
 
 create index if not exists threads_user_pinned_updated_idx
   on public.threads (user_id, is_pinned, updated_at desc);
+
+-- 5) Refresh planner statistics after index changes.
+analyze public.messages;
