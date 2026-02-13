@@ -13,7 +13,7 @@ import { AVAILABLE_MODELS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { ModelSelector } from '@/components/model-selector';
-import { MAX_ATTACHMENTS_PER_MESSAGE, isSupportedAttachmentMimeType } from '@/lib/attachments';
+import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment, isPdfAttachment, isSupportedAttachmentMimeType } from '@/lib/attachments';
 import { startUploadFileForThread } from '@/lib/uploads';
 
 export interface ChatInputHandle {
@@ -72,7 +72,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
     const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
-    const supportsAttachments = selectedModel.capabilities.includes('vision') || selectedModel.capabilities.includes('pdf');
+    const isChutesBackedModel = selectedModel.provider !== 'google' && selectedModel.provider !== 'openrouter';
+    const supportsImages = selectedModel.capabilities.includes('vision');
+    const supportsPdfs = selectedModel.capabilities.includes('pdf') || selectedModel.provider === 'google' || isChutesBackedModel;
+    const supportsAttachments = supportsImages || supportsPdfs;
+    const acceptedMimeTypes = supportsImages && supportsPdfs
+        ? 'image/png,image/jpeg,image/webp,image/gif,application/pdf'
+        : supportsImages
+            ? 'image/png,image/jpeg,image/webp,image/gif'
+            : supportsPdfs
+                ? 'application/pdf'
+                : '';
 
     const uploadedAttachments = useMemo(
         () => attachmentItems.filter((item) => item.status === 'uploaded' && item.attachment).map((item) => item.attachment as Attachment),
@@ -232,13 +242,21 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
         const nextItems: LocalAttachmentItem[] = selectedFiles.map((file) => {
             const localId = crypto.randomUUID();
-            if (!isSupportedAttachmentMimeType(file.type)) {
+            const mimeType = file.type || '';
+            const isKnownType = isSupportedAttachmentMimeType(mimeType);
+            const isAllowedType =
+                (isImageAttachment(mimeType) && supportsImages) ||
+                (isPdfAttachment(mimeType) && supportsPdfs);
+
+            if (!isKnownType || !isAllowedType) {
                 return {
                     localId,
                     file,
                     status: 'failed',
                     progress: 0,
-                    error: 'Unsupported file type',
+                    error: supportsImages
+                        ? 'Unsupported file type for this model'
+                        : 'This model only supports PDF attachments',
                 };
             }
             return {
@@ -289,7 +307,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         type="file"
                         className="hidden"
                         multiple
-                        accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+                        accept={acceptedMimeTypes}
                         onChange={handleFileChange}
                     />
 
@@ -448,7 +466,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                         <span className="text-[#fce7ef]">
                                             {supportsAttachments
                                                 ? 'Attach file'
-                                                : 'Use a vision-capable model to attach files'}
+                                                : 'Use an attachment-capable model to attach files'}
                                         </span>
                                     </div>
                                 </div>

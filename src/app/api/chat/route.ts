@@ -358,7 +358,8 @@ function supportsImageInputs(modelConfig: ModelConfig) {
 }
 
 function supportsPdfInputs(modelConfig: ModelConfig) {
-    return modelConfig.capabilities.includes('pdf') || modelConfig.provider === 'google';
+    const isChutesBackedModel = modelConfig.provider !== 'google' && modelConfig.provider !== 'openrouter';
+    return modelConfig.capabilities.includes('pdf') || modelConfig.provider === 'google' || isChutesBackedModel;
 }
 
 function toBase64(bytes: Uint8Array) {
