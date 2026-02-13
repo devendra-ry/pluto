@@ -61,8 +61,6 @@ const REASONING_OPTIONS: { value: ReasoningEffort; label: string; pro?: boolean 
     { value: 'medium', label: 'Medium' },
     { value: 'high', label: 'High' },
 ];
-const TEXTAREA_BOTTOM_PADDING = 96;
-const TEXTAREA_BOTTOM_PADDING_WITH_ATTACHMENTS = 176;
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     initialValue = '',
@@ -350,19 +348,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         onChange={handleChange}
                         onKeyDown={handleKeyDown}
                         placeholder={isImageMode ? 'Describe the image you want to generate...' : 'Type your message here...'}
-                        className="w-full px-5 pt-4 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
-                        style={{
-                            paddingBottom: `${activeAttachmentItems.length > 0
-                                ? TEXTAREA_BOTTOM_PADDING_WITH_ATTACHMENTS
-                                : TEXTAREA_BOTTOM_PADDING}px`,
-                            scrollPaddingBottom: `${activeAttachmentItems.length > 0
-                                ? TEXTAREA_BOTTOM_PADDING_WITH_ATTACHMENTS
-                                : TEXTAREA_BOTTOM_PADDING}px`,
-                        }}
+                        className="w-full px-5 pt-4 pb-3 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
                     />
 
                     {activeAttachmentItems.length > 0 && (
-                        <div className="absolute left-3 right-3 bottom-12 flex flex-col gap-2 pointer-events-auto">
+                        <div className="px-3 pb-2 flex flex-col gap-2">
                             <div className="max-h-24 overflow-y-auto pr-1 space-y-2">
                                 {activeAttachmentItems.map((item) => (
                                     <div
@@ -429,7 +419,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         </div>
                     )}
 
-                    <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 md:px-4 pb-3">
+                    <div className="flex items-center justify-between px-3 md:px-4 pb-3 pt-1">
                         <div className="flex items-center gap-1.5 md:gap-3">
                             <ModelSelector
                                 currentModel={currentModel}
