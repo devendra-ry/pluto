@@ -61,6 +61,8 @@ const REASONING_OPTIONS: { value: ReasoningEffort; label: string; pro?: boolean 
     { value: 'medium', label: 'Medium' },
     { value: 'high', label: 'High' },
 ];
+const TEXTAREA_BOTTOM_PADDING = 96;
+const TEXTAREA_BOTTOM_PADDING_WITH_ATTACHMENTS = 176;
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     initialValue = '',
@@ -348,10 +350,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         onChange={handleChange}
                         onKeyDown={handleKeyDown}
                         placeholder={isImageMode ? 'Describe the image you want to generate...' : 'Type your message here...'}
-                        className={cn(
-                            "w-full px-5 pt-4 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-base leading-relaxed",
-                            activeAttachmentItems.length > 0 ? "pb-40" : "pb-14"
-                        )}
+                        className="w-full px-5 pt-4 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
+                        style={{
+                            paddingBottom: `${activeAttachmentItems.length > 0
+                                ? TEXTAREA_BOTTOM_PADDING_WITH_ATTACHMENTS
+                                : TEXTAREA_BOTTOM_PADDING}px`,
+                            scrollPaddingBottom: `${activeAttachmentItems.length > 0
+                                ? TEXTAREA_BOTTOM_PADDING_WITH_ATTACHMENTS
+                                : TEXTAREA_BOTTOM_PADDING}px`,
+                        }}
                     />
 
                     {activeAttachmentItems.length > 0 && (
