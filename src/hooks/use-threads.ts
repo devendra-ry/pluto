@@ -9,6 +9,7 @@ export interface Thread {
     title: string;
     model: string;
     reasoning_effort?: ReasoningEffort;
+    system_prompt?: string | null;
     is_pinned?: boolean;
     created_at: string;
     updated_at: string;
@@ -128,7 +129,7 @@ const triggerRefresh = () => {
 };
 
 // Create a new thread
-export async function createThread(model: string, reasoningEffort?: ReasoningEffort): Promise<Thread> {
+export async function createThread(model: string, reasoningEffort?: ReasoningEffort, systemPrompt?: string | null): Promise<Thread> {
     const supabase = createClient();
 
     const { data: authData, error: authError } = await supabase.auth.getUser();
@@ -146,6 +147,7 @@ export async function createThread(model: string, reasoningEffort?: ReasoningEff
         title: 'New Chat',
         model,
         reasoning_effort: reasoningEffort,
+        system_prompt: (systemPrompt && systemPrompt.trim().length > 0) ? systemPrompt.trim() : null,
         user_id: user.id
     };
 
@@ -191,6 +193,18 @@ export async function updateReasoningEffort(id: string, effort: ReasoningEffort)
     const { error } = await supabase
         .from('threads')
         .update({ reasoning_effort: effort, updated_at: new Date().toISOString() })
+        .eq('id', id);
+
+    if (!error) triggerRefresh();
+}
+
+// Update thread system prompt/lore
+export async function updateThreadSystemPrompt(id: string, systemPrompt: string | null) {
+    const supabase = createClient();
+    const normalized = systemPrompt && systemPrompt.trim().length > 0 ? systemPrompt.trim() : null;
+    const { error } = await supabase
+        .from('threads')
+        .update({ system_prompt: normalized, updated_at: new Date().toISOString() })
         .eq('id', id);
 
     if (!error) triggerRefresh();

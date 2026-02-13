@@ -2,9 +2,9 @@
 
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { createThread } from '@/hooks/use-threads';
+import { createThread, updateThreadSystemPrompt } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_THREAD_KEY } from '@/lib/constants';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY } from '@/lib/constants';
 import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -27,6 +27,7 @@ export default function HomePage() {
   const chatInputRef = useRef<ChatInputHandle>(null);
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
+  const [systemPrompt, setSystemPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [draftThreadId, setDraftThreadId] = useState<string | null>(null);
 
@@ -35,9 +36,16 @@ export default function HomePage() {
       return draftThreadId;
     }
 
-    const thread = await createThread(model, reasoningEffort);
+    const thread = await createThread(model, reasoningEffort, systemPrompt);
     setDraftThreadId(thread.id);
     return thread.id;
+  };
+
+  const handleSystemPromptChange = async (nextPrompt: string) => {
+    setSystemPrompt(nextPrompt);
+    if (draftThreadId) {
+      await updateThreadSystemPrompt(draftThreadId, nextPrompt);
+    }
   };
 
   const handleSend = async (
@@ -64,6 +72,11 @@ export default function HomePage() {
         window.sessionStorage.setItem(PENDING_GENERATION_MODEL_KEY, targetModel);
       } else {
         window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
+      }
+      if (systemPrompt.trim().length > 0 && !isImageMode) {
+        window.sessionStorage.setItem(PENDING_SYSTEM_PROMPT_KEY, systemPrompt.trim());
+      } else {
+        window.sessionStorage.removeItem(PENDING_SYSTEM_PROMPT_KEY);
       }
       router.push(`/c/${threadId}`);
       return true;
@@ -179,6 +192,8 @@ export default function HomePage() {
         onModelChange={setModel}
         reasoningEffort={reasoningEffort}
         onReasoningEffortChange={setReasoningEffort}
+        systemPrompt={systemPrompt}
+        onSystemPromptChange={handleSystemPromptChange}
       />
     </div>
   );

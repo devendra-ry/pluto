@@ -497,8 +497,8 @@ function buildGoogleContents(messages: PreparedChatMessage[]) {
     });
 }
 
-function buildOpenAICompatibleMessages(messages: PreparedChatMessage[]) {
-    return messages.map((message) => {
+function buildOpenAICompatibleMessages(messages: PreparedChatMessage[], systemPrompt?: string) {
+    const prepared = messages.map((message) => {
         if (message.attachments.length === 0) {
             return {
                 role: message.role,
@@ -543,6 +543,14 @@ function buildOpenAICompatibleMessages(messages: PreparedChatMessage[]) {
             content: contentParts,
         };
     });
+
+    if (systemPrompt && systemPrompt.trim().length > 0) {
+        return [
+            { role: 'system', content: systemPrompt.trim() },
+            ...prepared,
+        ];
+    }
+    return prepared;
 }
 
 export async function POST(req: Request) {
@@ -589,13 +597,14 @@ export async function POST(req: Request) {
                     return;
                 }
 
-                const { messages, model, reasoningEffort } = parseResult.data;
+                const { messages, model, reasoningEffort, systemPrompt } = parseResult.data;
                 const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
                 if (!modelConfig) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid model selection' })}\n\n`);
                     controller.close();
                     return;
                 }
+                const normalizedSystemPrompt = systemPrompt?.trim() ?? '';
                 if (modelConfig.capabilities.includes('imageGen')) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Selected model is image-generation only. Use image generation flow.' })}\n\n`);
                     controller.close();
@@ -627,12 +636,12 @@ export async function POST(req: Request) {
                         signal
                     );
                     if (modelConfig.provider === 'google') {
-                        return getGoogleStream(model, preparedMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, signal);
+                        return getGoogleStream(model, preparedMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, normalizedSystemPrompt, signal);
                     }
                     if (modelConfig.provider === 'openrouter') {
-                        return getOpenRouterStream(model, preparedMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, signal);
+                        return getOpenRouterStream(model, preparedMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, normalizedSystemPrompt, signal);
                     }
-                    return getChutesStream(model, preparedMessages, reasoningEffort || 'low', modelConfig, limits.maxOutputTokens, signal);
+                    return getChutesStream(model, preparedMessages, reasoningEffort || 'low', modelConfig, limits.maxOutputTokens, normalizedSystemPrompt, signal);
                 };
 
                 let sourceStream: ReadableStream;
@@ -697,6 +706,7 @@ async function getChutesStream(
     reasoningEffort: ReasoningEffort = 'low',
     modelConfig: ModelConfig,
     maxOutputTokens?: number | null,
+    systemPrompt?: string,
     signal?: AbortSignal
 ) {
     const apiKey = process.env.CHUTES_API_KEY;
@@ -704,7 +714,7 @@ async function getChutesStream(
 
     const requestBody: Record<string, unknown> = {
         model,
-        messages: buildOpenAICompatibleMessages(messages),
+        messages: buildOpenAICompatibleMessages(messages, systemPrompt),
         stream: true,
         temperature: 1.0,
         top_p: 0.95,
@@ -738,6 +748,7 @@ async function getGoogleStream(
     messages: PreparedChatMessage[],
     reasoningEffort: ReasoningEffort = 'low',
     maxOutputTokens?: number | null,
+    systemPrompt?: string,
     signal?: AbortSignal
 ) {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -745,6 +756,15 @@ async function getGoogleStream(
 
     const ai = new GoogleGenAI({ apiKey });
     const contents = buildGoogleContents(messages);
+    const effectiveContents = systemPrompt && systemPrompt.trim().length > 0
+        ? [
+            {
+                role: 'user',
+                parts: [{ text: `System instruction:\n${systemPrompt.trim()}` }],
+            },
+            ...contents,
+        ]
+        : contents;
 
     const config: {
         maxOutputTokens: number;
@@ -774,7 +794,7 @@ async function getGoogleStream(
         }
     }
 
-    const response = await ai.models.generateContentStream({ model, config, contents });
+    const response = await ai.models.generateContentStream({ model, config, contents: effectiveContents });
 
     const encoder = new TextEncoder();
     return new ReadableStream({
@@ -818,6 +838,7 @@ async function getOpenRouterStream(
     messages: PreparedChatMessage[],
     reasoningEffort: ReasoningEffort = 'low',
     maxOutputTokens?: number | null,
+    systemPrompt?: string,
     signal?: AbortSignal
 ) {
     const apiKey = process.env.OPENROUTER_API_KEY;
@@ -832,7 +853,7 @@ async function getOpenRouterStream(
         },
         body: JSON.stringify({
             model,
-            messages: buildOpenAICompatibleMessages(messages),
+            messages: buildOpenAICompatibleMessages(messages, systemPrompt),
             stream: true,
             max_tokens: resolveOutputTokenCap(maxOutputTokens),
             reasoning: { effort: reasoningEffort },

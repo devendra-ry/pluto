@@ -326,6 +326,7 @@ export const DEFAULT_REASONING_EFFORT = 'high';
 export const IMAGE_GENERATION_MODEL = 'zai-org/z-image-turbo';
 export const PENDING_GENERATION_THREAD_KEY = 'pending-generation-thread-id';
 export const PENDING_GENERATION_MODEL_KEY = 'pending-generation-model-id';
+export const PENDING_SYSTEM_PROMPT_KEY = 'pending-system-prompt';
 
 export type ModelId = string;
 

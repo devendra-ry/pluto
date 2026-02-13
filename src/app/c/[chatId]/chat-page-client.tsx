@@ -5,9 +5,9 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { ChatMessage } from '@/components/chat-message';
 import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
-import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort } from '@/hooks/use-threads';
+import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort, updateThreadSystemPrompt } from '@/hooks/use-threads';
 import { useMessages, addMessage, deleteMessagesByIds, getThreadMessages } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_THREAD_KEY } from '@/lib/constants';
+import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { Wand2, BookOpen, Code, GraduationCap, ChevronDown, type LucideIcon } from 'lucide-react';
@@ -66,6 +66,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [isThinking, setIsThinking] = useState(false);
     const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
+    const [systemPrompt, setSystemPrompt] = useState('');
     const [isAtBottom, setIsAtBottom] = useState(true);
     const hasInitialized = useRef(false);
     const abortControllerRef = useRef<AbortController | null>(null);
@@ -82,6 +83,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (thread?.reasoning_effort) {
             setReasoningEffort(thread.reasoning_effort);
         }
+        setSystemPrompt(thread?.system_prompt ?? '');
     }, [thread]);
 
     useEffect(() => {
@@ -152,6 +154,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         setIsThinking(false);
         generatingRef.current = null;
         setReasoningEffort(DEFAULT_REASONING_EFFORT);
+        setSystemPrompt('');
         setIsAtBottom(true);
     }, [chatId]);
 
@@ -182,6 +185,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         await updateReasoningEffort(chatId, effort);
     };
 
+    const handleSystemPromptChange = async (nextPrompt: string) => {
+        setSystemPrompt(nextPrompt);
+        await updateThreadSystemPrompt(chatId, nextPrompt);
+    };
+
     const handleStop = useCallback(() => {
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
@@ -189,7 +197,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
     }, []);
 
-    const generateResponse = useCallback(async (currentMessages: ChatMessageType[], forcedModelId?: string) => {
+    const generateResponse = useCallback(async (currentMessages: ChatMessageType[], forcedModelId?: string, forcedSystemPrompt?: string) => {
         const lastMsg = currentMessages[currentMessages.length - 1];
         if (!lastMsg || lastMsg.role !== 'user') return;
         if (generatingRef.current === lastMsg.id) return;
@@ -305,6 +313,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             }
 
             const decoder = new TextDecoder();
+            const effectiveSystemPrompt = (forcedSystemPrompt ?? systemPrompt).trim();
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -316,6 +325,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     })),
                     model: activeModelId,
                     reasoningEffort,
+                    systemPrompt: !isImageGenModel && effectiveSystemPrompt ? effectiveSystemPrompt : undefined,
                 }),
                 signal: abortControllerRef.current.signal,
             });
@@ -427,7 +437,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             generatingRef.current = null;
             abortControllerRef.current = null;
         }
-    }, [chatId, model, reasoningEffort, thread, showToast]);
+    }, [chatId, model, reasoningEffort, systemPrompt, thread, showToast]);
 
     // Check for pending user message on load (e.g. new chat from home)
     useEffect(() => {
@@ -443,13 +453,15 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     return;
                 }
                 const pendingGenerationModelId = window.sessionStorage.getItem(PENDING_GENERATION_MODEL_KEY);
+                const pendingSystemPrompt = window.sessionStorage.getItem(PENDING_SYSTEM_PROMPT_KEY);
                 window.sessionStorage.removeItem(PENDING_GENERATION_THREAD_KEY);
                 window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
+                window.sessionStorage.removeItem(PENDING_SYSTEM_PROMPT_KEY);
                 if (pendingGenerationModelId === IMAGE_GENERATION_MODEL) {
                     generateResponse(messages, IMAGE_GENERATION_MODEL);
                     return;
                 }
-                generateResponse(messages);
+                generateResponse(messages, undefined, pendingSystemPrompt || undefined);
             }
         }
     }, [messages, isLoading, isThinking, generateResponse, chatId]);
@@ -726,6 +738,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 onModelChange={handleModelChange}
                 reasoningEffort={reasoningEffort}
                 onReasoningEffortChange={handleReasoningEffortChange}
+                systemPrompt={systemPrompt}
+                onSystemPromptChange={handleSystemPromptChange}
             />
         </div>
     );

@@ -8,7 +8,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle, ImagePlus } from 'lucide-react';
+import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle, ImagePlus, ScrollText } from 'lucide-react';
 import { AVAILABLE_MODELS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
@@ -54,6 +54,8 @@ interface ChatInputProps {
     onModelChange: (model: string) => void;
     reasoningEffort: ReasoningEffort;
     onReasoningEffortChange: (effort: ReasoningEffort) => void;
+    systemPrompt?: string;
+    onSystemPromptChange?: (prompt: string) => Promise<void> | void;
 }
 
 const REASONING_OPTIONS: { value: ReasoningEffort; label: string; pro?: boolean }[] = [
@@ -74,12 +76,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     onModelChange,
     reasoningEffort,
     onReasoningEffortChange,
+    systemPrompt = '',
+    onSystemPromptChange,
 }, ref) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const uploadTasksRef = useRef<Map<string, () => void>>(new Map());
     const [value, setValue] = useState(initialValue);
     const [isImageMode, setIsImageMode] = useState(false);
+    const [isSystemMenuOpen, setIsSystemMenuOpen] = useState(false);
+    const [systemPromptDraft, setSystemPromptDraft] = useState(systemPrompt);
+    const [isSavingSystemPrompt, setIsSavingSystemPrompt] = useState(false);
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
     const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
@@ -104,6 +111,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     );
     const hasUploadingAttachments = activeAttachmentItems.some((item) => item.status === 'uploading');
     const hasFailedAttachments = activeAttachmentItems.some((item) => item.status === 'failed');
+    const hasSystemPrompt = systemPrompt.trim().length > 0;
 
     useImperativeHandle(ref, () => ({
         setValue: (newValue: string) => {
@@ -134,6 +142,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             tasks.clear();
         };
     }, []);
+
+    useEffect(() => {
+        setSystemPromptDraft(systemPrompt);
+    }, [systemPrompt]);
 
     const updateItem = useCallback((localId: string, updater: (item: LocalAttachmentItem) => LocalAttachmentItem) => {
         setAttachmentItems((prev) => prev.map((item) => (item.localId === localId ? updater(item) : item)));
@@ -259,6 +271,35 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const handleAttachClick = () => {
         if (isLoading || !supportsAttachments) return;
         fileInputRef.current?.click();
+    };
+
+    const handleSaveSystemPrompt = async () => {
+        if (!onSystemPromptChange) {
+            setIsSystemMenuOpen(false);
+            return;
+        }
+        setIsSavingSystemPrompt(true);
+        try {
+            await onSystemPromptChange(systemPromptDraft);
+            setIsSystemMenuOpen(false);
+        } finally {
+            setIsSavingSystemPrompt(false);
+        }
+    };
+
+    const handleClearSystemPrompt = async () => {
+        setSystemPromptDraft('');
+        if (!onSystemPromptChange) {
+            setIsSystemMenuOpen(false);
+            return;
+        }
+        setIsSavingSystemPrompt(true);
+        try {
+            await onSystemPromptChange('');
+            setIsSystemMenuOpen(false);
+        } finally {
+            setIsSavingSystemPrompt(false);
+        }
     };
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -477,6 +518,64 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 <Globe className="h-3.5 w-3.5 md:h-4 md:w-4" />
                                 <span className="hidden md:inline">Search</span>
                             </Button>
+
+                            <DropdownMenu open={isSystemMenuOpen} onOpenChange={setIsSystemMenuOpen}>
+                                <DropdownMenuTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        type="button"
+                                        className={cn(
+                                            "h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
+                                            hasSystemPrompt
+                                                ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
+                                                : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
+                                        )}
+                                    >
+                                        <ScrollText className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                                        <span className="hidden md:inline">System</span>
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent
+                                    align="start"
+                                    side="top"
+                                    className="w-[min(90vw,420px)] p-3 bg-[#1a1520] border-[#3a3045] shadow-2xl mb-2"
+                                    onCloseAutoFocus={(e) => e.preventDefault()}
+                                >
+                                    <div className="space-y-2">
+                                        <p className="text-xs text-zinc-300 font-semibold tracking-tight">
+                                            System Prompt (chat only)
+                                        </p>
+                                        <textarea
+                                            value={systemPromptDraft}
+                                            onChange={(e) => setSystemPromptDraft(e.target.value)}
+                                            placeholder="Set behavior, rules, or lore for this thread..."
+                                            className="w-full min-h-[120px] max-h-[260px] resize-y rounded-xl bg-[#120f18] border border-[#3a3045]/70 p-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-[#7a58a3]/70"
+                                        />
+                                        <p className="text-[11px] text-zinc-500">
+                                            Applied to chat responses only. Ignored in Image mode.
+                                        </p>
+                                        <div className="flex items-center justify-end gap-2">
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => void handleClearSystemPrompt()}
+                                                disabled={isSavingSystemPrompt || (!hasSystemPrompt && systemPromptDraft.length === 0)}
+                                                className="h-8 px-3 text-zinc-300 hover:text-zinc-100 hover:bg-[#2a2535]"
+                                            >
+                                                Clear
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                onClick={() => void handleSaveSystemPrompt()}
+                                                disabled={isSavingSystemPrompt}
+                                                className="h-8 px-3 bg-[#3a283e] hover:bg-[#4a354e] text-pink-200"
+                                            >
+                                                Save
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
 
                             <Button
                                 variant="ghost"
