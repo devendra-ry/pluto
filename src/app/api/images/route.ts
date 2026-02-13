@@ -1,8 +1,7 @@
-import { cookies } from 'next/headers';
-
 import { DEFAULT_ATTACHMENTS_BUCKET } from '@/lib/attachments';
 import { IMAGE_GENERATION_MODEL } from '@/lib/constants';
 import { type Attachment } from '@/lib/types';
+import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { createClient } from '@/utils/supabase/server';
 
 export const runtime = 'nodejs';
@@ -189,12 +188,19 @@ interface GeneratedImage {
 }
 
 export async function POST(req: Request) {
-    const cookieStore = await cookies();
-    const supabase = createClient(cookieStore);
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        return jsonResponse({ error: 'Unauthorized' }, 401);
+    let supabase: ReturnType<typeof createClient>;
+    let user: Awaited<ReturnType<typeof requireUser>>['user'];
+    try {
+        assertValidPostOrigin(req);
+        const auth = await requireUser();
+        supabase = auth.supabase;
+        user = auth.user;
+    } catch (error) {
+        const response = toJsonErrorResponse(error);
+        if (response) {
+            return response;
+        }
+        return jsonResponse({ error: 'Internal server error' }, 500);
     }
 
     const body = await req.json().catch(() => null);

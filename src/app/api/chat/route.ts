@@ -3,7 +3,7 @@ import { AVAILABLE_MODELS, type ModelConfig } from '@/lib/constants';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 import { createClient } from '@/utils/supabase/server';
-import { cookies } from 'next/headers';
+import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import {
     DEFAULT_ATTACHMENTS_BUCKET,
     MAX_ATTACHMENTS_PER_MESSAGE,
@@ -554,13 +554,20 @@ function buildOpenAICompatibleMessages(messages: PreparedChatMessage[], systemPr
 }
 
 export async function POST(req: Request) {
-    const cookieStore = await cookies();
-    const supabase = createClient(cookieStore);
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-            status: 401,
+    let supabase: ReturnType<typeof createClient>;
+    let user: Awaited<ReturnType<typeof requireUser>>['user'];
+    try {
+        assertValidPostOrigin(req);
+        const auth = await requireUser();
+        supabase = auth.supabase;
+        user = auth.user;
+    } catch (error) {
+        const response = toJsonErrorResponse(error);
+        if (response) {
+            return response;
+        }
+        return new Response(JSON.stringify({ error: 'Internal server error' }), {
+            status: 500,
             headers: { 'Content-Type': 'application/json' },
         });
     }

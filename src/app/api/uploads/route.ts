@@ -1,11 +1,11 @@
 import { createClient } from '@/utils/supabase/server';
-import { cookies } from 'next/headers';
 import {
     DEFAULT_ATTACHMENTS_BUCKET,
     MAX_ATTACHMENT_BYTES,
     isSupportedAttachmentMimeType,
 } from '@/lib/attachments';
 import { type Attachment } from '@/lib/types';
+import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 
 export const runtime = 'nodejs';
 
@@ -55,12 +55,19 @@ function jsonResponse(payload: Record<string, unknown>, status: number = 200) {
 }
 
 export async function POST(req: Request) {
-    const cookieStore = await cookies();
-    const supabase = createClient(cookieStore);
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        return jsonResponse({ error: 'Unauthorized' }, 401);
+    let supabase: ReturnType<typeof createClient>;
+    let user: Awaited<ReturnType<typeof requireUser>>['user'];
+    try {
+        assertValidPostOrigin(req);
+        const auth = await requireUser();
+        supabase = auth.supabase;
+        user = auth.user;
+    } catch (error) {
+        const response = toJsonErrorResponse(error);
+        if (response) {
+            return response;
+        }
+        return jsonResponse({ error: 'Internal server error' }, 500);
     }
 
     const formData = await req.formData();
@@ -128,11 +135,17 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
-    const cookieStore = await cookies();
-    const supabase = createClient(cookieStore);
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
+    let supabase: ReturnType<typeof createClient>;
+    let user: Awaited<ReturnType<typeof requireUser>>['user'];
+    try {
+        const auth = await requireUser();
+        supabase = auth.supabase;
+        user = auth.user;
+    } catch (error) {
+        const response = toJsonErrorResponse(error);
+        if (response) {
+            return response;
+        }
         return new Response('Unauthorized', { status: 401 });
     }
 
