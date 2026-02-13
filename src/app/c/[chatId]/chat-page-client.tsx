@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { ChatMessage } from '@/components/chat-message';
-import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
+import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort } from '@/hooks/use-threads';
 import { useMessages, addMessage, deleteMessagesByIds, getThreadMessages } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT } from '@/lib/constants';
+import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { Wand2, BookOpen, Code, GraduationCap, ChevronDown, type LucideIcon } from 'lucide-react';
@@ -24,6 +24,19 @@ interface ChatMessageType {
     attachments?: Attachment[];
     reasoning?: string;
     model_id?: string;
+}
+
+function isAttachment(value: unknown): value is Attachment {
+    if (!value || typeof value !== 'object') return false;
+    const record = value as Record<string, unknown>;
+    return (
+        typeof record.id === 'string' &&
+        typeof record.name === 'string' &&
+        typeof record.mimeType === 'string' &&
+        typeof record.size === 'number' &&
+        typeof record.path === 'string' &&
+        typeof record.url === 'string'
+    );
 }
 
 // Regex to fix markdown headings without space after #
@@ -167,36 +180,33 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
     }, []);
 
-    const generateResponse = useCallback(async (currentMessages: ChatMessageType[]) => {
+    const generateResponse = useCallback(async (currentMessages: ChatMessageType[], forcedModelId?: string) => {
         const lastMsg = currentMessages[currentMessages.length - 1];
+        if (!lastMsg || lastMsg.role !== 'user') return;
         if (generatingRef.current === lastMsg.id) return;
         generatingRef.current = lastMsg.id;
 
-        // Check if model supports reasoning
-        const selectedModel = AVAILABLE_MODELS.find(m => m.id === model);
+        const activeModelId = forcedModelId || model;
+        const selectedModel = AVAILABLE_MODELS.find(m => m.id === activeModelId);
         const supportsReasoning = selectedModel?.supportsReasoning ?? true;
+        const isImageGenModel = selectedModel?.capabilities.includes('imageGen') ?? false;
 
-        // For models that use thinking param (like Kimi), disable thinking UI when reasoning is low
         const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && reasoningEffort === 'low');
 
-        // Create assistant message immediately so loading indicator shows
         const assistantMsgId = crypto.randomUUID();
         const assistantMsg: ChatMessageType = {
             id: assistantMsgId,
             role: 'assistant',
             content: '',
             reasoning: '',
-            model_id: model,
+            model_id: activeModelId,
         };
         setMessages(prev => [...prev, assistantMsg]);
 
-        // Only set isThinking for models that will actually think
-        setIsThinking(willThink);
+        setIsThinking(!isImageGenModel && willThink);
         setIsLoading(true);
         abortControllerRef.current = new AbortController();
 
-        // Update title if it's a new chat and we have at least one message
-        // Use async check to handle cases where thread hook hasn't loaded yet
         const updateTitleIfNeeded = async () => {
             const currentThread = thread;
             if (currentThread?.title === 'New Chat' && currentMessages.length > 0) {
@@ -209,17 +219,20 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 }
             }
         };
-        updateTitleIfNeeded();
+        void updateTitleIfNeeded();
 
-        const decoder = new TextDecoder();
         let fullContent = '';
         let fullReasoning = '';
-        const persistAssistantMessage = async () => {
-            if (!fullContent && !fullReasoning) {
+        const persistAssistantMessage = async (
+            content: string,
+            reasoning?: string,
+            attachments: Attachment[] = []
+        ) => {
+            if (!content && !reasoning && attachments.length === 0) {
                 return false;
             }
 
-            const newMsg = await addMessage(chatId, 'assistant', fullContent, fullReasoning, model);
+            const newMsg = await addMessage(chatId, 'assistant', content, reasoning, activeModelId, attachments);
             setMessages(prev =>
                 prev.map((m) => (m.id === assistantMsgId ? { ...m, id: newMsg.id } : m))
             );
@@ -229,6 +242,61 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         };
 
         try {
+            if (isImageGenModel) {
+                const response = await fetch('/api/images', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        threadId: chatId,
+                        model: activeModelId,
+                        prompt: lastMsg.content,
+                    }),
+                    signal: abortControllerRef.current.signal,
+                });
+
+                const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+                if (!response.ok) {
+                    const errorMessage =
+                        typeof payload.error === 'string'
+                            ? payload.error
+                            : 'Failed to generate image';
+                    throw new Error(errorMessage);
+                }
+
+                const attachment = isAttachment(payload.attachment) ? payload.attachment : null;
+                if (!attachment) {
+                    throw new Error('Image generation did not return a valid attachment');
+                }
+
+                const revisedPrompt = typeof payload.revisedPrompt === 'string'
+                    ? payload.revisedPrompt.trim()
+                    : '';
+                const assistantContent = revisedPrompt
+                    ? `Generated image.\nPrompt rewrite: ${revisedPrompt}`
+                    : 'Generated image.';
+
+                setMessages((prev) => {
+                    const updated = [...prev];
+                    const msgIdx = updated.findIndex(m => m.id === assistantMsgId);
+                    if (msgIdx !== -1) {
+                        updated[msgIdx] = {
+                            ...updated[msgIdx],
+                            content: assistantContent,
+                            attachments: [attachment],
+                            model_id: activeModelId,
+                        };
+                    }
+                    return updated;
+                });
+
+                const persisted = await persistAssistantMessage(assistantContent, undefined, [attachment]);
+                if (!persisted) {
+                    throw new Error('Failed to persist generated image');
+                }
+                return;
+            }
+
+            const decoder = new TextDecoder();
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -238,7 +306,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                         content: m.content,
                         attachments: m.attachments ?? [],
                     })),
-                    model,
+                    model: activeModelId,
                     reasoningEffort,
                 }),
                 signal: abortControllerRef.current.signal,
@@ -280,7 +348,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                             updated[msgIdx] = {
                                                 ...updated[msgIdx],
                                                 reasoning: fullReasoning,
-                                                model_id: model,
+                                                model_id: activeModelId,
                                             };
                                         }
                                         return updated;
@@ -303,7 +371,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                                 ...updated[msgIdx],
                                                 content: fullContent,
                                                 reasoning: fullReasoning,
-                                                model_id: model,
+                                                model_id: activeModelId,
                                             };
                                         }
                                         return updated;
@@ -317,7 +385,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 }
             }
 
-            const persisted = await persistAssistantMessage();
+            const persisted = await persistAssistantMessage(fullContent, fullReasoning);
             if (!persisted) {
                 setMessages(currentMessages);
                 lastRequestFailed.current = true;
@@ -325,14 +393,13 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             }
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
-                // User stopped
-                // If we have some content, save it so we don't lose the partial response
-                const persisted = await persistAssistantMessage();
+                if (isImageGenModel) {
+                    setMessages(currentMessages);
+                    return;
+                }
+                const persisted = await persistAssistantMessage(fullContent, fullReasoning);
                 if (!persisted) {
-                    // If no content handling yet, mark as failed so we don't loop retry
                     lastRequestFailed.current = true;
-                    // Also revert messages to remove empty bubble if needed, 
-                    // though sync effect usually handles this.
                     setMessages(currentMessages);
                 }
             } else {
@@ -365,10 +432,16 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
     }, [messages, isLoading, isThinking, generateResponse, chatId]);
 
-    const sendMessage = useCallback(async (userMessage: string, attachments: Attachment[], existingMessages: ChatMessageType[]) => {
+    const sendMessage = useCallback(async (
+        userMessage: string,
+        attachments: Attachment[],
+        existingMessages: ChatMessageType[],
+        options: ChatSubmitOptions
+    ) => {
         setIsLoading(true);
         // Reset the failure flag when user manually sends a message
         lastRequestFailed.current = false;
+        const targetModel = options.mode === 'image' ? IMAGE_GENERATION_MODEL : model;
 
         const userMsg: ChatMessageType = {
             id: crypto.randomUUID(),
@@ -386,7 +459,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 m.id === userMsg.id ? { ...m, id: persistedUser.id } : m
             );
             setMessages(persistedMessages);
-            await generateResponse(persistedMessages);
+            await generateResponse(persistedMessages, targetModel);
             return true;
         } catch (error) {
             setIsLoading(false);
@@ -394,12 +467,12 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             showToast('Failed to send message. Please try again.', 'error');
             return false;
         }
-    }, [chatId, generateResponse, showToast]);
+    }, [chatId, generateResponse, showToast, model]);
 
-    const handleSend = useCallback(async (value: string, attachments: Attachment[]) => {
+    const handleSend = useCallback(async (value: string, attachments: Attachment[], options: ChatSubmitOptions) => {
         if ((!value.trim() && attachments.length === 0) || isLoading) return false;
         setIsAtBottom(true);
-        return sendMessage(value, attachments, messages);
+        return sendMessage(value, attachments, messages, options);
     }, [isLoading, messages, sendMessage]);
 
     const handlePromptClick = (prompt: string) => {

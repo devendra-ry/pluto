@@ -596,6 +596,11 @@ export async function POST(req: Request) {
                     controller.close();
                     return;
                 }
+                if (modelConfig.capabilities.includes('imageGen')) {
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Selected model is image-generation only. Use image generation flow.' })}\n\n`);
+                    controller.close();
+                    return;
+                }
 
                 const limits = await resolveModelLimits(model, modelConfig, signal);
                 let trimmedContext = trimMessagesToInputBudget(messages, limits);

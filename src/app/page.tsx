@@ -2,9 +2,9 @@
 
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { createThread } from '@/hooks/use-threads';
+import { createThread, updateThreadModel } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT } from '@/lib/constants';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL } from '@/lib/constants';
 import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -30,23 +30,32 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [draftThreadId, setDraftThreadId] = useState<string | null>(null);
 
-  const ensureThread = async () => {
+  const ensureThread = async (targetModel: string = model) => {
     if (draftThreadId) {
       return draftThreadId;
     }
 
-    const thread = await createThread(model, reasoningEffort);
+    const thread = await createThread(targetModel, reasoningEffort);
     setDraftThreadId(thread.id);
     return thread.id;
   };
 
-  const handleSend = async (value: string, attachments: Attachment[]) => {
+  const handleSend = async (
+    value: string,
+    attachments: Attachment[],
+    options: { mode: 'chat' | 'image' }
+  ) => {
     if (!value.trim() && attachments.length === 0) return false;
+    const isImageMode = options.mode === 'image';
+    const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : model;
 
     setIsLoading(true);
     try {
       // 1. Ensure thread exists (attachments may have already created one)
-      const threadId = await ensureThread();
+      const threadId = await ensureThread(targetModel);
+      if (isImageMode) {
+        await updateThreadModel(threadId, targetModel);
+      }
 
       // 2. Add the user message
       await addMessage(threadId, 'user', value.trim(), undefined, undefined, attachments);

@@ -104,6 +104,8 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
 
     const filteredModels = useMemo(() => {
         return AVAILABLE_MODELS.filter((model) => {
+            if (model.hidden) return false;
+
             // 1. Search Query (Always apply)
             if (searchQuery) {
                 const query = searchQuery.toLowerCase();
@@ -137,7 +139,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
         });
     }, [searchQuery, selectedProvider, activeFilters, showLegacy, starredModelIds]);
 
-    const legacyModels = AVAILABLE_MODELS.filter((m) => m.isLegacy);
+    const legacyModels = AVAILABLE_MODELS.filter((m) => m.isLegacy && !m.hidden);
 
     const toggleFilter = (cap: Capability) => {
         setActiveFilters((prev) => prev.includes(cap) ? prev.filter((c) => c !== cap) : [...prev, cap]);

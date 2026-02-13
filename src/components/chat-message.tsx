@@ -214,10 +214,10 @@ export const ChatMessage = memo(function ChatMessage({
 
         // Assistant message - left aligned, plain text, no bubble
         // Don't return null if streaming (loading) - show loading indicator
-        if (!isUser && !content && !reasoning && !isThinking && !isStreaming) return null;
+        if (!isUser && !content && !reasoning && attachments.length === 0 && !isThinking && !isStreaming) return null;
 
         // Show loading indicator for non-thinking models when streaming but no content yet
-        const showLoadingDots = isStreaming && !content && !reasoning && !isThinking;
+        const showLoadingDots = isStreaming && !content && !reasoning && attachments.length === 0 && !isThinking;
 
         return (
             <div className="py-1 px-4 group">
@@ -343,6 +343,38 @@ export const ChatMessage = memo(function ChatMessage({
                             >
                                 {preprocessLaTeX(content)}
                             </ReactMarkdown>
+                        </div>
+                    )}
+
+                    {attachments.length > 0 && (
+                        <div className={cn("space-y-2", content ? "mt-3" : "")}>
+                            {attachments.map((attachment) => {
+                                const isImage = attachment.mimeType.startsWith('image/');
+                                return (
+                                    <a
+                                        key={attachment.id}
+                                        href={attachment.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="block rounded-xl border border-white/10 bg-black/20 hover:bg-black/30 transition-colors p-2 max-w-xl"
+                                    >
+                                        {isImage && (
+                                            <div className="mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+                                                <Image
+                                                    src={attachment.url}
+                                                    alt={attachment.name}
+                                                    width={768}
+                                                    height={512}
+                                                    className="h-auto w-full object-cover"
+                                                    unoptimized
+                                                />
+                                            </div>
+                                        )}
+                                        <p className="text-sm text-zinc-200 truncate">{attachment.name}</p>
+                                        <p className="text-xs text-zinc-400">{attachment.mimeType}</p>
+                                    </a>
+                                );
+                            })}
                         </div>
                     )}
 

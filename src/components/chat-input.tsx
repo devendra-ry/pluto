@@ -8,7 +8,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle } from 'lucide-react';
+import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle, ImagePlus } from 'lucide-react';
 import { AVAILABLE_MODELS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
@@ -32,10 +32,20 @@ interface LocalAttachmentItem {
     error?: string;
 }
 
+export type ChatSubmitMode = 'chat' | 'image';
+
+export interface ChatSubmitOptions {
+    mode: ChatSubmitMode;
+}
+
 interface ChatInputProps {
     initialValue?: string;
     onInputChange?: (value: string) => void;
-    onSubmit: (value: string, attachments: Attachment[]) => Promise<boolean | void> | boolean | void;
+    onSubmit: (
+        value: string,
+        attachments: Attachment[],
+        options: ChatSubmitOptions
+    ) => Promise<boolean | void> | boolean | void;
     onEnsureThread?: () => Promise<string>;
     threadId?: string | null;
     onStop?: () => void;
@@ -69,6 +79,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const fileInputRef = useRef<HTMLInputElement>(null);
     const uploadTasksRef = useRef<Map<string, () => void>>(new Map());
     const [value, setValue] = useState(initialValue);
+    const [isImageMode, setIsImageMode] = useState(false);
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
     const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
@@ -76,7 +87,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const supportsImages = !isOpenRouterModel && selectedModel.capabilities.includes('vision');
     const supportsPdfs = !isOpenRouterModel && (selectedModel.capabilities.includes('pdf') || selectedModel.provider === 'google');
     const supportsTexts = !isOpenRouterModel && selectedModel.provider === 'google';
-    const supportsAttachments = supportsImages || supportsPdfs || supportsTexts;
+    const supportsAttachments = !isImageMode && (supportsImages || supportsPdfs || supportsTexts);
     const activeAttachmentItems = useMemo(
         () => (supportsAttachments ? attachmentItems : []),
         [supportsAttachments, attachmentItems]
@@ -212,7 +223,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         }
 
         try {
-            const submitted = await onSubmit(value, uploadedAttachments);
+            const submitted = await onSubmit(value, uploadedAttachments, { mode: isImageMode ? 'image' : 'chat' });
             if (submitted === false) {
                 return;
             }
@@ -226,6 +237,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             // Parent handles toast/error feedback.
         }
     };
+
+    const handleToggleImageMode = useCallback(() => {
+        setIsImageMode((prev) => {
+            const next = !prev;
+            if (next) {
+                const tasks = uploadTasksRef.current;
+                for (const cancel of tasks.values()) {
+                    cancel();
+                }
+                tasks.clear();
+                setAttachmentItems([]);
+                if (fileInputRef.current) {
+                    fileInputRef.current.value = '';
+                }
+            }
+            return next;
+        });
+    }, []);
 
     const handleAttachClick = () => {
         if (isLoading || !supportsAttachments) return;
@@ -318,7 +347,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         value={value}
                         onChange={handleChange}
                         onKeyDown={handleKeyDown}
-                        placeholder="Type your message here..."
+                        placeholder={isImageMode ? 'Describe the image you want to generate...' : 'Type your message here...'}
                         className={cn(
                             "w-full px-5 pt-4 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-base leading-relaxed",
                             activeAttachmentItems.length > 0 ? "pb-40" : "pb-14"
@@ -452,6 +481,21 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 <span className="hidden md:inline">Search</span>
                             </Button>
 
+                            <Button
+                                variant="ghost"
+                                type="button"
+                                onClick={handleToggleImageMode}
+                                className={cn(
+                                    "h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
+                                    isImageMode
+                                        ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
+                                        : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
+                                )}
+                            >
+                                <ImagePlus className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                                <span className="hidden md:inline">Image</span>
+                            </Button>
+
                             <div className="group/attach relative flex flex-col items-center">
                                 <Button
                                     variant="ghost"
@@ -466,7 +510,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 <div className="absolute bottom-full mb-2 hidden group-hover/attach:block z-50 pointer-events-none">
                                     <div className="bg-[#1a1520]/95 backdrop-blur-md text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
                                         <span className="text-[#fce7ef]">
-                                            {supportsAttachments
+                                            {isImageMode
+                                                ? 'Attachments are disabled in Image mode'
+                                                : supportsAttachments
                                                 ? 'Attach file'
                                                 : 'Use an attachment-capable model to attach files'}
                                         </span>
