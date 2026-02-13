@@ -18,6 +18,38 @@ export interface Thread {
 
 export const REFRESH_THREADS_EVENT = 'pluto:refresh_threads';
 const THREAD_SELECT_COLUMNS = 'id,title,model,reasoning_effort,system_prompt,is_pinned,created_at,updated_at,user_id';
+type BrowserSupabaseClient = ReturnType<typeof createClient>;
+
+let cachedUserId: string | null | undefined;
+let cachedUserIdPromise: Promise<string | null> | null = null;
+
+function setCachedUserId(userId: string | null) {
+    cachedUserId = userId;
+}
+
+async function getCurrentUserId(supabase: BrowserSupabaseClient): Promise<string | null> {
+    if (cachedUserId !== undefined) {
+        return cachedUserId;
+    }
+
+    if (!cachedUserIdPromise) {
+        cachedUserIdPromise = (async () => {
+            const { data, error } = await supabase.auth.getUser();
+            if (error) {
+                throw error;
+            }
+            return data.user?.id ?? null;
+        })();
+    }
+
+    try {
+        const userId = await cachedUserIdPromise;
+        cachedUserId = userId;
+        return userId;
+    } finally {
+        cachedUserIdPromise = null;
+    }
+}
 
 function sortThreadsByUpdatedAt(threads: Thread[]) {
     return [...threads].sort((a, b) => {
@@ -64,17 +96,17 @@ export function useThreads() {
     const [supabase] = useState(() => createClient());
 
     const refreshThreads = async () => {
+        if (!currentUserId) {
+            setThreads([]);
+            return;
+        }
+
         try {
-            let query = supabase
+            const { data, error } = await supabase
                 .from('threads')
                 .select(THREAD_SELECT_COLUMNS)
+                .eq('user_id', currentUserId)
                 .order('updated_at', { ascending: false });
-
-            if (currentUserId) {
-                query = query.eq('user_id', currentUserId);
-            }
-
-            const { data, error } = await query;
 
             if (error) {
                 console.error('[useThreads] Error fetching threads:', error);
@@ -94,17 +126,19 @@ export function useThreads() {
         let localUserId: string | null = null;
 
         const fetchThreads = async () => {
+            if (!localUserId) {
+                if (isActive) {
+                    setThreads([]);
+                }
+                return;
+            }
+
             try {
-                let query = supabase
+                const { data, error } = await supabase
                     .from('threads')
                     .select(THREAD_SELECT_COLUMNS)
+                    .eq('user_id', localUserId)
                     .order('updated_at', { ascending: false });
-
-                if (localUserId) {
-                    query = query.eq('user_id', localUserId);
-                }
-
-                const { data, error } = await query;
 
                 if (error) {
                     console.error('[useThreads] Error fetching threads:', error);
@@ -129,6 +163,7 @@ export function useThreads() {
                 }
 
                 localUserId = authData?.user?.id ?? null;
+                setCachedUserId(localUserId);
                 setCurrentUserId(localUserId);
             } catch (err) {
                 if (!isActive) return;
@@ -136,8 +171,13 @@ export function useThreads() {
                 return;
             }
 
+            if (!localUserId) {
+                setThreads([]);
+                return;
+            }
+
             await fetchThreads();
-            if (!isActive || !localUserId) {
+            if (!isActive) {
                 return;
             }
 
@@ -238,23 +278,17 @@ const triggerRefresh = () => {
 export async function createThread(model: string, reasoningEffort?: ReasoningEffort, systemPrompt?: string | null): Promise<Thread> {
     const supabase = createClient();
 
-    const { data: authData, error: authError } = await supabase.auth.getUser();
-    if (authError) {
-        throw authError;
-    }
-
-    if (!authData?.user) {
+    const userId = await getCurrentUserId(supabase);
+    if (!userId) {
         throw new Error('You must be signed in to create a chat.');
     }
-
-    const user = authData.user;
 
     const insertData = {
         title: 'New Chat',
         model,
         reasoning_effort: reasoningEffort,
         system_prompt: (systemPrompt && systemPrompt.trim().length > 0) ? systemPrompt.trim() : null,
-        user_id: user.id
+        user_id: userId
     };
 
     const { data, error } = await supabase
