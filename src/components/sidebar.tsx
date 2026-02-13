@@ -73,7 +73,8 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
     const isCollapsed = isMobileSize ? !mobileOpen : desktopCollapsed;
 
     const [searchQuery, setSearchQuery] = useState('');
-    const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+    const [deleteConfirm, setDeleteConfirm] = useState<Thread | null>(null);
+    const [deletePending, setDeletePending] = useState(false);
     const [user, setUser] = useState<SupabaseUser | null>(initialUser);
     const debouncedSearch = useDebouncedValue(searchQuery, 300);
     const { threads, refreshThreads } = useThreads();
@@ -150,20 +151,22 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         router.push('/');
     }, [router]);
 
-    const handleDeleteClick = useCallback((e: React.MouseEvent, threadId: string) => {
+    const handleDeleteClick = useCallback((e: React.MouseEvent, thread: Thread) => {
         try {
             e.preventDefault();
             e.stopPropagation();
-            setDeleteConfirm(threadId);
+            setDeleteConfirm(thread);
         } catch (err) {
             console.error('[Sidebar] Error in handleDeleteClick:', err);
         }
     }, []);
 
-    const handleDeleteConfirm = useCallback(async (e: React.MouseEvent, threadId: string) => {
+    const handleDeleteConfirm = useCallback(async () => {
+        if (!deleteConfirm) return;
+
+        const threadId = deleteConfirm.id;
         try {
-            e.preventDefault();
-            e.stopPropagation();
+            setDeletePending(true);
             await deleteThread(threadId);
             setDeleteConfirm(null);
 
@@ -176,18 +179,19 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         } catch (err) {
             console.error('[Sidebar] Error in handleDeleteConfirm:', err);
             showToast('Failed to delete thread', 'error');
+        } finally {
+            setDeletePending(false);
         }
-    }, [pathname, router, refreshThreads, showToast]);
+    }, [deleteConfirm, pathname, router, refreshThreads, showToast]);
 
-    const handleDeleteCancel = useCallback((e: React.MouseEvent) => {
+    const handleDeleteCancel = useCallback(() => {
         try {
-            e.preventDefault();
-            e.stopPropagation();
+            if (deletePending) return;
             setDeleteConfirm(null);
         } catch (err) {
             console.error('[Sidebar] Error in handleDeleteCancel:', err);
         }
-    }, []);
+    }, [deletePending]);
 
     const handleTogglePin = useCallback(async (e: React.MouseEvent, threadId: string, isPinned: boolean) => {
         try {
@@ -206,7 +210,6 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
 
     const renderThreadItem = useCallback((thread: Thread) => {
         const isActive = pathname === `/c/${thread.id}`;
-        const isConfirmingDelete = deleteConfirm === thread.id;
 
         return (
             <div
@@ -234,70 +237,46 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                     </span>
                 </Link>
 
-                {/* Delete Confirmation Overlay */}
-                {isConfirmingDelete && (
-                    <div className="absolute inset-0 bg-[#0f0a12]/95 rounded-lg flex items-center justify-center gap-2 z-20 animate-in fade-in duration-150">
-                        <span className="text-sm text-zinc-400 mr-1">Delete?</span>
-                        <Button
-                            size="sm"
-                            className="h-6 px-2 text-sm bg-red-600 hover:bg-red-500 text-white"
-                            onClick={(e) => handleDeleteConfirm(e, thread.id)}
-                        >
-                            Yes
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 px-2 text-sm text-zinc-400 hover:text-zinc-200"
-                            onClick={handleDeleteCancel}
-                        >
-                            No
-                        </Button>
-                    </div>
-                )}
-
                 {/* Hover Actions */}
-                {!isConfirmingDelete && (
-                    <div
-                        className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-300 h-full pr-1 z-10"
-                    >
-                        {/* Pin Button */}
-                        <div className="relative group/tooltip">
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                className={cn(
-                                    "h-7 w-7 transition-colors rounded-md",
-                                    thread.is_pinned ? "text-pink-500 hover:bg-pink-500/10" : "text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
-                                )}
-                                onClick={(e) => handleTogglePin(e, thread.id, !!thread.is_pinned)}
-                            >
-                                <Pin className={cn("h-3.5 w-3.5 transform rotate-45", thread.is_pinned && "fill-current")} />
-                            </Button>
-                            <div className="absolute bottom-full right-0 mb-2 px-2 py-1 bg-black text-[10px] text-white rounded whitespace-nowrap opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity z-50">
-                                {thread.is_pinned ? 'Unpin Thread' : 'Pin Thread'}
-                            </div>
-                        </div>
-
-                        {/* Delete Button */}
-                        <div className="relative group/tooltip">
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all"
-                                onClick={(e) => handleDeleteClick(e, thread.id)}
-                            >
-                                <X className="h-3.5 w-3.5" />
-                            </Button>
-                            <div className="absolute bottom-full right-0 mb-2 px-2 py-1 bg-black text-[10px] text-white rounded whitespace-nowrap opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity z-50">
-                                Delete Thread
-                            </div>
+                <div
+                    className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-300 h-full pr-1 z-10"
+                >
+                    {/* Pin Button */}
+                    <div className="relative group/tooltip">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                                "h-7 w-7 transition-colors rounded-md",
+                                thread.is_pinned ? "text-pink-500 hover:bg-pink-500/10" : "text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
+                            )}
+                            onClick={(e) => handleTogglePin(e, thread.id, !!thread.is_pinned)}
+                        >
+                            <Pin className={cn("h-3.5 w-3.5 transform rotate-45", thread.is_pinned && "fill-current")} />
+                        </Button>
+                        <div className="absolute bottom-full right-0 mb-2 px-2 py-1 bg-black text-[10px] text-white rounded whitespace-nowrap opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity z-50">
+                            {thread.is_pinned ? 'Unpin Thread' : 'Pin Thread'}
                         </div>
                     </div>
-                )}
+
+                    {/* Delete Button */}
+                    <div className="relative group/tooltip">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all"
+                            onClick={(e) => handleDeleteClick(e, thread)}
+                        >
+                            <X className="h-3.5 w-3.5" />
+                        </Button>
+                        <div className="absolute bottom-full right-0 mb-2 px-2 py-1 bg-black text-[10px] text-white rounded whitespace-nowrap opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity z-50">
+                            Delete Thread
+                        </div>
+                    </div>
+                </div>
             </div>
         );
-    }, [pathname, deleteConfirm, handleDeleteConfirm, handleDeleteCancel, handleTogglePin, handleDeleteClick]);
+    }, [pathname, handleTogglePin, handleDeleteClick]);
 
     const rowProps = useMemo<SidebarRowData>(() => ({
         virtualItems,
@@ -483,6 +462,55 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         >
                             <Plus className="h-5 w-5" />
                         </Button>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Delete confirmation modal */}
+            <AnimatePresence>
+                {deleteConfirm && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+                        onClick={handleDeleteCancel}
+                    >
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.98, y: 6 }}
+                            transition={{ duration: 0.15 }}
+                            className="w-full max-w-md rounded-xl border border-[#3a2a40] bg-[#17101c] p-5 shadow-2xl"
+                            onClick={(e) => e.stopPropagation()}
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="delete-thread-title"
+                        >
+                            <h2 id="delete-thread-title" className="text-base font-semibold text-zinc-100">
+                                Confirm deletion
+                            </h2>
+                            <p className="mt-2 text-sm text-zinc-400 break-words">
+                                Are you sure you want to delete <span className="text-zinc-300">&ldquo;{deleteConfirm.title}&rdquo;</span>? This action cannot be undone.
+                            </p>
+                            <div className="mt-5 flex items-center justify-end gap-2">
+                                <Button
+                                    variant="ghost"
+                                    className="text-zinc-300 hover:text-zinc-100"
+                                    onClick={handleDeleteCancel}
+                                    disabled={deletePending}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    className="bg-red-600 hover:bg-red-500 text-white"
+                                    onClick={handleDeleteConfirm}
+                                    disabled={deletePending}
+                                >
+                                    {deletePending ? 'Deleting...' : 'Confirm'}
+                                </Button>
+                            </div>
+                        </motion.div>
                     </motion.div>
                 )}
             </AnimatePresence>
