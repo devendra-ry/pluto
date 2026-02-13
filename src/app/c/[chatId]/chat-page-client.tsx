@@ -404,7 +404,10 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 }
             } else {
                 console.error('Chat error:', error);
-                showToast('Failed to generate response. Please try again.', 'error');
+                const errorMessage = error instanceof Error
+                    ? error.message
+                    : 'Failed to generate response. Please try again.';
+                showToast(errorMessage, 'error');
                 // Remove the empty assistant message if it failed
                 setMessages(currentMessages);
                 // Mark that the last request failed to prevent auto-retry
