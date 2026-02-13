@@ -58,7 +58,7 @@ function isSelectableChatModel(modelId: string): boolean {
 
 export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const thread = useThread(chatId);
-    const storedMessages = useMessages(chatId);
+    const { messages: storedMessages, refreshMessages: refreshStoredMessages } = useMessages(chatId);
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const [model, setModel] = useState<string>(DEFAULT_MODEL);
     const chatInputRef = useRef<ChatInputHandle>(null);
@@ -74,6 +74,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const lastRequestFailed = useRef(false); // Prevent auto-retry after failures
     const currentMessagesChatId = useRef<string | null>(null);
     const justAddedMessageIdRef = useRef<string | null>(null);
+    const locallyDeletedMessageIdsRef = useRef<Set<string>>(new Set());
     const { showToast } = useToast();
 
     useEffect(() => {
@@ -112,6 +113,15 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             // Update messages if they change after initialization (e.g. from sync or outside update)
             // But only if we aren't currently generating to avoid race conditions with local state
             if (!isLoading && !isThinking && storedMessages) {
+                // Protect local retry/edit state from stale realtime snapshots that still contain deleted messages.
+                if (locallyDeletedMessageIdsRef.current.size > 0) {
+                    const hasLocallyDeleted = storedMessages.some((m) => locallyDeletedMessageIdsRef.current.has(m.id));
+                    if (hasLocallyDeleted) {
+                        return;
+                    }
+                    locallyDeletedMessageIdsRef.current.clear();
+                }
+
                 // If we just added a message, wait for it to appear in storedMessages before syncing
                 // This prevents the UI from reverting to a previous state and causing a loop
                 if (justAddedMessageIdRef.current) {
@@ -570,7 +580,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             }
 
             const deleteIds = canonicalMessages.slice(deleteStartIndex).map((m) => m.id);
+            if (deleteIds.length > 0) {
+                deleteIds.forEach((id) => locallyDeletedMessageIdsRef.current.add(id));
+            }
             await deleteMessagesByIds(deleteIds);
+            await refreshStoredMessages();
 
             const persistedUser = await addMessage(chatId, 'user', newContent, undefined, undefined, editedMessageAttachments);
 
@@ -596,7 +610,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             console.error('Failed to edit message:', error);
             showToast('Failed to edit message history. Please try again.', 'error');
         }
-    }, [messages, chatId, showToast, generateResponse]);
+    }, [messages, chatId, showToast, generateResponse, refreshStoredMessages]);
 
     const handleRetry = useCallback(async (messageId: string) => {
         setIsLoading(true);
@@ -631,7 +645,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             }
 
             const deleteIds = canonicalMessages.slice(anchorDbIndex + 1).map((m) => m.id);
+            if (deleteIds.length > 0) {
+                deleteIds.forEach((id) => locallyDeletedMessageIdsRef.current.add(id));
+            }
             await deleteMessagesByIds(deleteIds);
+            await refreshStoredMessages();
 
             // Refetch canonical state after delete so we regenerate from DB truth.
             const refreshedMessages = await getThreadMessages(chatId);
@@ -651,7 +669,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             console.error('Failed to retry message:', error);
             showToast('Failed to delete previous responses. Please try again.', 'error');
         }
-    }, [messages, chatId, showToast, generateResponse]);
+    }, [messages, chatId, showToast, generateResponse, refreshStoredMessages]);
 
     return (
         <div className="flex flex-col h-full bg-[#1a1520]">

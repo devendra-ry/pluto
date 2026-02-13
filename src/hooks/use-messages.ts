@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { type Attachment } from '@/lib/types';
 
@@ -69,6 +69,23 @@ export async function getThreadMessages(threadId: string): Promise<Message[]> {
 export function useMessages(threadId: string | null) {
     const [messages, setMessages] = useState<Message[] | null>(() => (threadId ? null : []));
     const [supabase] = useState(() => createClient());
+    const refreshMessages = useCallback(async () => {
+        if (!threadId) return;
+
+        const { data, error } = await supabase
+            .from('messages')
+            .select(MESSAGE_SELECT_COLUMNS)
+            .eq('thread_id', threadId)
+            .order('created_at', { ascending: true })
+            .order('id', { ascending: true });
+
+        if (error) {
+            return;
+        }
+        if (data) {
+            setMessages(data as Message[]);
+        }
+    }, [threadId, supabase]);
 
     useEffect(() => {
         if (!threadId) {
@@ -141,7 +158,10 @@ export function useMessages(threadId: string | null) {
         };
     }, [threadId, supabase]);
 
-    return threadId ? messages : [];
+    return {
+        messages: threadId ? messages : [],
+        refreshMessages,
+    };
 }
 
 // Add a new message to a thread
