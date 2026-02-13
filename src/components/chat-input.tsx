@@ -83,6 +83,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const uploadTasksRef = useRef<Map<string, () => void>>(new Map());
+    const valueRef = useRef(initialValue);
+    const attachmentItemsRef = useRef<LocalAttachmentItem[]>([]);
     const [value, setValue] = useState(initialValue);
     const [isImageMode, setIsImageMode] = useState(false);
     const [isSystemMenuOpen, setIsSystemMenuOpen] = useState(false);
@@ -133,6 +135,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             textareaRef.current.style.height = 'auto';
             textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
         }
+        valueRef.current = value;
     }, [value]);
 
     useEffect(() => {
@@ -148,6 +151,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     useEffect(() => {
         setSystemPromptDraft(systemPrompt);
     }, [systemPrompt]);
+
+    useEffect(() => {
+        attachmentItemsRef.current = attachmentItems;
+    }, [attachmentItems]);
 
     const updateItem = useCallback((localId: string, updater: (item: LocalAttachmentItem) => LocalAttachmentItem) => {
         setAttachmentItems((prev) => prev.map((item) => (item.localId === localId ? updater(item) : item)));
@@ -236,19 +243,43 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             return;
         }
 
-        try {
-            const submitted = await onSubmit(value, uploadedAttachments, { mode: isImageMode ? 'image' : 'chat' });
-            if (submitted === false) {
-                return;
-            }
+        const submittedValue = value;
+        const submittedItems = attachmentItems;
+        const submittedAttachments = uploadedAttachments;
 
-            setValue('');
-            setAttachmentItems([]);
-            if (fileInputRef.current) {
-                fileInputRef.current.value = '';
+        // Clear immediately so user can start typing the next prompt while generation runs.
+        setValue('');
+        onInputChange?.('');
+        setAttachmentItems([]);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+
+        try {
+            const submitted = await onSubmit(submittedValue, submittedAttachments, { mode: isImageMode ? 'image' : 'chat' });
+            if (submitted === false) {
+                // Restore only if user has not started drafting a new message yet.
+                if (valueRef.current.trim().length === 0 && attachmentItemsRef.current.length === 0) {
+                    setValue(submittedValue);
+                    onInputChange?.(submittedValue);
+                    setAttachmentItems(submittedItems);
+                    if (fileInputRef.current) {
+                        fileInputRef.current.value = '';
+                    }
+                }
+                return;
             }
         } catch {
             // Parent handles toast/error feedback.
+            // Restore only if user has not started drafting a new message yet.
+            if (valueRef.current.trim().length === 0 && attachmentItemsRef.current.length === 0) {
+                setValue(submittedValue);
+                onInputChange?.(submittedValue);
+                setAttachmentItems(submittedItems);
+                if (fileInputRef.current) {
+                    fileInputRef.current.value = '';
+                }
+            }
         }
     };
 
