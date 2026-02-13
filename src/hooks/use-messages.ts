@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/utils/supabase/client';
+import { type Attachment } from '@/lib/types';
 
 export interface Message {
     id: string;
     thread_id: string;
     role: 'user' | 'assistant';
     content: string;
+    attachments?: Attachment[];
     reasoning?: string;
     model_id?: string;
     created_at: string;
@@ -79,7 +81,8 @@ export async function addMessage(
     role: 'user' | 'assistant',
     content: string,
     reasoning?: string,
-    modelId?: string
+    modelId?: string,
+    attachments: Attachment[] = []
 ): Promise<Message> {
     const supabase = createClient();
     const { data, error } = await supabase
@@ -88,6 +91,7 @@ export async function addMessage(
             thread_id: threadId,
             role,
             content,
+            attachments,
             reasoning,
             model_id: modelId,
         })

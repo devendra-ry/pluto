@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { ChatMessage } from '@/components/chat-message';
 import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
-import { type ReasoningEffort } from '@/lib/types';
+import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort } from '@/hooks/use-threads';
 import { useMessages, addMessage, deleteMessagesByIds, getThreadMessages } from '@/hooks/use-messages';
 import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT } from '@/lib/constants';
@@ -21,6 +21,7 @@ interface ChatMessageType {
     id: string;
     role: 'user' | 'assistant';
     content: string;
+    attachments?: Attachment[];
     reasoning?: string;
     model_id?: string;
 }
@@ -81,6 +82,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     id: m.id,
                     role: m.role,
                     content: m.content,
+                    attachments: m.attachments ?? [],
                     reasoning: m.reasoning,
                     model_id: m.model_id,
                 }))
@@ -105,6 +107,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                         id: m.id,
                         role: m.role,
                         content: m.content,
+                        attachments: m.attachments ?? [],
                         reasoning: m.reasoning,
                         model_id: m.model_id,
                     }))
@@ -199,7 +202,9 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             if (currentThread?.title === 'New Chat' && currentMessages.length > 0) {
                 const firstUserMsg = currentMessages.find(m => m.role === 'user');
                 if (firstUserMsg) {
-                    const title = firstUserMsg.content.slice(0, 50) + (firstUserMsg.content.length > 50 ? '...' : '');
+                    const attachmentTitle = firstUserMsg.attachments?.[0]?.name ? `Attachment: ${firstUserMsg.attachments[0].name}` : 'New Chat';
+                    const baseTitle = firstUserMsg.content.trim() || attachmentTitle;
+                    const title = baseTitle.slice(0, 50) + (baseTitle.length > 50 ? '...' : '');
                     updateThreadTitle(chatId, title);
                 }
             }
@@ -228,7 +233,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    messages: currentMessages.map((m) => ({ role: m.role, content: m.content })),
+                    messages: currentMessages.map((m) => ({
+                        role: m.role,
+                        content: m.content,
+                        attachments: m.attachments ?? [],
+                    })),
                     model,
                     reasoningEffort,
                 }),
@@ -356,7 +365,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
     }, [messages, isLoading, isThinking, generateResponse, chatId]);
 
-    const sendMessage = useCallback(async (userMessage: string, existingMessages: ChatMessageType[]) => {
+    const sendMessage = useCallback(async (userMessage: string, attachments: Attachment[], existingMessages: ChatMessageType[]) => {
         setIsLoading(true);
         // Reset the failure flag when user manually sends a message
         lastRequestFailed.current = false;
@@ -365,28 +374,32 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             id: crypto.randomUUID(),
             role: 'user',
             content: userMessage,
+            attachments,
         };
 
         const updatedMessages = [...existingMessages, userMsg];
         setMessages(updatedMessages);
 
         try {
-            const persistedUser = await addMessage(chatId, 'user', userMessage);
+            const persistedUser = await addMessage(chatId, 'user', userMessage, undefined, undefined, attachments);
             const persistedMessages = updatedMessages.map((m) =>
                 m.id === userMsg.id ? { ...m, id: persistedUser.id } : m
             );
             setMessages(persistedMessages);
             await generateResponse(persistedMessages);
+            return true;
         } catch (error) {
             setIsLoading(false);
             console.error('Failed to send message:', error);
+            showToast('Failed to send message. Please try again.', 'error');
+            return false;
         }
-    }, [chatId, generateResponse]);
+    }, [chatId, generateResponse, showToast]);
 
-    const handleSend = useCallback(async (value: string) => {
-        if (!value.trim() || isLoading) return;
+    const handleSend = useCallback(async (value: string, attachments: Attachment[]) => {
+        if ((!value.trim() && attachments.length === 0) || isLoading) return false;
         setIsAtBottom(true);
-        await sendMessage(value, messages);
+        return sendMessage(value, attachments, messages);
     }, [isLoading, messages, sendMessage]);
 
     const handlePromptClick = (prompt: string) => {
@@ -404,6 +417,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             setIsLoading(false);
             return;
         }
+        const editedMessageAttachments = localMessages[msgIndex].attachments ?? [];
 
         const anchorBeforeEditId = msgIndex > 0 ? localMessages[msgIndex - 1].id : null;
         try {
@@ -422,7 +436,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             const deleteIds = canonicalMessages.slice(deleteStartIndex).map((m) => m.id);
             await deleteMessagesByIds(deleteIds);
 
-            const persistedUser = await addMessage(chatId, 'user', newContent);
+            const persistedUser = await addMessage(chatId, 'user', newContent, undefined, undefined, editedMessageAttachments);
 
             // Refetch canonical state after delete + insert so generation starts from DB truth.
             const refreshedMessages = await getThreadMessages(chatId);
@@ -430,6 +444,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 id: m.id,
                 role: m.role,
                 content: m.content,
+                attachments: m.attachments ?? [],
                 reasoning: m.reasoning,
                 model_id: m.model_id,
             }));
@@ -488,6 +503,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 id: m.id,
                 role: m.role,
                 content: m.content,
+                attachments: m.attachments ?? [],
                 reasoning: m.reasoning,
                 model_id: m.model_id,
             }));
@@ -575,6 +591,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                         id={message.id}
                                         role={message.role}
                                         content={message.content.replace(HEADING_FIX_REGEX, '$1 $2')}
+                                        attachments={message.attachments}
                                         reasoning={message.reasoning}
                                         isStreaming={isLoading && index === messages.length - 1 && message.role === 'assistant'}
                                         isThinking={isThinking && index === messages.length - 1 && message.role === 'assistant'}
@@ -607,6 +624,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             <ChatInput
                 ref={chatInputRef}
                 onSubmit={handleSend}
+                threadId={chatId}
                 onStop={handleStop}
                 isLoading={isLoading}
                 currentModel={model}

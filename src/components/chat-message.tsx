@@ -5,11 +5,13 @@ import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import Image from 'next/image';
 import { Copy, RefreshCcw, SquarePen, GitBranch, ChevronDown, Check, Brain, Loader2, type LucideIcon } from 'lucide-react';
 import { useState, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
+import { type Attachment } from '@/lib/types';
 
 interface ActionIconProps {
     icon: LucideIcon;
@@ -43,6 +45,7 @@ interface ChatMessageProps {
     id: string;
     role: 'user' | 'assistant';
     content: string;
+    attachments?: Attachment[];
     isStreaming?: boolean;
     isThinking?: boolean;
     modelName?: string;
@@ -55,6 +58,7 @@ export const ChatMessage = memo(function ChatMessage({
     id,
     role,
     content,
+    attachments = [],
     isStreaming,
     isThinking,
     modelName,
@@ -138,7 +142,41 @@ export const ChatMessage = memo(function ChatMessage({
                     ) : (
                         <>
                             <div className="max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-2 bg-[#2a2035]/80 backdrop-blur-sm border border-white/5 text-zinc-100 shadow-lg">
-                                <p className="whitespace-pre-wrap break-words text-base leading-relaxed">{content}</p>
+                                {content && (
+                                    <p className="whitespace-pre-wrap break-words text-base leading-relaxed">{content}</p>
+                                )}
+
+                                {attachments.length > 0 && (
+                                    <div className={cn("space-y-2", content ? "mt-3" : "")}>
+                                        {attachments.map((attachment) => {
+                                            const isImage = attachment.mimeType.startsWith('image/');
+                                            return (
+                                                <a
+                                                    key={attachment.id}
+                                                    href={attachment.url}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="block rounded-xl border border-white/10 bg-black/20 hover:bg-black/30 transition-colors p-2"
+                                                >
+                                                    {isImage && (
+                                                        <div className="mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+                                                            <Image
+                                                                src={attachment.url}
+                                                                alt={attachment.name}
+                                                                width={480}
+                                                                height={320}
+                                                                className="h-auto w-full object-cover"
+                                                                unoptimized
+                                                            />
+                                                        </div>
+                                                    )}
+                                                    <p className="text-sm text-zinc-200 truncate">{attachment.name}</p>
+                                                    <p className="text-xs text-zinc-400">{attachment.mimeType}</p>
+                                                </a>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                             </div>
 
                             {/* Action icons below message - same row */}

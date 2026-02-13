@@ -1,10 +1,16 @@
 import { ChatRequestSchema, ChatMessage, type ReasoningEffort } from '@/lib/types';
 import { AVAILABLE_MODELS, type ModelConfig } from '@/lib/constants';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-import { OpenRouter } from '@openrouter/sdk';
 
 import { createClient } from '@/utils/supabase/server';
 import { cookies } from 'next/headers';
+import {
+    DEFAULT_ATTACHMENTS_BUCKET,
+    MAX_ATTACHMENTS_PER_MESSAGE,
+    MAX_ATTACHMENT_BYTES_FOR_MODEL,
+    isImageAttachment,
+    isPdfAttachment,
+} from '@/lib/attachments';
 
 export const runtime = 'edge';
 
@@ -12,6 +18,7 @@ const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000;
 const DEFAULT_OUTPUT_RESERVE_TOKENS = 4096;
 const DEFAULT_SAFETY_MARGIN_TOKENS = 2048;
 const DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS = 65536;
+const MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL = 25 * 1024 * 1024;
 const MIN_INPUT_BUDGET_TOKENS = 2048;
 const CONTEXT_RETRY_SCALE = 0.7;
 const DEFAULT_LIMITS_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -38,8 +45,27 @@ interface TrimmedContext {
     outputReserve: number;
 }
 
+interface PreparedAttachment {
+    id: string;
+    name: string;
+    mimeType: string;
+    path: string;
+    base64Data: string;
+    dataUrl: string;
+}
+
+interface PreparedChatMessage {
+    role: 'user' | 'assistant';
+    content: string;
+    attachments: PreparedAttachment[];
+}
+
 const LIMITS_CACHE_TTL_MS = readPositiveInt(process.env.CHAT_LIMITS_CACHE_TTL_MS, DEFAULT_LIMITS_CACHE_TTL_MS);
 const limitsCache = new Map<string, CachedLimitsEntry>();
+const ATTACHMENTS_BUCKET =
+    process.env.SUPABASE_ATTACHMENTS_BUCKET ||
+    process.env.NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET ||
+    DEFAULT_ATTACHMENTS_BUCKET;
 
 function readPositiveInt(value: string | undefined, fallback: number) {
     if (!value) return fallback;
@@ -228,7 +254,9 @@ async function resolveChutesModelLimits(model: string, signal?: AbortSignal): Pr
 
 function estimateMessageTokens(message: ChatMessage) {
     // Simple, fast approximation for mixed text/markdown/code content.
-    return Math.ceil(message.content.length / 3.5) + 8;
+    const attachmentCount = message.attachments?.length ?? 0;
+    const attachmentBudget = attachmentCount * 1200;
+    return Math.ceil(message.content.length / 3.5) + 8 + attachmentBudget;
 }
 
 function estimateConversationTokens(messages: ChatMessage[]) {
@@ -325,6 +353,186 @@ function isContextOverflowError(error: unknown) {
     return patterns.some((pattern) => normalized.includes(pattern));
 }
 
+function supportsImageInputs(modelConfig: ModelConfig) {
+    return modelConfig.capabilities.includes('vision');
+}
+
+function supportsPdfInputs(modelConfig: ModelConfig) {
+    return modelConfig.capabilities.includes('pdf') || modelConfig.provider === 'google';
+}
+
+function toBase64(bytes: Uint8Array) {
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+}
+
+async function prepareMessageAttachments(
+    messages: ChatMessage[],
+    supabase: ReturnType<typeof createClient>,
+    userId: string,
+    modelConfig: ModelConfig,
+    signal?: AbortSignal
+): Promise<PreparedChatMessage[]> {
+    const allowImages = supportsImageInputs(modelConfig);
+    const allowPdfs = supportsPdfInputs(modelConfig);
+    let totalAttachmentBytes = 0;
+
+    const prepared: PreparedChatMessage[] = [];
+    for (const message of messages) {
+        const attachments = message.attachments ?? [];
+        if (attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+            throw new Error(`Too many attachments in a single message. Maximum is ${MAX_ATTACHMENTS_PER_MESSAGE}.`);
+        }
+
+        const preparedAttachments: PreparedAttachment[] = [];
+        let skippedForCapabilities = 0;
+        for (const attachment of attachments) {
+            if (signal?.aborted) throw new Error('Request aborted');
+
+            if (!attachment.path.startsWith(`${userId}/`)) {
+                throw new Error('Invalid attachment path');
+            }
+
+            const imageAttachment = isImageAttachment(attachment.mimeType);
+            const pdfAttachment = isPdfAttachment(attachment.mimeType);
+
+            if (!imageAttachment && !pdfAttachment) {
+                throw new Error(`Unsupported attachment type: ${attachment.mimeType}`);
+            }
+            if (imageAttachment && !allowImages) {
+                skippedForCapabilities += 1;
+                continue;
+            }
+            if (pdfAttachment && !allowPdfs) {
+                skippedForCapabilities += 1;
+                continue;
+            }
+
+            const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).download(attachment.path);
+            if (error || !data) {
+                throw new Error(`Failed to load attachment: ${attachment.name}`);
+            }
+
+            const buffer = new Uint8Array(await data.arrayBuffer());
+            if (buffer.byteLength > MAX_ATTACHMENT_BYTES_FOR_MODEL) {
+                const maxMb = Math.floor(MAX_ATTACHMENT_BYTES_FOR_MODEL / (1024 * 1024));
+                throw new Error(`Attachment "${attachment.name}" exceeds model limit (${maxMb}MB).`);
+            }
+            totalAttachmentBytes += buffer.byteLength;
+            if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL) {
+                const maxMb = Math.floor(MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL / (1024 * 1024));
+                throw new Error(`Total attachment payload is too large for one request (${maxMb}MB max).`);
+            }
+
+            const base64Data = toBase64(buffer);
+            preparedAttachments.push({
+                id: attachment.id,
+                name: attachment.name,
+                mimeType: attachment.mimeType,
+                path: attachment.path,
+                base64Data,
+                dataUrl: `data:${attachment.mimeType};base64,${base64Data}`,
+            });
+        }
+
+        prepared.push({
+            role: message.role,
+            content: skippedForCapabilities > 0 && !message.content
+                ? '[Attachment omitted: unsupported by selected model]'
+                : message.content,
+            attachments: preparedAttachments,
+        });
+
+        if (skippedForCapabilities > 0) {
+            console.warn(
+                `[chat] skipped ${skippedForCapabilities} attachment(s) for provider=${modelConfig.provider} model without required capability`
+            );
+        }
+    }
+
+    return prepared;
+}
+
+function buildGoogleContents(messages: PreparedChatMessage[]) {
+    return messages.map((message) => {
+        const parts: Array<Record<string, unknown>> = [];
+
+        if (message.content) {
+            parts.push({ text: message.content });
+        }
+
+        for (const attachment of message.attachments) {
+            parts.push({
+                inlineData: {
+                    mimeType: attachment.mimeType,
+                    data: attachment.base64Data,
+                },
+            });
+        }
+
+        if (parts.length === 0) {
+            parts.push({ text: ' ' });
+        }
+
+        return {
+            role: message.role === 'assistant' ? 'model' : 'user',
+            parts,
+        };
+    });
+}
+
+function buildOpenAICompatibleMessages(messages: PreparedChatMessage[]) {
+    return messages.map((message) => {
+        if (message.attachments.length === 0) {
+            return {
+                role: message.role,
+                content: message.content,
+            };
+        }
+
+        const contentParts: Array<Record<string, unknown>> = [];
+        if (message.content) {
+            contentParts.push({
+                type: 'text',
+                text: message.content,
+            });
+        }
+
+        for (const attachment of message.attachments) {
+            if (isImageAttachment(attachment.mimeType)) {
+                contentParts.push({
+                    type: 'image_url',
+                    image_url: {
+                        url: attachment.dataUrl,
+                    },
+                });
+                continue;
+            }
+
+            contentParts.push({
+                type: 'file',
+                file: {
+                    filename: attachment.name,
+                    file_data: attachment.dataUrl,
+                },
+            });
+        }
+
+        if (contentParts.length === 0) {
+            contentParts.push({ type: 'text', text: ' ' });
+        }
+
+        return {
+            role: message.role,
+            content: contentParts,
+        };
+    });
+}
+
 export async function POST(req: Request) {
     const cookieStore = await cookies();
     const supabase = createClient(cookieStore);
@@ -394,13 +602,20 @@ export async function POST(req: Request) {
                 }, 15000);
 
                 const getSourceStream = async (contextMessages: ChatMessage[]) => {
+                    const preparedMessages = await prepareMessageAttachments(
+                        contextMessages,
+                        supabase,
+                        user.id,
+                        modelConfig,
+                        signal
+                    );
                     if (modelConfig.provider === 'google') {
-                        return getGoogleStream(model, contextMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, signal);
+                        return getGoogleStream(model, preparedMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, signal);
                     }
                     if (modelConfig.provider === 'openrouter') {
-                        return getOpenRouterStream(model, contextMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, signal);
+                        return getOpenRouterStream(model, preparedMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, signal);
                     }
-                    return getChutesStream(model, contextMessages, reasoningEffort || 'low', modelConfig, limits.maxOutputTokens, signal);
+                    return getChutesStream(model, preparedMessages, reasoningEffort || 'low', modelConfig, limits.maxOutputTokens, signal);
                 };
 
                 let sourceStream: ReadableStream;
@@ -461,7 +676,7 @@ export async function POST(req: Request) {
 
 async function getChutesStream(
     model: string,
-    messages: ChatMessage[],
+    messages: PreparedChatMessage[],
     reasoningEffort: ReasoningEffort = 'low',
     modelConfig: ModelConfig,
     maxOutputTokens?: number | null,
@@ -472,7 +687,7 @@ async function getChutesStream(
 
     const requestBody: Record<string, unknown> = {
         model,
-        messages,
+        messages: buildOpenAICompatibleMessages(messages),
         stream: true,
         temperature: 1.0,
         top_p: 0.95,
@@ -503,7 +718,7 @@ async function getChutesStream(
 
 async function getGoogleStream(
     model: string,
-    messages: ChatMessage[],
+    messages: PreparedChatMessage[],
     reasoningEffort: ReasoningEffort = 'low',
     maxOutputTokens?: number | null,
     signal?: AbortSignal
@@ -512,10 +727,7 @@ async function getGoogleStream(
     if (!apiKey) throw new Error('Gemini API key missing');
 
     const ai = new GoogleGenAI({ apiKey });
-    const contents = messages.map(msg => ({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }]
-    }));
+    const contents = buildGoogleContents(messages);
 
     const config: {
         maxOutputTokens: number;
@@ -586,63 +798,37 @@ async function getGoogleStream(
 
 async function getOpenRouterStream(
     model: string,
-    messages: ChatMessage[],
+    messages: PreparedChatMessage[],
     reasoningEffort: ReasoningEffort = 'low',
     maxOutputTokens?: number | null,
     signal?: AbortSignal
 ) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error('OpenRouter API key missing');
-
-    const openRouter = new OpenRouter({
-        apiKey,
-        httpReferer: process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000",
-        xTitle: "Pluto Chat",
-    });
-
-    const response = await openRouter.chat.send({
-        chatGenerationParams: {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+            'X-Title': 'Pluto Chat',
+        },
+        body: JSON.stringify({
             model,
-            messages: messages.map(msg => ({ role: msg.role, content: msg.content })),
+            messages: buildOpenAICompatibleMessages(messages),
             stream: true,
-            maxTokens: resolveOutputTokenCap(maxOutputTokens),
-            reasoning: { effort: reasoningEffort }
-        }
+            max_tokens: resolveOutputTokenCap(maxOutputTokens),
+            reasoning: { effort: reasoningEffort },
+        }),
+        signal,
     });
 
-    const encoder = new TextEncoder();
-    return new ReadableStream({
-        async start(controller) {
-            try {
-                for await (const chunk of response) {
-                    if (signal?.aborted) break;
+    if (!response.ok) {
+        const responseText = await response.text().catch(() => '');
+        throw new Error(`OpenRouter API error ${response.status}: ${responseText || response.statusText}`);
+    }
 
-                    const delta = chunk.choices?.[0]?.delta;
-                    if (delta && (delta.content || delta.reasoning)) {
-                        const data = JSON.stringify({
-                            choices: [{
-                                delta: {
-                                    content: delta.content ?? undefined,
-                                    reasoning_content: delta.reasoning ?? undefined
-                                },
-                                index: 0,
-                                finish_reason: null
-                            }]
-                        });
-                        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-                    }
-                }
-                if (!signal?.aborted) {
-                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-                    controller.close();
-                }
-            } catch (e) {
-                if (!signal?.aborted) {
-                    controller.error(e);
-                }
-            }
-        }
-    });
+    return response.body as ReadableStream;
 }
 
 /**
@@ -698,9 +884,9 @@ async function processAndTransformStream(sourceStream: ReadableStream, controlle
                     const choice = parsed.choices?.[0];
                     const delta = choice?.delta;
                     const content = delta?.content || '';
-                    const reasoning = delta?.reasoning_content || '';
+                    const reasoning = delta?.reasoning_content || delta?.reasoning || delta?.thinking || '';
 
-                    if (content) {
+                    if (content || reasoning) {
                         let newContent = '';
                         let newReasoning = reasoning;
                         let remaining = content;

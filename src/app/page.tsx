@@ -6,7 +6,7 @@ import { createThread } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
 import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT } from '@/lib/constants';
 import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
-import { type ReasoningEffort } from '@/lib/types';
+import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Wand2, BookOpen, Code, GraduationCap, type LucideIcon } from 'lucide-react';
 
@@ -28,21 +28,33 @@ export default function HomePage() {
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   const [isLoading, setIsLoading] = useState(false);
+  const [draftThreadId, setDraftThreadId] = useState<string | null>(null);
 
-  const handleSend = async (value: string) => {
-    if (!value.trim()) return;
+  const ensureThread = async () => {
+    if (draftThreadId) {
+      return draftThreadId;
+    }
+
+    const thread = await createThread(model, reasoningEffort);
+    setDraftThreadId(thread.id);
+    return thread.id;
+  };
+
+  const handleSend = async (value: string, attachments: Attachment[]) => {
+    if (!value.trim() && attachments.length === 0) return false;
 
     setIsLoading(true);
     try {
-      // 1. Create the thread
-      const thread = await createThread(model, reasoningEffort);
+      // 1. Ensure thread exists (attachments may have already created one)
+      const threadId = await ensureThread();
 
       // 2. Add the user message
-      await addMessage(thread.id, 'user', value.trim());
+      await addMessage(threadId, 'user', value.trim(), undefined, undefined, attachments);
 
       // 3. Navigate to the new chat
       // The ChatPageClient will pick up the user message and start generating
-      router.push(`/c/${thread.id}`);
+      router.push(`/c/${threadId}`);
+      return true;
     } catch (error: unknown) {
       console.error('Failed to create chat:', error);
       const errorRecord = toErrorRecord(error);
@@ -74,6 +86,7 @@ export default function HomePage() {
 
       alert(`Failed to create chat: ${errorMessage}`);
       setIsLoading(false);
+      return false;
     }
   };
 
@@ -147,6 +160,8 @@ export default function HomePage() {
       <ChatInput
         ref={chatInputRef}
         onSubmit={handleSend}
+        onEnsureThread={ensureThread}
+        threadId={draftThreadId}
         isLoading={isLoading}
         currentModel={model}
         onModelChange={setModel}

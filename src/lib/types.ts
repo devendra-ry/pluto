@@ -8,10 +8,22 @@ export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 export const MessageRoleSchema = z.enum(['user', 'assistant']);
 export type MessageRole = z.infer<typeof MessageRoleSchema>;
 
+// File attachment metadata saved with a message
+export const AttachmentSchema = z.object({
+    id: z.string().min(1, 'Attachment id is required'),
+    name: z.string().min(1, 'Attachment name is required'),
+    mimeType: z.string().min(1, 'Attachment MIME type is required'),
+    size: z.number().int().nonnegative(),
+    path: z.string().min(1, 'Attachment path is required'),
+    url: z.string().min(1, 'Attachment URL is required'),
+});
+export type Attachment = z.infer<typeof AttachmentSchema>;
+
 // Single message in a chat request
 export const ChatMessageSchema = z.object({
     role: MessageRoleSchema,
     content: z.string(),
+    attachments: z.array(AttachmentSchema).optional(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
