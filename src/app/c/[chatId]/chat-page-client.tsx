@@ -7,7 +7,7 @@ import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/compo
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort } from '@/hooks/use-threads';
 import { useMessages, addMessage, deleteMessagesByIds, getThreadMessages } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL } from '@/lib/constants';
+import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_THREAD_KEY } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { Wand2, BookOpen, Code, GraduationCap, ChevronDown, type LucideIcon } from 'lucide-react';
@@ -430,6 +430,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (hasInitialized.current && messages.length > 0 && !isLoading && !isThinking) {
             const lastMessage = messages[messages.length - 1];
             if (lastMessage.role === 'user') {
+                const pendingGenerationThreadId = window.sessionStorage.getItem(PENDING_GENERATION_THREAD_KEY);
+                if (pendingGenerationThreadId !== chatId) {
+                    return;
+                }
+                window.sessionStorage.removeItem(PENDING_GENERATION_THREAD_KEY);
                 generateResponse(messages);
             }
         }

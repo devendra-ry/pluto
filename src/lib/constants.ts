@@ -333,6 +333,7 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
 export const DEFAULT_MODEL = 'moonshotai/Kimi-K2.5-TEE';
 export const DEFAULT_REASONING_EFFORT = 'high';
 export const IMAGE_GENERATION_MODEL = 'zai-org/z-image-turbo';
+export const PENDING_GENERATION_THREAD_KEY = 'pending-generation-thread-id';
 
 export type ModelId = string;
 

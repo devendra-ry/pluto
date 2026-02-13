@@ -4,7 +4,7 @@ import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread, updateThreadModel } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL } from '@/lib/constants';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_THREAD_KEY } from '@/lib/constants';
 import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -62,6 +62,7 @@ export default function HomePage() {
 
       // 3. Navigate to the new chat
       // The ChatPageClient will pick up the user message and start generating
+      window.sessionStorage.setItem(PENDING_GENERATION_THREAD_KEY, threadId);
       router.push(`/c/${threadId}`);
       return true;
     } catch (error: unknown) {
