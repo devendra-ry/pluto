@@ -355,16 +355,16 @@ function isContextOverflowError(error: unknown) {
 }
 
 function supportsImageInputs(modelConfig: ModelConfig) {
-    return modelConfig.capabilities.includes('vision');
+    return modelConfig.provider !== 'openrouter' && modelConfig.capabilities.includes('vision');
 }
 
 function supportsPdfInputs(modelConfig: ModelConfig) {
-    return modelConfig.capabilities.includes('pdf') || modelConfig.provider === 'google';
+    return modelConfig.provider !== 'openrouter'
+        && (modelConfig.capabilities.includes('pdf') || modelConfig.provider === 'google');
 }
 
 function supportsTextInputs(modelConfig: ModelConfig) {
-    const isChutesBackedModel = modelConfig.provider !== 'google' && modelConfig.provider !== 'openrouter';
-    return modelConfig.provider === 'google' || isChutesBackedModel;
+    return modelConfig.provider !== 'openrouter' && modelConfig.provider === 'google';
 }
 
 function toBase64(bytes: Uint8Array) {

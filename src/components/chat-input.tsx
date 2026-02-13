@@ -72,11 +72,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
     const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
-    const isChutesBackedModel = selectedModel.provider !== 'google' && selectedModel.provider !== 'openrouter';
-    const supportsImages = selectedModel.capabilities.includes('vision');
-    const supportsPdfs = selectedModel.capabilities.includes('pdf') || selectedModel.provider === 'google';
-    const supportsTexts = selectedModel.provider === 'google' || isChutesBackedModel;
+    const isOpenRouterModel = selectedModel.provider === 'openrouter';
+    const supportsImages = !isOpenRouterModel && selectedModel.capabilities.includes('vision');
+    const supportsPdfs = !isOpenRouterModel && (selectedModel.capabilities.includes('pdf') || selectedModel.provider === 'google');
+    const supportsTexts = !isOpenRouterModel && selectedModel.provider === 'google';
     const supportsAttachments = supportsImages || supportsPdfs || supportsTexts;
+    const activeAttachmentItems = useMemo(
+        () => (supportsAttachments ? attachmentItems : []),
+        [supportsAttachments, attachmentItems]
+    );
     const acceptedMimeTypes = [
         supportsImages ? 'image/png,image/jpeg,image/webp,image/gif' : '',
         supportsPdfs ? 'application/pdf' : '',
@@ -84,11 +88,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     ].filter(Boolean).join(',');
 
     const uploadedAttachments = useMemo(
-        () => attachmentItems.filter((item) => item.status === 'uploaded' && item.attachment).map((item) => item.attachment as Attachment),
-        [attachmentItems]
+        () => activeAttachmentItems.filter((item) => item.status === 'uploaded' && item.attachment).map((item) => item.attachment as Attachment),
+        [activeAttachmentItems]
     );
-    const hasUploadingAttachments = attachmentItems.some((item) => item.status === 'uploading');
-    const hasFailedAttachments = attachmentItems.some((item) => item.status === 'failed');
+    const hasUploadingAttachments = activeAttachmentItems.some((item) => item.status === 'uploading');
+    const hasFailedAttachments = activeAttachmentItems.some((item) => item.status === 'failed');
 
     useImperativeHandle(ref, () => ({
         setValue: (newValue: string) => {
@@ -232,7 +236,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         const files = Array.from(e.target.files ?? []);
         if (files.length === 0) return;
 
-        const availableSlots = Math.max(0, MAX_ATTACHMENTS_PER_MESSAGE - attachmentItems.length);
+        const availableSlots = Math.max(0, MAX_ATTACHMENTS_PER_MESSAGE - activeAttachmentItems.length);
         const selectedFiles = files.slice(0, availableSlots);
         if (selectedFiles.length === 0) {
             e.target.value = '';
@@ -317,14 +321,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         placeholder="Type your message here..."
                         className={cn(
                             "w-full px-5 pt-4 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-base leading-relaxed",
-                            attachmentItems.length > 0 ? "pb-40" : "pb-14"
+                            activeAttachmentItems.length > 0 ? "pb-40" : "pb-14"
                         )}
                     />
 
-                    {attachmentItems.length > 0 && (
+                    {activeAttachmentItems.length > 0 && (
                         <div className="absolute left-3 right-3 bottom-12 flex flex-col gap-2 pointer-events-auto">
                             <div className="max-h-24 overflow-y-auto pr-1 space-y-2">
-                                {attachmentItems.map((item) => (
+                                {activeAttachmentItems.map((item) => (
                                     <div
                                         key={item.localId}
                                         className="rounded-xl bg-[#2a2035]/60 border border-white/10 px-3 py-2"
@@ -453,7 +457,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                     variant="ghost"
                                     type="button"
                                     onClick={handleAttachClick}
-                                    disabled={isLoading || !supportsAttachments || attachmentItems.length >= MAX_ATTACHMENTS_PER_MESSAGE}
+                                    disabled={isLoading || !supportsAttachments || activeAttachmentItems.length >= MAX_ATTACHMENTS_PER_MESSAGE}
                                     className="h-8 w-8 md:w-11 p-0 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all flex items-center justify-center"
                                 >
                                     <Paperclip className="h-3.5 w-3.5 md:h-4 md:w-4" />
