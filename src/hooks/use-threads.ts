@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { type ReasoningEffort } from '@/lib/types';
 
@@ -58,15 +58,23 @@ function toThread(value: unknown): Thread | null {
 // Get all threads sorted by most recent
 export function useThreads() {
     const [threads, setThreads] = useState<Thread[]>([]);
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const channelRef = useRef<ReturnType<ReturnType<typeof createClient>['channel']> | null>(null);
     // Use useState to ensure client is created once and stable
     const [supabase] = useState(() => createClient());
 
     const refreshThreads = async () => {
         try {
-            const { data, error } = await supabase
+            let query = supabase
                 .from('threads')
                 .select(THREAD_SELECT_COLUMNS)
                 .order('updated_at', { ascending: false });
+
+            if (currentUserId) {
+                query = query.eq('user_id', currentUserId);
+            }
+
+            const { data, error } = await query;
 
             if (error) {
                 console.error('[useThreads] Error fetching threads:', error);
@@ -83,13 +91,20 @@ export function useThreads() {
 
     useEffect(() => {
         let isActive = true;
+        let localUserId: string | null = null;
 
         const fetchThreads = async () => {
             try {
-                const { data, error } = await supabase
+                let query = supabase
                     .from('threads')
                     .select(THREAD_SELECT_COLUMNS)
                     .order('updated_at', { ascending: false });
+
+                if (localUserId) {
+                    query = query.eq('user_id', localUserId);
+                }
+
+                const { data, error } = await query;
 
                 if (error) {
                     console.error('[useThreads] Error fetching threads:', error);
@@ -104,40 +119,74 @@ export function useThreads() {
             }
         };
 
-        void fetchThreads();
-
-        // 1. Realtime subscription
-        const channel = supabase
-            .channel('threads_changes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'threads' }, (payload) => {
+        const setup = async () => {
+            try {
+                const { data: authData, error: authError } = await supabase.auth.getUser();
                 if (!isActive) return;
-
-                if (payload.eventType === 'DELETE') {
-                    const deletedId = typeof payload.old?.id === 'string' ? payload.old.id : null;
-                    if (!deletedId) return;
-                    setThreads((prev) => prev.filter((thread) => thread.id !== deletedId));
+                if (authError) {
+                    console.error('[useThreads] Error resolving current user:', authError);
                     return;
                 }
 
-                const nextThread = toThread(payload.new);
-                if (!nextThread) return;
+                localUserId = authData?.user?.id ?? null;
+                setCurrentUserId(localUserId);
+            } catch (err) {
+                if (!isActive) return;
+                console.error('[useThreads] Unexpected error resolving current user:', err);
+                return;
+            }
 
-                setThreads((prev) => {
-                    const existingIndex = prev.findIndex((thread) => thread.id === nextThread.id);
-                    if (existingIndex === -1) {
-                        return sortThreadsByUpdatedAt([...prev, nextThread]);
+            await fetchThreads();
+            if (!isActive || !localUserId) {
+                return;
+            }
+
+            if (channelRef.current) {
+                supabase.removeChannel(channelRef.current);
+                channelRef.current = null;
+            }
+
+            // 1. Realtime subscription scoped to current user only
+            const channel = supabase
+                .channel(`threads_changes_${localUserId}`)
+                .on('postgres_changes', {
+                    event: '*',
+                    schema: 'public',
+                    table: 'threads',
+                    filter: `user_id=eq.${localUserId}`,
+                }, (payload) => {
+                    if (!isActive) return;
+
+                    if (payload.eventType === 'DELETE') {
+                        const deletedId = typeof payload.old?.id === 'string' ? payload.old.id : null;
+                        if (!deletedId) return;
+                        setThreads((prev) => prev.filter((thread) => thread.id !== deletedId));
+                        return;
                     }
 
-                    const updated = [...prev];
-                    updated[existingIndex] = nextThread;
-                    return sortThreadsByUpdatedAt(updated);
+                    const nextThread = toThread(payload.new);
+                    if (!nextThread) return;
+
+                    setThreads((prev) => {
+                        const existingIndex = prev.findIndex((thread) => thread.id === nextThread.id);
+                        if (existingIndex === -1) {
+                            return sortThreadsByUpdatedAt([...prev, nextThread]);
+                        }
+
+                        const updated = [...prev];
+                        updated[existingIndex] = nextThread;
+                        return sortThreadsByUpdatedAt(updated);
+                    });
+                })
+                .subscribe((status) => {
+                    if (status === 'CHANNEL_ERROR') {
+                        console.error('[useThreads] Realtime channel error');
+                    }
                 });
-            })
-            .subscribe((status) => {
-                if (status === 'CHANNEL_ERROR') {
-                    console.error('[useThreads] Realtime channel error');
-                }
-            });
+            channelRef.current = channel;
+        };
+
+        void setup();
 
         // 2. Local CustomEvent sync for immediate updates
         const handleRefresh = () => {
@@ -147,7 +196,10 @@ export function useThreads() {
 
         return () => {
             isActive = false;
-            supabase.removeChannel(channel);
+            if (channelRef.current) {
+                supabase.removeChannel(channelRef.current);
+                channelRef.current = null;
+            }
             window.removeEventListener(REFRESH_THREADS_EVENT, handleRefresh);
         };
     }, [supabase]);
