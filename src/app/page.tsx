@@ -4,8 +4,8 @@ import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread, updateThreadSystemPrompt } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY } from '@/lib/constants';
-import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY } from '@/lib/constants';
+import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -60,10 +60,11 @@ export default function HomePage() {
   const handleSend = async (
     value: string,
     attachments: Attachment[],
-    options: { mode: 'chat' | 'image' }
+    options: ChatSubmitOptions
   ) => {
     if (!value.trim() && attachments.length === 0) return false;
     const isImageMode = options.mode === 'image';
+    const isSearchMode = options.mode === 'search';
     const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : null;
 
     setIsLoading(true);
@@ -81,6 +82,11 @@ export default function HomePage() {
         window.sessionStorage.setItem(PENDING_GENERATION_MODEL_KEY, targetModel);
       } else {
         window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
+      }
+      if (isSearchMode && !isImageMode) {
+        window.sessionStorage.setItem(PENDING_GENERATION_SEARCH_KEY, '1');
+      } else {
+        window.sessionStorage.removeItem(PENDING_GENERATION_SEARCH_KEY);
       }
       if (systemPrompt.trim().length > 0 && !isImageMode) {
         window.sessionStorage.setItem(PENDING_SYSTEM_PROMPT_KEY, systemPrompt.trim());

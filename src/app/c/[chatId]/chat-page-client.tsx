@@ -7,7 +7,7 @@ import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/compo
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort, updateThreadSystemPrompt } from '@/hooks/use-threads';
 import { useMessages, addMessage, deleteMessagesByIds, getThreadMessages } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY } from '@/lib/constants';
+import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { Wand2, BookOpen, Code, GraduationCap, ChevronDown, type LucideIcon } from 'lucide-react';
@@ -228,7 +228,12 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
     }, []);
 
-    const generateResponse = useCallback(async (currentMessages: ChatMessageType[], forcedModelId?: string, forcedSystemPrompt?: string) => {
+    const generateResponse = useCallback(async (
+        currentMessages: ChatMessageType[],
+        forcedModelId?: string,
+        forcedSystemPrompt?: string,
+        forceSearchMode: boolean = false
+    ) => {
         const lastMsg = currentMessages[currentMessages.length - 1];
         if (!lastMsg || lastMsg.role !== 'user') return;
         if (generatingRef.current === lastMsg.id) return;
@@ -237,6 +242,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         const activeModelId = forcedModelId || model;
         const selectedModel = AVAILABLE_MODELS.find(m => m.id === activeModelId);
         const isImageGenModel = activeModelId === IMAGE_GENERATION_MODEL;
+        const useSearch = !isImageGenModel && forceSearchMode;
         const supportsReasoning = isImageGenModel ? false : (selectedModel?.supportsReasoning ?? true);
 
         const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && reasoningEffort === 'low');
@@ -365,6 +371,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     model: activeModelId,
                     reasoningEffort,
                     systemPrompt: !isImageGenModel && effectiveSystemPrompt ? effectiveSystemPrompt : undefined,
+                    search: useSearch,
                 }),
                 signal: abortControllerRef.current.signal,
             });
@@ -492,15 +499,17 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     return;
                 }
                 const pendingGenerationModelId = window.sessionStorage.getItem(PENDING_GENERATION_MODEL_KEY);
+                const pendingGenerationSearch = window.sessionStorage.getItem(PENDING_GENERATION_SEARCH_KEY);
                 const pendingSystemPrompt = window.sessionStorage.getItem(PENDING_SYSTEM_PROMPT_KEY);
                 window.sessionStorage.removeItem(PENDING_GENERATION_THREAD_KEY);
                 window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
+                window.sessionStorage.removeItem(PENDING_GENERATION_SEARCH_KEY);
                 window.sessionStorage.removeItem(PENDING_SYSTEM_PROMPT_KEY);
                 if (pendingGenerationModelId === IMAGE_GENERATION_MODEL) {
-                    generateResponse(messages, IMAGE_GENERATION_MODEL);
+                    generateResponse(messages, IMAGE_GENERATION_MODEL, undefined, false);
                     return;
                 }
-                generateResponse(messages, undefined, pendingSystemPrompt || undefined);
+                generateResponse(messages, undefined, pendingSystemPrompt || undefined, pendingGenerationSearch === '1');
             }
         }
     }, [messages, isLoading, isThinking, generateResponse, chatId]);
@@ -515,6 +524,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         // Reset the failure flag when user manually sends a message
         lastRequestFailed.current = false;
         const targetModel = options.mode === 'image' ? IMAGE_GENERATION_MODEL : model;
+        const useSearch = options.mode === 'search';
 
         const userMsg: ChatMessageType = {
             id: crypto.randomUUID(),
@@ -532,7 +542,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 m.id === userMsg.id ? { ...m, id: persistedUser.id } : m
             );
             setMessages(persistedMessages);
-            await generateResponse(persistedMessages, targetModel);
+            await generateResponse(persistedMessages, targetModel, undefined, useSearch);
             return true;
         } catch (error) {
             setIsLoading(false);

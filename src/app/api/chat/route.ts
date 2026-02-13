@@ -1,5 +1,5 @@
 import { ChatRequestSchema, ChatMessage, type ReasoningEffort } from '@/lib/types';
-import { AVAILABLE_MODELS, type ModelConfig } from '@/lib/constants';
+import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS, type ModelConfig } from '@/lib/constants';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 import { createClient } from '@/utils/supabase/server';
@@ -64,6 +64,7 @@ const ATTACHMENTS_BUCKET =
     process.env.SUPABASE_ATTACHMENTS_BUCKET ||
     process.env.NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET ||
     DEFAULT_ATTACHMENTS_BUCKET;
+const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
 
 function readPositiveInt(value: string | undefined, fallback: number) {
     if (!value) return fallback;
@@ -603,16 +604,22 @@ export async function POST(req: Request) {
                     return;
                 }
 
-                const { messages, model, reasoningEffort, systemPrompt } = parseResult.data;
+                const { messages, model, reasoningEffort, systemPrompt, search } = parseResult.data;
                 const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
                 if (!modelConfig) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid model selection' })}\n\n`);
                     controller.close();
                     return;
                 }
+                const useSearch = search === true;
                 const normalizedSystemPrompt = systemPrompt?.trim() ?? '';
                 if (modelConfig.capabilities.includes('imageGen')) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Selected model is image-generation only. Use image generation flow.' })}\n\n`);
+                    controller.close();
+                    return;
+                }
+                if (useSearch && (modelConfig.provider !== 'google' || !SEARCH_ENABLED_MODEL_SET.has(model))) {
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Search is supported only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite.' })}\n\n`);
                     controller.close();
                     return;
                 }
@@ -642,7 +649,7 @@ export async function POST(req: Request) {
                         signal
                     );
                     if (modelConfig.provider === 'google') {
-                        return getGoogleStream(model, preparedMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, normalizedSystemPrompt, signal);
+                        return getGoogleStream(model, preparedMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, normalizedSystemPrompt, useSearch, signal);
                     }
                     if (modelConfig.provider === 'openrouter') {
                         return getOpenRouterStream(model, preparedMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, normalizedSystemPrompt, signal);
@@ -755,6 +762,7 @@ async function getGoogleStream(
     reasoningEffort: ReasoningEffort = 'low',
     maxOutputTokens?: number | null,
     systemPrompt?: string,
+    useSearch: boolean = false,
     signal?: AbortSignal
 ) {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -779,6 +787,7 @@ async function getGoogleStream(
             thinkingLevel?: ThinkingLevel;
             thinkingBudget?: number;
         };
+        tools?: Array<{ googleSearch: Record<string, never> }>;
     } = { maxOutputTokens: resolveOutputTokenCap(maxOutputTokens) };
     const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
 
@@ -798,6 +807,10 @@ async function getGoogleStream(
             const budgetMap: Record<string, number> = { low: 0, medium: -1, high: maxBudget };
             config.thinkingConfig.thinkingBudget = budgetMap[reasoningEffort] ?? -1;
         }
+    }
+
+    if (useSearch) {
+        config.tools = [{ googleSearch: {} }];
     }
 
     const response = await ai.models.generateContentStream({ model, config, contents: effectiveContents });

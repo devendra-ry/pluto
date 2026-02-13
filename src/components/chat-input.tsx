@@ -9,7 +9,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle, ImagePlus, ScrollText } from 'lucide-react';
-import { AVAILABLE_MODELS } from '@/lib/constants';
+import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { ModelSelector } from '@/components/model-selector';
@@ -33,7 +33,7 @@ interface LocalAttachmentItem {
     error?: string;
 }
 
-export type ChatSubmitMode = 'chat' | 'image';
+export type ChatSubmitMode = 'chat' | 'image' | 'search';
 
 export interface ChatSubmitOptions {
     mode: ChatSubmitMode;
@@ -87,6 +87,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const attachmentItemsRef = useRef<LocalAttachmentItem[]>([]);
     const [value, setValue] = useState(initialValue);
     const [isImageMode, setIsImageMode] = useState(false);
+    const [isSearchMode, setIsSearchMode] = useState(false);
     const [isSystemMenuOpen, setIsSystemMenuOpen] = useState(false);
     const [systemPromptDraft, setSystemPromptDraft] = useState(systemPrompt);
     const [isSavingSystemPrompt, setIsSavingSystemPrompt] = useState(false);
@@ -94,6 +95,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const { showToast } = useToast();
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
     const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
+    const supportsSearchMode = SEARCH_ENABLED_MODELS.includes(currentModel as typeof SEARCH_ENABLED_MODELS[number]);
     const isOpenRouterModel = selectedModel.provider === 'openrouter';
     const supportsImages = !isOpenRouterModel && selectedModel.capabilities.includes('vision');
     const supportsPdfs = !isOpenRouterModel && (selectedModel.capabilities.includes('pdf') || selectedModel.provider === 'google');
@@ -116,6 +118,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const hasUploadingAttachments = activeAttachmentItems.some((item) => item.status === 'uploading');
     const hasFailedAttachments = activeAttachmentItems.some((item) => item.status === 'failed');
     const hasSystemPrompt = systemPrompt.trim().length > 0;
+
+    useEffect(() => {
+        if (!supportsSearchMode && isSearchMode) {
+            setIsSearchMode(false);
+            showToast('Search is available only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite', 'error');
+        }
+    }, [supportsSearchMode, isSearchMode, showToast]);
 
     useImperativeHandle(ref, () => ({
         setValue: (newValue: string) => {
@@ -256,7 +265,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         }
 
         try {
-            const submitted = await onSubmit(submittedValue, submittedAttachments, { mode: isImageMode ? 'image' : 'chat' });
+            const submitted = await onSubmit(submittedValue, submittedAttachments, {
+                mode: isImageMode ? 'image' : (isSearchMode ? 'search' : 'chat')
+            });
             if (submitted === false) {
                 // Restore only if user has not started drafting a new message yet.
                 if (valueRef.current.trim().length === 0 && attachmentItemsRef.current.length === 0) {
@@ -287,6 +298,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         setIsImageMode((prev) => {
             const next = !prev;
             if (next) {
+                setIsSearchMode(false);
                 const tasks = uploadTasksRef.current;
                 for (const cancel of tasks.values()) {
                     cancel();
@@ -300,6 +312,21 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             return next;
         });
     }, []);
+
+    const handleToggleSearchMode = useCallback(() => {
+        if (isLoading) return;
+        if (!supportsSearchMode) {
+            showToast('Search is available only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite', 'error');
+            return;
+        }
+        setIsSearchMode((prev) => {
+            const next = !prev;
+            if (next) {
+                setIsImageMode(false);
+            }
+            return next;
+        });
+    }, [isLoading, supportsSearchMode, showToast]);
 
     const handleAttachClick = () => {
         if (isLoading || !supportsAttachments) return;
@@ -427,7 +454,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         value={value}
                         onChange={handleChange}
                         onKeyDown={handleKeyDown}
-                        placeholder={isImageMode ? 'Describe the image you want to generate...' : 'Type your message here...'}
+                        placeholder={
+                            isImageMode
+                                ? 'Describe the image you want to generate...'
+                                : (isSearchMode ? 'Ask anything with web search...' : 'Type your message here...')
+                        }
                         className="w-full px-5 pt-4 pb-3 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
                     />
 
@@ -552,7 +583,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
                             <Button
                                 variant="ghost"
-                                className="h-8 px-2 md:px-3 gap-1.5 md:gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all text-sm font-semibold"
+                                type="button"
+                                onClick={handleToggleSearchMode}
+                                className={cn(
+                                    "h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
+                                    isSearchMode
+                                        ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
+                                        : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
+                                )}
                             >
                                 <Globe className="h-3.5 w-3.5 md:h-4 md:w-4" />
                                 <span className="hidden md:inline">Search</span>
