@@ -9,6 +9,7 @@ export const SUPPORTED_ATTACHMENT_MIME_TYPES = [
     'image/webp',
     'image/gif',
     'application/pdf',
+    'text/plain',
 ] as const;
 
 export function isImageAttachment(mimeType: string) {
@@ -17,6 +18,10 @@ export function isImageAttachment(mimeType: string) {
 
 export function isPdfAttachment(mimeType: string) {
     return mimeType === 'application/pdf';
+}
+
+export function isTextAttachment(mimeType: string) {
+    return mimeType === 'text/plain';
 }
 
 export function isSupportedAttachmentMimeType(mimeType: string) {

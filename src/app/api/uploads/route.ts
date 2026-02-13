@@ -79,7 +79,7 @@ export async function POST(req: Request) {
 
     if (!isSupportedAttachmentMimeType(mimeType)) {
         return jsonResponse({
-            error: 'Unsupported file type. Allowed: PNG, JPG, WEBP, GIF, PDF',
+            error: 'Unsupported file type. Allowed: PNG, JPG, WEBP, GIF, PDF, TXT',
         }, 400);
     }
     if (file.size <= 0) {

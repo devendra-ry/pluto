@@ -10,6 +10,7 @@ import {
     MAX_ATTACHMENT_BYTES_FOR_MODEL,
     isImageAttachment,
     isPdfAttachment,
+    isTextAttachment,
 } from '@/lib/attachments';
 
 export const runtime = 'edge';
@@ -361,6 +362,11 @@ function supportsPdfInputs(modelConfig: ModelConfig) {
     return modelConfig.capabilities.includes('pdf') || modelConfig.provider === 'google';
 }
 
+function supportsTextInputs(modelConfig: ModelConfig) {
+    const isChutesBackedModel = modelConfig.provider !== 'google' && modelConfig.provider !== 'openrouter';
+    return modelConfig.provider === 'google' || isChutesBackedModel;
+}
+
 function toBase64(bytes: Uint8Array) {
     let binary = '';
     const chunkSize = 0x8000;
@@ -379,6 +385,7 @@ async function prepareMessageAttachments(
 ): Promise<PreparedChatMessage[]> {
     const allowImages = supportsImageInputs(modelConfig);
     const allowPdfs = supportsPdfInputs(modelConfig);
+    const allowTexts = supportsTextInputs(modelConfig);
     let totalAttachmentBytes = 0;
 
     const prepared: PreparedChatMessage[] = [];
@@ -399,8 +406,9 @@ async function prepareMessageAttachments(
 
             const imageAttachment = isImageAttachment(attachment.mimeType);
             const pdfAttachment = isPdfAttachment(attachment.mimeType);
+            const textAttachment = isTextAttachment(attachment.mimeType);
 
-            if (!imageAttachment && !pdfAttachment) {
+            if (!imageAttachment && !pdfAttachment && !textAttachment) {
                 throw new Error(`Unsupported attachment type: ${attachment.mimeType}`);
             }
             if (imageAttachment && !allowImages) {
@@ -408,6 +416,10 @@ async function prepareMessageAttachments(
                 continue;
             }
             if (pdfAttachment && !allowPdfs) {
+                skippedForCapabilities += 1;
+                continue;
+            }
+            if (textAttachment && !allowTexts) {
                 skippedForCapabilities += 1;
                 continue;
             }
