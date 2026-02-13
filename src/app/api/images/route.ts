@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 
 import { DEFAULT_ATTACHMENTS_BUCKET } from '@/lib/attachments';
-import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL } from '@/lib/constants';
+import { IMAGE_GENERATION_MODEL } from '@/lib/constants';
 import { type Attachment } from '@/lib/types';
 import { createClient } from '@/utils/supabase/server';
 
@@ -40,16 +40,13 @@ function getImagesApiUrlCandidates() {
     ]);
 }
 
-function getModelImagesApiUrlCandidates(model: string) {
-    if (model === IMAGE_GENERATION_MODEL) {
-        return uniqueUrls([
-            process.env.CHUTES_Z_IMAGE_API_URL,
-            process.env.CHUTES_Z_IMAGE_URL,
-            DEFAULT_Z_IMAGE_GENERATE_URL,
-            ...getImagesApiUrlCandidates(),
-        ]);
-    }
-    return getImagesApiUrlCandidates();
+function getImageApiUrlCandidates() {
+    return uniqueUrls([
+        process.env.CHUTES_Z_IMAGE_API_URL,
+        process.env.CHUTES_Z_IMAGE_URL,
+        DEFAULT_Z_IMAGE_GENERATE_URL,
+        ...getImagesApiUrlCandidates(),
+    ]);
 }
 
 function jsonResponse(payload: Record<string, unknown>, status: number = 200) {
@@ -207,7 +204,8 @@ export async function POST(req: Request) {
 
     const record = body as Record<string, unknown>;
     const threadId = getText(record.threadId);
-    const model = getText(record.model);
+    const requestedModel = getText(record.model);
+    const model = IMAGE_GENERATION_MODEL;
     const prompt = getText(record.prompt);
     const width = DEFAULT_IMAGE_WIDTH;
     const height = DEFAULT_IMAGE_HEIGHT;
@@ -218,22 +216,11 @@ export async function POST(req: Request) {
     if (!threadId) {
         return jsonResponse({ error: 'threadId is required' }, 400);
     }
-    if (!model) {
-        return jsonResponse({ error: 'model is required' }, 400);
-    }
     if (!prompt) {
         return jsonResponse({ error: 'prompt is required' }, 400);
     }
-
-    const modelConfig = AVAILABLE_MODELS.find((item) => item.id === model);
-    if (!modelConfig) {
-        return jsonResponse({ error: 'Invalid model selection' }, 400);
-    }
-    if (!modelConfig.capabilities.includes('imageGen')) {
-        return jsonResponse({ error: 'Selected model does not support image generation' }, 400);
-    }
-    if (modelConfig.provider === 'openrouter' || modelConfig.provider === 'google') {
-        return jsonResponse({ error: 'Image generation is only enabled for chutes-backed models' }, 400);
+    if (requestedModel && requestedModel !== IMAGE_GENERATION_MODEL) {
+        return jsonResponse({ error: 'Image mode uses an internal model and does not accept model overrides' }, 400);
     }
 
     const apiKey = process.env.CHUTES_API_KEY || process.env.CHUTES_API_TOKEN;
@@ -244,17 +231,29 @@ export async function POST(req: Request) {
     try {
         await assertThreadOwnership(supabase, threadId, user.id);
 
-        const targetApiUrls = getModelImagesApiUrlCandidates(model);
+        const targetApiUrls = getImageApiUrlCandidates();
         const requestAttempts: Array<{ label: string; body: Record<string, unknown> }> = [];
 
-        if (model === IMAGE_GENERATION_MODEL) {
-            requestAttempts.push({
-                label: 'prompt-only',
-                body: { prompt },
-            });
-            requestAttempts.push({
-                label: 'native-image',
-                body: {
+        requestAttempts.push({
+            label: 'prompt-only',
+            body: { prompt },
+        });
+        requestAttempts.push({
+            label: 'native-image',
+            body: {
+                prompt,
+                width,
+                height,
+                num_inference_steps: numInferenceSteps,
+                guidance_scale: guidanceScale,
+                shift,
+                max_sequence_length: DEFAULT_MAX_SEQUENCE_LENGTH,
+            },
+        });
+        requestAttempts.push({
+            label: 'input-args-native-image',
+            body: {
+                input_args: {
                     prompt,
                     width,
                     height,
@@ -263,30 +262,16 @@ export async function POST(req: Request) {
                     shift,
                     max_sequence_length: DEFAULT_MAX_SEQUENCE_LENGTH,
                 },
-            });
-            requestAttempts.push({
-                label: 'input-args-native-image',
-                body: {
-                    input_args: {
-                        prompt,
-                        width,
-                        height,
-                        num_inference_steps: numInferenceSteps,
-                        guidance_scale: guidanceScale,
-                        shift,
-                        max_sequence_length: DEFAULT_MAX_SEQUENCE_LENGTH,
-                    },
+            },
+        });
+        requestAttempts.push({
+            label: 'input-args-prompt-only',
+            body: {
+                input_args: {
+                    prompt,
                 },
-            });
-            requestAttempts.push({
-                label: 'input-args-prompt-only',
-                body: {
-                    input_args: {
-                        prompt,
-                    },
-                },
-            });
-        }
+            },
+        });
 
         requestAttempts.push({
             label: 'openai-compatible',
@@ -369,8 +354,7 @@ export async function POST(req: Request) {
 
         if (!generated) {
             const missingModelSpecificUrl =
-                model === IMAGE_GENERATION_MODEL
-                && !getText(process.env.CHUTES_Z_IMAGE_API_URL || '')
+                !getText(process.env.CHUTES_Z_IMAGE_API_URL || '')
                 && !getText(process.env.CHUTES_Z_IMAGE_URL || '');
             if (lastStatus === 404 && missingModelSpecificUrl) {
                 return jsonResponse({

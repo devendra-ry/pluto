@@ -2,9 +2,9 @@
 
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { createThread, updateThreadModel } from '@/hooks/use-threads';
+import { createThread } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_THREAD_KEY } from '@/lib/constants';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_THREAD_KEY } from '@/lib/constants';
 import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -30,12 +30,12 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [draftThreadId, setDraftThreadId] = useState<string | null>(null);
 
-  const ensureThread = async (targetModel: string = model) => {
+  const ensureThread = async () => {
     if (draftThreadId) {
       return draftThreadId;
     }
 
-    const thread = await createThread(targetModel, reasoningEffort);
+    const thread = await createThread(model, reasoningEffort);
     setDraftThreadId(thread.id);
     return thread.id;
   };
@@ -47,15 +47,12 @@ export default function HomePage() {
   ) => {
     if (!value.trim() && attachments.length === 0) return false;
     const isImageMode = options.mode === 'image';
-    const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : model;
+    const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : null;
 
     setIsLoading(true);
     try {
       // 1. Ensure thread exists (attachments may have already created one)
-      const threadId = await ensureThread(targetModel);
-      if (isImageMode) {
-        await updateThreadModel(threadId, targetModel);
-      }
+      const threadId = await ensureThread();
 
       // 2. Add the user message
       await addMessage(threadId, 'user', value.trim(), undefined, undefined, attachments);
@@ -63,6 +60,11 @@ export default function HomePage() {
       // 3. Navigate to the new chat
       // The ChatPageClient will pick up the user message and start generating
       window.sessionStorage.setItem(PENDING_GENERATION_THREAD_KEY, threadId);
+      if (targetModel) {
+        window.sessionStorage.setItem(PENDING_GENERATION_MODEL_KEY, targetModel);
+      } else {
+        window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
+      }
       router.push(`/c/${threadId}`);
       return true;
     } catch (error: unknown) {

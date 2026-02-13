@@ -319,21 +319,13 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         supportsReasoning: false,
         capabilities: [],
     },
-    {
-        id: 'zai-org/z-image-turbo',
-        name: 'Z Image Turbo',
-        description: 'Fast image generation model on Chutes',
-        provider: 'zai-org',
-        supportsReasoning: false,
-        capabilities: ['imageGen'],
-        hidden: true,
-    },
 ];
 
 export const DEFAULT_MODEL = 'moonshotai/Kimi-K2.5-TEE';
 export const DEFAULT_REASONING_EFFORT = 'high';
 export const IMAGE_GENERATION_MODEL = 'zai-org/z-image-turbo';
 export const PENDING_GENERATION_THREAD_KEY = 'pending-generation-thread-id';
+export const PENDING_GENERATION_MODEL_KEY = 'pending-generation-model-id';
 
 export type ModelId = string;
 

@@ -7,7 +7,7 @@ import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/compo
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort } from '@/hooks/use-threads';
 import { useMessages, addMessage, deleteMessagesByIds, getThreadMessages } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_THREAD_KEY } from '@/lib/constants';
+import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_THREAD_KEY } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { Wand2, BookOpen, Code, GraduationCap, ChevronDown, type LucideIcon } from 'lucide-react';
@@ -50,6 +50,12 @@ const ICON_MAP: Record<string, LucideIcon> = {
     GraduationCap,
 };
 
+function isSelectableChatModel(modelId: string): boolean {
+    const modelConfig = AVAILABLE_MODELS.find((m) => m.id === modelId);
+    if (!modelConfig) return false;
+    return !modelConfig.hidden && !modelConfig.capabilities.includes('imageGen');
+}
+
 export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const thread = useThread(chatId);
     const storedMessages = useMessages(chatId);
@@ -70,7 +76,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const { showToast } = useToast();
 
     useEffect(() => {
-        if (thread?.model) {
+        if (thread?.model && isSelectableChatModel(thread.model)) {
             setModel(thread.model);
         }
         if (thread?.reasoning_effort) {
@@ -164,6 +170,9 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
 
     const handleModelChange = async (newModel: string) => {
+        if (!isSelectableChatModel(newModel)) {
+            return;
+        }
         setModel(newModel);
         await updateThreadModel(chatId, newModel);
     };
@@ -188,8 +197,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
         const activeModelId = forcedModelId || model;
         const selectedModel = AVAILABLE_MODELS.find(m => m.id === activeModelId);
-        const supportsReasoning = selectedModel?.supportsReasoning ?? true;
-        const isImageGenModel = selectedModel?.capabilities.includes('imageGen') ?? false;
+        const isImageGenModel = activeModelId === IMAGE_GENERATION_MODEL;
+        const supportsReasoning = isImageGenModel ? false : (selectedModel?.supportsReasoning ?? true);
 
         const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && reasoningEffort === 'low');
 
@@ -248,7 +257,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         threadId: chatId,
-                        model: activeModelId,
                         prompt: lastMsg.content,
                     }),
                     signal: abortControllerRef.current.signal,
@@ -434,7 +442,13 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 if (pendingGenerationThreadId !== chatId) {
                     return;
                 }
+                const pendingGenerationModelId = window.sessionStorage.getItem(PENDING_GENERATION_MODEL_KEY);
                 window.sessionStorage.removeItem(PENDING_GENERATION_THREAD_KEY);
+                window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
+                if (pendingGenerationModelId === IMAGE_GENERATION_MODEL) {
+                    generateResponse(messages, IMAGE_GENERATION_MODEL);
+                    return;
+                }
                 generateResponse(messages);
             }
         }

@@ -100,11 +100,15 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
         localStorage.setItem('starred-models', JSON.stringify(next));
     };
 
-    const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
+    const selectableModels = useMemo(
+        () => AVAILABLE_MODELS.filter((model) => !model.hidden && !model.capabilities.includes('imageGen')),
+        []
+    );
+    const selectedModel = selectableModels.find((m) => m.id === currentModel) ?? selectableModels[0] ?? AVAILABLE_MODELS[0];
 
     const filteredModels = useMemo(() => {
         return AVAILABLE_MODELS.filter((model) => {
-            if (model.hidden) return false;
+            if (model.hidden || model.capabilities.includes('imageGen')) return false;
 
             // 1. Search Query (Always apply)
             if (searchQuery) {
