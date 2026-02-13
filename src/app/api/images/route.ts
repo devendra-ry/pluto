@@ -26,6 +26,15 @@ function getImagesApiUrl() {
         || DEFAULT_CHUTES_IMAGES_URL;
 }
 
+function getModelImagesApiUrl(model: string) {
+    if (model === IMAGE_GENERATION_MODEL) {
+        return process.env.CHUTES_Z_IMAGE_API_URL
+            || process.env.CHUTES_Z_IMAGE_URL
+            || getImagesApiUrl();
+    }
+    return getImagesApiUrl();
+}
+
 function jsonResponse(payload: Record<string, unknown>, status: number = 200) {
     return new Response(JSON.stringify(payload), {
         status,
@@ -159,6 +168,12 @@ async function resolveImageData(
     throw new Error('Image API response missing both b64_json and url');
 }
 
+interface GeneratedImage {
+    bytes: Uint8Array;
+    mimeType: string;
+    revisedPrompt?: string;
+}
+
 export async function POST(req: Request) {
     const cookieStore = await cookies();
     const supabase = createClient(cookieStore);
@@ -212,47 +227,100 @@ export async function POST(req: Request) {
     try {
         await assertThreadOwnership(supabase, threadId, user.id);
 
-        const requestBody: Record<string, unknown> = {
-            model,
-            prompt,
-            size: `${width}x${height}`,
-            n: 1,
-            response_format: 'b64_json',
-        };
+        const targetApiUrl = getModelImagesApiUrl(model);
+        const requestAttempts: Array<{ label: string; body: Record<string, unknown> }> = [];
 
         if (model === IMAGE_GENERATION_MODEL) {
-            requestBody.width = width;
-            requestBody.height = height;
-            requestBody.num_inference_steps = numInferenceSteps;
-            requestBody.guidance_scale = guidanceScale;
-            requestBody.shift = shift;
+            requestAttempts.push({
+                label: 'native-image',
+                body: {
+                    prompt,
+                    width,
+                    height,
+                    num_inference_steps: numInferenceSteps,
+                    guidance_scale: guidanceScale,
+                    shift,
+                },
+            });
         }
 
-        const chutesResponse = await fetch(getImagesApiUrl(), {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
+        requestAttempts.push({
+            label: 'openai-compatible',
+            body: {
+                model,
+                prompt,
+                size: `${width}x${height}`,
+                n: 1,
+                response_format: 'b64_json',
+                num_inference_steps: numInferenceSteps,
+                guidance_scale: guidanceScale,
+                shift,
             },
-            body: JSON.stringify(requestBody),
-            signal: req.signal,
         });
 
-        if (!chutesResponse.ok) {
-            const responseText = await chutesResponse.text().catch(() => '');
-            return jsonResponse({
-                error: `Chutes image API error ${chutesResponse.status}: ${responseText || chutesResponse.statusText}`,
-            }, 502);
+        let generated: GeneratedImage | null = null;
+        let lastStatus = 0;
+        let lastErrorText = '';
+        let lastAttemptLabel = '';
+
+        for (const attempt of requestAttempts) {
+            lastAttemptLabel = attempt.label;
+            const chutesResponse = await fetch(targetApiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`,
+                },
+                body: JSON.stringify(attempt.body),
+                signal: req.signal,
+            });
+
+            const contentType = getText(chutesResponse.headers.get('content-type') || '').toLowerCase();
+
+            if (!chutesResponse.ok) {
+                lastStatus = chutesResponse.status;
+                lastErrorText = await chutesResponse.text().catch(() => '') || chutesResponse.statusText || 'Unknown upstream error';
+                continue;
+            }
+
+            try {
+                if (contentType.startsWith('image/')) {
+                    generated = {
+                        bytes: new Uint8Array(await chutesResponse.arrayBuffer()),
+                        mimeType: contentType.split(';')[0] || 'image/png',
+                    };
+                    break;
+                }
+
+                const rawText = await chutesResponse.text();
+                let parsedPayload: Record<string, unknown> | null = null;
+                try {
+                    const parsed = JSON.parse(rawText) as unknown;
+                    if (parsed && typeof parsed === 'object') {
+                        parsedPayload = parsed as Record<string, unknown>;
+                    }
+                } catch {
+                    parsedPayload = null;
+                }
+
+                if (!parsedPayload) {
+                    throw new Error(rawText || 'Unsupported image API response format');
+                }
+
+                generated = await resolveImageData(parsedPayload, req.signal);
+                break;
+            } catch (error) {
+                lastStatus = chutesResponse.status || 500;
+                lastErrorText = error instanceof Error ? error.message : 'Failed to parse image API response';
+            }
         }
 
-        const contentType = getText(chutesResponse.headers.get('content-type') || '').toLowerCase();
-        const generated = contentType.startsWith('image/')
-            ? {
-                bytes: new Uint8Array(await chutesResponse.arrayBuffer()),
-                mimeType: contentType.split(';')[0] || 'image/png',
-                revisedPrompt: undefined,
-            }
-            : await resolveImageData(await chutesResponse.json() as Record<string, unknown>, req.signal);
+        if (!generated) {
+            const mappedStatus = lastStatus >= 400 && lastStatus < 500 ? lastStatus : 502;
+            return jsonResponse({
+                error: `Chutes image API error (${lastAttemptLabel || 'unknown attempt'}): ${lastErrorText || 'No error details provided'}`,
+            }, mappedStatus);
+        }
 
         const bucket = getBucketName();
         const attachmentId = crypto.randomUUID();
