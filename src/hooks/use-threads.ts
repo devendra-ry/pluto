@@ -215,6 +215,12 @@ export async function createThread(model: string, reasoningEffort?: ReasoningEff
         throw error;
     }
 
+    try {
+        await cleanupEmptyThreads(data.id);
+    } catch (cleanupError) {
+        console.error('[useThreads] Failed to cleanup empty threads after create:', cleanupError);
+    }
+
     triggerRefresh();
     return data;
 }
@@ -227,7 +233,8 @@ export async function updateThreadTitle(id: string, title: string) {
         .update({ title, updated_at: new Date().toISOString() })
         .eq('id', id);
 
-    if (!error) triggerRefresh();
+    if (error) throw error;
+    triggerRefresh();
 }
 
 // Update thread model
@@ -238,7 +245,8 @@ export async function updateThreadModel(id: string, model: string) {
         .update({ model, updated_at: new Date().toISOString() })
         .eq('id', id);
 
-    if (!error) triggerRefresh();
+    if (error) throw error;
+    triggerRefresh();
 }
 
 // Update thread reasoning effort
@@ -249,7 +257,8 @@ export async function updateReasoningEffort(id: string, effort: ReasoningEffort)
         .update({ reasoning_effort: effort, updated_at: new Date().toISOString() })
         .eq('id', id);
 
-    if (!error) triggerRefresh();
+    if (error) throw error;
+    triggerRefresh();
 }
 
 // Update thread system prompt/lore
@@ -261,7 +270,8 @@ export async function updateThreadSystemPrompt(id: string, systemPrompt: string 
         .update({ system_prompt: normalized, updated_at: new Date().toISOString() })
         .eq('id', id);
 
-    if (!error) triggerRefresh();
+    if (error) throw error;
+    triggerRefresh();
 }
 
 // Toggle thread pin
@@ -272,7 +282,8 @@ export async function toggleThreadPin(id: string, isPinned: boolean) {
         .update({ is_pinned: isPinned, updated_at: new Date().toISOString() })
         .eq('id', id);
 
-    if (!error) triggerRefresh();
+    if (error) throw error;
+    triggerRefresh();
 }
 
 // Update thread timestamp (for sorting)
@@ -283,41 +294,34 @@ export async function touchThread(id: string) {
         .update({ updated_at: new Date().toISOString() })
         .eq('id', id);
 
-    if (!error) triggerRefresh();
+    if (error) throw error;
+    triggerRefresh();
 }
 
 // Delete a thread and all its messages
 export async function deleteThread(id: string) {
     const supabase = createClient();
     const { error } = await supabase.from('threads').delete().eq('id', id);
-
-    if (!error) triggerRefresh();
+    if (error) throw error;
+    try {
+        await cleanupEmptyThreads();
+    } catch (cleanupError) {
+        console.error('[useThreads] Failed to cleanup empty threads after delete:', cleanupError);
+    }
+    triggerRefresh();
 }
 
 // Cleanup empty threads (titled "New Chat" and have no messages)
 export async function cleanupEmptyThreads(excludeId?: string) {
     const supabase = createClient();
-
-    const { data: threads } = await supabase
-        .from('threads')
-        .select('id, title')
-        .eq('title', 'New Chat')
-        .neq('id', excludeId);
-
-    if (threads && threads.length > 0) {
-        let deletedAny = false;
-        for (const thread of threads) {
-            const { count } = await supabase
-                .from('messages')
-                .select('*', { count: 'exact', head: true })
-                .eq('thread_id', thread.id);
-
-            if (count === 0) {
-                await supabase.from('threads').delete().eq('id', thread.id);
-                deletedAny = true;
-            }
-        }
-        if (deletedAny) triggerRefresh();
+    const { data, error } = await supabase.rpc('cleanup_empty_new_chat_threads', {
+        exclude_thread_id: excludeId ?? null,
+    });
+    if (error) {
+        throw error;
+    }
+    if (typeof data === 'number' && data > 0) {
+        triggerRefresh();
     }
 }
 

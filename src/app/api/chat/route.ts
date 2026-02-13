@@ -13,13 +13,13 @@ import {
     isTextAttachment,
 } from '@/lib/attachments';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000;
 const DEFAULT_OUTPUT_RESERVE_TOKENS = 4096;
 const DEFAULT_SAFETY_MARGIN_TOKENS = 2048;
 const DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS = 65536;
-const MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL = 25 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL = 12 * 1024 * 1024;
 const MIN_INPUT_BUDGET_TOKENS = 2048;
 const CONTEXT_RETRY_SCALE = 0.7;
 const DEFAULT_LIMITS_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -47,12 +47,9 @@ interface TrimmedContext {
 }
 
 interface PreparedAttachment {
-    id: string;
     name: string;
     mimeType: string;
-    path: string;
     base64Data: string;
-    dataUrl: string;
 }
 
 interface PreparedChatMessage {
@@ -368,12 +365,7 @@ function supportsTextInputs(modelConfig: ModelConfig) {
 }
 
 function toBase64(bytes: Uint8Array) {
-    let binary = '';
-    const chunkSize = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-    }
-    return btoa(binary);
+    return Buffer.from(bytes).toString('base64');
 }
 
 async function prepareMessageAttachments(
@@ -424,6 +416,15 @@ async function prepareMessageAttachments(
                 continue;
             }
 
+            if (attachment.size > MAX_ATTACHMENT_BYTES_FOR_MODEL) {
+                const maxMb = Math.floor(MAX_ATTACHMENT_BYTES_FOR_MODEL / (1024 * 1024));
+                throw new Error(`Attachment "${attachment.name}" exceeds model limit (${maxMb}MB).`);
+            }
+            if (totalAttachmentBytes + attachment.size > MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL) {
+                const maxMb = Math.floor(MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL / (1024 * 1024));
+                throw new Error(`Total attachment payload is too large for one request (${maxMb}MB max).`);
+            }
+
             const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).download(attachment.path);
             if (error || !data) {
                 throw new Error(`Failed to load attachment: ${attachment.name}`);
@@ -442,12 +443,9 @@ async function prepareMessageAttachments(
 
             const base64Data = toBase64(buffer);
             preparedAttachments.push({
-                id: attachment.id,
                 name: attachment.name,
                 mimeType: attachment.mimeType,
-                path: attachment.path,
                 base64Data,
-                dataUrl: `data:${attachment.mimeType};base64,${base64Data}`,
             });
         }
 
@@ -515,11 +513,12 @@ function buildOpenAICompatibleMessages(messages: PreparedChatMessage[], systemPr
         }
 
         for (const attachment of message.attachments) {
+            const dataUrl = `data:${attachment.mimeType};base64,${attachment.base64Data}`;
             if (isImageAttachment(attachment.mimeType)) {
                 contentParts.push({
                     type: 'image_url',
                     image_url: {
-                        url: attachment.dataUrl,
+                        url: dataUrl,
                     },
                 });
                 continue;
@@ -529,7 +528,7 @@ function buildOpenAICompatibleMessages(messages: PreparedChatMessage[], systemPr
                 type: 'file',
                 file: {
                     filename: attachment.name,
-                    file_data: attachment.dataUrl,
+                    file_data: dataUrl,
                 },
             });
         }

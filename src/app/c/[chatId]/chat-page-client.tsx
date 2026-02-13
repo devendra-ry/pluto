@@ -176,18 +176,39 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (!isSelectableChatModel(newModel)) {
             return;
         }
+        const previousModel = model;
         setModel(newModel);
-        await updateThreadModel(chatId, newModel);
+        try {
+            await updateThreadModel(chatId, newModel);
+        } catch (error) {
+            setModel(previousModel);
+            const message = error instanceof Error ? error.message : 'Failed to update model';
+            showToast(message, 'error');
+        }
     };
 
     const handleReasoningEffortChange = async (effort: ReasoningEffort) => {
+        const previousEffort = reasoningEffort;
         setReasoningEffort(effort);
-        await updateReasoningEffort(chatId, effort);
+        try {
+            await updateReasoningEffort(chatId, effort);
+        } catch (error) {
+            setReasoningEffort(previousEffort);
+            const message = error instanceof Error ? error.message : 'Failed to update reasoning effort';
+            showToast(message, 'error');
+        }
     };
 
     const handleSystemPromptChange = async (nextPrompt: string) => {
+        const previousPrompt = systemPrompt;
         setSystemPrompt(nextPrompt);
-        await updateThreadSystemPrompt(chatId, nextPrompt);
+        try {
+            await updateThreadSystemPrompt(chatId, nextPrompt);
+        } catch (error) {
+            setSystemPrompt(previousPrompt);
+            const message = error instanceof Error ? error.message : 'Failed to update system prompt';
+            showToast(message, 'error');
+        }
     };
 
     const handleStop = useCallback(() => {
@@ -232,7 +253,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     const attachmentTitle = firstUserMsg.attachments?.[0]?.name ? `Attachment: ${firstUserMsg.attachments[0].name}` : 'New Chat';
                     const baseTitle = firstUserMsg.content.trim() || attachmentTitle;
                     const title = baseTitle.slice(0, 50) + (baseTitle.length > 50 ? '...' : '');
-                    updateThreadTitle(chatId, title);
+                    try {
+                        await updateThreadTitle(chatId, title);
+                    } catch (error) {
+                        console.error('Failed to update thread title:', error);
+                    }
                 }
             }
         };
@@ -254,7 +279,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 prev.map((m) => (m.id === assistantMsgId ? { ...m, id: newMsg.id } : m))
             );
             justAddedMessageIdRef.current = newMsg.id;
-            await touchThread(chatId);
+            try {
+                await touchThread(chatId);
+            } catch (error) {
+                console.error('Failed to touch thread timestamp:', error);
+            }
             return true;
         };
 

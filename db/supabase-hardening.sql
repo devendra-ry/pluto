@@ -137,7 +137,32 @@ using (
   and (storage.foldername(name))[1] = auth.uid()::text
 );
 
--- 4) Query-performance indexes for common app reads.
+-- 4) Single-query cleanup helper to avoid client-side N+1 deletes.
+create or replace function public.cleanup_empty_new_chat_threads(exclude_thread_id uuid default null)
+returns integer
+language sql
+security invoker
+set search_path = public
+as $$
+  with deleted as (
+    delete from public.threads t
+    where t.title = 'New Chat'
+      and t.user_id = auth.uid()
+      and (exclude_thread_id is null or t.id <> exclude_thread_id)
+      and not exists (
+        select 1
+        from public.messages m
+        where m.thread_id = t.id
+      )
+    returning 1
+  )
+  select count(*)::integer from deleted;
+$$;
+
+revoke all on function public.cleanup_empty_new_chat_threads(uuid) from public;
+grant execute on function public.cleanup_empty_new_chat_threads(uuid) to authenticated;
+
+-- 5) Query-performance indexes for common app reads.
 create index if not exists messages_thread_created_idx
   on public.messages (thread_id, created_at);
 
@@ -153,5 +178,5 @@ create index if not exists threads_user_updated_idx
 create index if not exists threads_user_pinned_updated_idx
   on public.threads (user_id, is_pinned, updated_at desc);
 
--- 5) Refresh planner statistics after index changes.
+-- 6) Refresh planner statistics after index changes.
 analyze public.messages;

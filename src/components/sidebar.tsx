@@ -20,11 +20,12 @@ import { type User as SupabaseUser } from '@supabase/supabase-js';
 import { List, type RowComponentProps } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useThreads, deleteThread, toggleThreadPin, cleanupEmptyThreads } from '@/hooks/use-threads';
+import { useThreads, deleteThread, toggleThreadPin } from '@/hooks/use-threads';
 import { type Thread } from '@/hooks/use-threads';
 import { groupThreadsByDate } from '@/lib/date-utils';
 import { useDebouncedValue } from '@/hooks/use-debounce';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/components/ui/toast';
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
 
@@ -76,6 +77,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
     const [user, setUser] = useState<SupabaseUser | null>(initialUser);
     const debouncedSearch = useDebouncedValue(searchQuery, 300);
     const { threads, refreshThreads } = useThreads();
+    const { showToast } = useToast();
 
     const [supabase] = useState(() => createClient());
 
@@ -99,13 +101,6 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
             window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(desktopCollapsed));
         }
     }, [desktopCollapsed]);
-
-
-    // Cleanup empty threads on mount
-    useEffect(() => {
-        const chatId = pathname?.split('/').pop();
-        cleanupEmptyThreads(chatId);
-    }, [pathname]); // Run when pathname changes
 
     const filteredPinned = useMemo(() => pinnedThreads.filter(t =>
         t.title.toLowerCase().includes(debouncedSearch.toLowerCase())
@@ -180,8 +175,9 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
             }
         } catch (err) {
             console.error('[Sidebar] Error in handleDeleteConfirm:', err);
+            showToast('Failed to delete thread', 'error');
         }
-    }, [pathname, router, refreshThreads]);
+    }, [pathname, router, refreshThreads, showToast]);
 
     const handleDeleteCancel = useCallback((e: React.MouseEvent) => {
         try {
@@ -203,8 +199,9 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
             await refreshThreads();
         } catch (err) {
             console.error('[Sidebar] Error in handleTogglePin:', err);
+            showToast('Failed to update pin status', 'error');
         }
-    }, [refreshThreads]);
+    }, [refreshThreads, showToast]);
 
 
     const renderThreadItem = useCallback((thread: Thread) => {

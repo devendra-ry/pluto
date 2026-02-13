@@ -15,6 +15,7 @@ import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { ModelSelector } from '@/components/model-selector';
 import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment, isPdfAttachment, isSupportedAttachmentMimeType, isTextAttachment } from '@/lib/attachments';
 import { startUploadFileForThread } from '@/lib/uploads';
+import { useToast } from '@/components/ui/toast';
 
 export interface ChatInputHandle {
     setValue: (value: string) => void;
@@ -88,6 +89,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const [systemPromptDraft, setSystemPromptDraft] = useState(systemPrompt);
     const [isSavingSystemPrompt, setIsSavingSystemPrompt] = useState(false);
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
+    const { showToast } = useToast();
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
     const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
     const isOpenRouterModel = selectedModel.provider === 'openrouter';
@@ -282,6 +284,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         try {
             await onSystemPromptChange(systemPromptDraft);
             setIsSystemMenuOpen(false);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to save system prompt';
+            showToast(message, 'error');
         } finally {
             setIsSavingSystemPrompt(false);
         }
@@ -297,6 +302,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         try {
             await onSystemPromptChange('');
             setIsSystemMenuOpen(false);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to clear system prompt';
+            showToast(message, 'error');
         } finally {
             setIsSavingSystemPrompt(false);
         }

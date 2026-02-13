@@ -8,6 +8,7 @@ import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT,
 import { ChatInput, type ChatInputHandle } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { Wand2, BookOpen, Code, GraduationCap, type LucideIcon } from 'lucide-react';
 
 function toErrorRecord(error: unknown): Record<string, unknown> {
@@ -30,6 +31,7 @@ export default function HomePage() {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [draftThreadId, setDraftThreadId] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   const ensureThread = async () => {
     if (draftThreadId) {
@@ -42,9 +44,16 @@ export default function HomePage() {
   };
 
   const handleSystemPromptChange = async (nextPrompt: string) => {
+    const previousPrompt = systemPrompt;
     setSystemPrompt(nextPrompt);
     if (draftThreadId) {
-      await updateThreadSystemPrompt(draftThreadId, nextPrompt);
+      try {
+        await updateThreadSystemPrompt(draftThreadId, nextPrompt);
+      } catch (error) {
+        setSystemPrompt(previousPrompt);
+        const message = error instanceof Error ? error.message : 'Failed to update system prompt';
+        showToast(message, 'error');
+      }
     }
   };
 
