@@ -788,9 +788,24 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
 
         const anchorMessageId = localMessages[msgIndex].id;
-        const forcedModelId = inferRetryModelId(localMessages, clickedMessageIndex, msgIndex);
-        const forceSearchMode = forcedModelId !== IMAGE_GENERATION_MODEL
-            && inferRetrySearchMode(localMessages, clickedMessageIndex, msgIndex, chatId);
+        const inputMode = chatInputRef.current?.getMode();
+        let forcedModelId: string | undefined;
+        let forceSearchMode = false;
+
+        if (inputMode === 'image') {
+            forcedModelId = IMAGE_GENERATION_MODEL;
+        } else if (inputMode === 'search') {
+            forcedModelId = undefined;
+            forceSearchMode = true;
+        } else if (inputMode === 'chat') {
+            forcedModelId = undefined;
+            forceSearchMode = false;
+        } else {
+            // Fallback when input mode is temporarily unavailable.
+            forcedModelId = inferRetryModelId(localMessages, clickedMessageIndex, msgIndex);
+            forceSearchMode = forcedModelId !== IMAGE_GENERATION_MODEL
+                && inferRetrySearchMode(localMessages, clickedMessageIndex, msgIndex, chatId);
+        }
 
         try {
             const canonicalMessages = await getThreadMessages(chatId);

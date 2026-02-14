@@ -20,6 +20,7 @@ import { useToast } from '@/components/ui/toast';
 export interface ChatInputHandle {
     setValue: (value: string) => void;
     focus: () => void;
+    getMode: () => ChatSubmitMode;
 }
 
 type LocalAttachmentStatus = 'uploading' | 'uploaded' | 'failed';
@@ -88,6 +89,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const [value, setValue] = useState(initialValue);
     const [isImageMode, setIsImageMode] = useState(false);
     const [isSearchMode, setIsSearchMode] = useState(false);
+    const isImageModeRef = useRef(false);
+    const isSearchModeRef = useRef(false);
     const [isSystemMenuOpen, setIsSystemMenuOpen] = useState(false);
     const [systemPromptDraft, setSystemPromptDraft] = useState(systemPrompt);
     const [isSavingSystemPrompt, setIsSavingSystemPrompt] = useState(false);
@@ -121,10 +124,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
     useEffect(() => {
         if (!supportsSearchMode && isSearchMode) {
+            isSearchModeRef.current = false;
             setIsSearchMode(false);
             showToast('Search is available only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite', 'error');
         }
     }, [supportsSearchMode, isSearchMode, showToast]);
+
+    const getSubmitMode = useCallback<() => ChatSubmitMode>(() => {
+        if (isImageModeRef.current) return 'image';
+        if (isSearchModeRef.current) return 'search';
+        return 'chat';
+    }, []);
 
     useImperativeHandle(ref, () => ({
         setValue: (newValue: string) => {
@@ -137,7 +147,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             });
         },
         focus: () => textareaRef.current?.focus(),
-    }));
+        getMode: () => getSubmitMode(),
+    }), [getSubmitMode]);
 
     useEffect(() => {
         if (textareaRef.current) {
@@ -266,7 +277,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
         try {
             const submitted = await onSubmit(submittedValue, submittedAttachments, {
-                mode: isImageMode ? 'image' : (isSearchMode ? 'search' : 'chat')
+                mode: getSubmitMode()
             });
             if (submitted === false) {
                 // Restore only if user has not started drafting a new message yet.
@@ -295,22 +306,22 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     };
 
     const handleToggleImageMode = useCallback(() => {
-        setIsImageMode((prev) => {
-            const next = !prev;
-            if (next) {
-                setIsSearchMode(false);
-                const tasks = uploadTasksRef.current;
-                for (const cancel of tasks.values()) {
-                    cancel();
-                }
-                tasks.clear();
-                setAttachmentItems([]);
-                if (fileInputRef.current) {
-                    fileInputRef.current.value = '';
-                }
+        const next = !isImageModeRef.current;
+        isImageModeRef.current = next;
+        setIsImageMode(next);
+        if (next) {
+            isSearchModeRef.current = false;
+            setIsSearchMode(false);
+            const tasks = uploadTasksRef.current;
+            for (const cancel of tasks.values()) {
+                cancel();
             }
-            return next;
-        });
+            tasks.clear();
+            setAttachmentItems([]);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
     }, []);
 
     const handleToggleSearchMode = useCallback(() => {
@@ -319,13 +330,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             showToast('Search is available only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite', 'error');
             return;
         }
-        setIsSearchMode((prev) => {
-            const next = !prev;
-            if (next) {
-                setIsImageMode(false);
-            }
-            return next;
-        });
+        const next = !isSearchModeRef.current;
+        isSearchModeRef.current = next;
+        setIsSearchMode(next);
+        if (next) {
+            isImageModeRef.current = false;
+            setIsImageMode(false);
+        }
     }, [isLoading, supportsSearchMode, showToast]);
 
     const handleAttachClick = () => {
