@@ -1,6 +1,65 @@
 -- Pluto DB hardening (run in Supabase SQL editor)
 
--- 1) Ensure message writes are allowed only for owners of the parent thread.
+-- 1) RLS policies with initplan-friendly auth checks.
+-- Threads
+drop policy if exists "Users can view their own threads" on public.threads;
+create policy "Users can view their own threads"
+on public.threads
+for select
+to authenticated
+using (user_id = (select auth.uid()));
+
+drop policy if exists "Users can create their own threads" on public.threads;
+create policy "Users can create their own threads"
+on public.threads
+for insert
+to authenticated
+with check (user_id = (select auth.uid()));
+
+drop policy if exists "Users can update their own threads" on public.threads;
+create policy "Users can update their own threads"
+on public.threads
+for update
+to authenticated
+using (user_id = (select auth.uid()))
+with check (user_id = (select auth.uid()));
+
+drop policy if exists "Users can delete their own threads" on public.threads;
+create policy "Users can delete their own threads"
+on public.threads
+for delete
+to authenticated
+using (user_id = (select auth.uid()));
+
+-- Messages
+drop policy if exists "Users can view messages in their threads" on public.messages;
+create policy "Users can view messages in their threads"
+on public.messages
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.threads
+    where threads.id = messages.thread_id
+      and threads.user_id = (select auth.uid())
+  )
+);
+
+drop policy if exists "Users can insert messages in their threads" on public.messages;
+create policy "Users can insert messages in their threads"
+on public.messages
+for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.threads
+    where threads.id = messages.thread_id
+      and threads.user_id = (select auth.uid())
+  )
+);
+
 drop policy if exists "Users can delete messages in their threads" on public.messages;
 create policy "Users can delete messages in their threads"
 on public.messages
@@ -11,7 +70,7 @@ using (
     select 1
     from public.threads
     where threads.id = messages.thread_id
-      and threads.user_id = auth.uid()
+      and threads.user_id = (select auth.uid())
   )
 );
 
@@ -25,7 +84,7 @@ using (
     select 1
     from public.threads
     where threads.id = messages.thread_id
-      and threads.user_id = auth.uid()
+      and threads.user_id = (select auth.uid())
   )
 )
 with check (
@@ -33,7 +92,7 @@ with check (
     select 1
     from public.threads
     where threads.id = messages.thread_id
-      and threads.user_id = auth.uid()
+      and threads.user_id = (select auth.uid())
   )
 );
 
