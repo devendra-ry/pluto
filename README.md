@@ -1,6 +1,6 @@
 # Pluto
 
-Pluto is a modern, local-first AI chat interface built with Next.js 15, designed to provide a premium experience for interacting with cutting-edge LLMs. It focuses on privacy, speed, and advanced reasoning capabilities.
+Pluto is a modern, local-first AI chat interface built with Next.js 16, designed to provide a premium experience for interacting with cutting-edge LLMs. It focuses on privacy, speed, and advanced reasoning capabilities.
 
 ## ✨ Features
 
@@ -10,6 +10,9 @@ Pluto is a modern, local-first AI chat interface built with Next.js 15, designed
   - **Qwen**: Qwen 3 (Thinking & Instruct variants).
   - **Other Top Models**: Kimi K2.5, MiniMax M2.1, GLM 4.7, and Hermes 4.
 - **Visualized Reasoning**: specialized UI for "Thinking" models (like DeepSeek R1 and Gemini Flash Thinking), allowing you to expand/collapse the model's internal chain of thought.
+- **Multimodal Inputs**: model-aware file attachments with upload progress, cancel/retry, and per-provider capability checks.
+- **Image Generation Mode**: a dedicated Image pill routes prompts to internal z-image generation flow without exposing image-only models in selector.
+- **Gemini Search Mode**: optional Search pill uses Google Search grounding, restricted to Gemini 2.5 Flash and Gemini 2.5 Flash Lite.
 - **Supabase-Powered History**: Your chat history is stored securely in **Supabase**. This ensures your conversations are available across devices and stay in sync in real-time.
 - **Rich Text Rendering**:
   - **Markdown Support**: Full GFM (GitHub Flavored Markdown) support.
@@ -40,11 +43,11 @@ Pluto uses **Supabase** to manage `threads` and `messages`. This means:
 
 ## 🛠️ Tech Stack
 
-- **Framework**: [Next.js 15](https://nextjs.org/) (App Router)
+- **Framework**: [Next.js 16](https://nextjs.org/) (App Router)
 - **Language**: [TypeScript](https://www.typescriptlang.org/)
 - **UI Library**: [React 19](https://react.dev/), [Shadcn UI](https://ui.shadcn.com/), [Tailwind CSS v4](https://tailwindcss.com/)
 - **State/Database**: [Supabase](https://supabase.com/)
-- **AI Integration**: [Vercel AI SDK](https://sdk.vercel.ai/docs), [Google GenAI SDK](https://github.com/google/google-api-nodejs-client), [OpenRouter SDK](https://openrouter.ai/docs)
+- **AI Integration**: [Google GenAI SDK](https://github.com/googleapis/js-genai), [OpenRouter SDK](https://openrouter.ai/docs), Chutes API
 - **Markdown/Math**: `react-markdown`, `rehype-katex`, `remark-math`
 
 ## 🚀 Getting Started

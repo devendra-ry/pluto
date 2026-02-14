@@ -12,8 +12,10 @@ const DEFAULT_NUM_INFERENCE_STEPS = 9;
 const DEFAULT_GUIDANCE_SCALE = 0;
 const DEFAULT_SHIFT = 3;
 const DEFAULT_MAX_SEQUENCE_LENGTH = 512;
-const DEFAULT_CHUTES_IMAGES_URL = 'https://llm.chutes.ai/v1/images/generations';
 const DEFAULT_Z_IMAGE_GENERATE_URL = 'https://chutes-z-image-turbo.chutes.ai/generate';
+const IMAGE_RETRYABLE_STATUSES = new Set([502, 503]);
+const IMAGE_RETRY_ATTEMPTS = 2;
+const IMAGE_RETRY_BACKOFF_MS = 350;
 
 function getBucketName() {
     return process.env.SUPABASE_ATTACHMENTS_BUCKET
@@ -31,21 +33,16 @@ function uniqueUrls(urls: Array<string | undefined>) {
     return Array.from(set);
 }
 
-function getImagesApiUrlCandidates() {
-    return uniqueUrls([
-        process.env.CHUTES_IMAGES_API_URL,
-        process.env.CHUTES_IMAGE_API_URL,
-        DEFAULT_CHUTES_IMAGES_URL,
-    ]);
-}
-
 function getImageApiUrlCandidates() {
     return uniqueUrls([
         process.env.CHUTES_Z_IMAGE_API_URL,
         process.env.CHUTES_Z_IMAGE_URL,
         DEFAULT_Z_IMAGE_GENERATE_URL,
-        ...getImagesApiUrlCandidates(),
     ]);
+}
+
+function wait(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function jsonResponse(payload: Record<string, unknown>, status: number = 200) {
@@ -211,7 +208,6 @@ export async function POST(req: Request) {
     const record = body as Record<string, unknown>;
     const threadId = getText(record.threadId);
     const requestedModel = getText(record.model);
-    const model = IMAGE_GENERATION_MODEL;
     const prompt = getText(record.prompt);
     const width = DEFAULT_IMAGE_WIDTH;
     const height = DEFAULT_IMAGE_HEIGHT;
@@ -241,11 +237,7 @@ export async function POST(req: Request) {
         const requestAttempts: Array<{ label: string; body: Record<string, unknown> }> = [];
 
         requestAttempts.push({
-            label: 'prompt-only',
-            body: { prompt },
-        });
-        requestAttempts.push({
-            label: 'native-image',
+            label: 'z-image-generate',
             body: {
                 prompt,
                 width,
@@ -257,39 +249,15 @@ export async function POST(req: Request) {
             },
         });
         requestAttempts.push({
-            label: 'input-args-native-image',
-            body: {
-                input_args: {
-                    prompt,
-                    width,
-                    height,
-                    num_inference_steps: numInferenceSteps,
-                    guidance_scale: guidanceScale,
-                    shift,
-                    max_sequence_length: DEFAULT_MAX_SEQUENCE_LENGTH,
-                },
-            },
+            label: 'prompt-only-fallback',
+            body: { prompt },
         });
         requestAttempts.push({
-            label: 'input-args-prompt-only',
+            label: 'input-args-fallback',
             body: {
                 input_args: {
                     prompt,
                 },
-            },
-        });
-
-        requestAttempts.push({
-            label: 'openai-compatible',
-            body: {
-                model,
-                prompt,
-                size: `${width}x${height}`,
-                n: 1,
-                response_format: 'b64_json',
-                num_inference_steps: numInferenceSteps,
-                guidance_scale: guidanceScale,
-                shift,
             },
         });
 
@@ -303,54 +271,65 @@ export async function POST(req: Request) {
             for (const attempt of requestAttempts) {
                 lastAttemptLabel = attempt.label;
                 lastAttemptUrl = apiUrl;
-                const chutesResponse = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey}`,
-                    },
-                    body: JSON.stringify(attempt.body),
-                    signal: req.signal,
-                });
+                for (let retry = 0; retry <= IMAGE_RETRY_ATTEMPTS; retry++) {
+                    const chutesResponse = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${apiKey}`,
+                        },
+                        body: JSON.stringify(attempt.body),
+                        signal: req.signal,
+                    });
 
-                const contentType = getText(chutesResponse.headers.get('content-type') || '').toLowerCase();
-
-                if (!chutesResponse.ok) {
-                    lastStatus = chutesResponse.status;
-                    lastErrorText = await chutesResponse.text().catch(() => '') || chutesResponse.statusText || 'Unknown upstream error';
-                    continue;
-                }
-
-                try {
-                    if (contentType.startsWith('image/')) {
-                        generated = {
-                            bytes: new Uint8Array(await chutesResponse.arrayBuffer()),
-                            mimeType: contentType.split(';')[0] || 'image/png',
-                        };
+                    const contentType = getText(chutesResponse.headers.get('content-type') || '').toLowerCase();
+                    if (!chutesResponse.ok) {
+                        lastStatus = chutesResponse.status;
+                        lastErrorText = await chutesResponse.text().catch(() => '') || chutesResponse.statusText || 'Unknown upstream error';
+                        const shouldRetry = IMAGE_RETRYABLE_STATUSES.has(chutesResponse.status)
+                            && retry < IMAGE_RETRY_ATTEMPTS;
+                        if (shouldRetry) {
+                            await wait(IMAGE_RETRY_BACKOFF_MS * (retry + 1));
+                            continue;
+                        }
                         break;
                     }
 
-                    const rawText = await chutesResponse.text();
-                    let parsedPayload: Record<string, unknown> | null = null;
                     try {
-                        const parsed = JSON.parse(rawText) as unknown;
-                        if (parsed && typeof parsed === 'object') {
-                            parsedPayload = parsed as Record<string, unknown>;
+                        if (contentType.startsWith('image/')) {
+                            generated = {
+                                bytes: new Uint8Array(await chutesResponse.arrayBuffer()),
+                                mimeType: contentType.split(';')[0] || 'image/png',
+                            };
+                            break;
                         }
-                    } catch {
-                        parsedPayload = null;
+
+                        const rawText = await chutesResponse.text();
+                        let parsedPayload: Record<string, unknown> | null = null;
+                        try {
+                            const parsed = JSON.parse(rawText) as unknown;
+                            if (parsed && typeof parsed === 'object') {
+                                parsedPayload = parsed as Record<string, unknown>;
+                            }
+                        } catch {
+                            parsedPayload = null;
+                        }
+
+                        if (!parsedPayload) {
+                            throw new Error(rawText || 'Unsupported image API response format');
+                        }
+
+                        generated = await resolveImageData(parsedPayload, req.signal);
+                        break;
+                    } catch (error) {
+                        lastStatus = chutesResponse.status || 500;
+                        lastErrorText = error instanceof Error ? error.message : 'Failed to parse image API response';
                     }
 
-                    if (!parsedPayload) {
-                        throw new Error(rawText || 'Unsupported image API response format');
-                    }
-
-                    generated = await resolveImageData(parsedPayload, req.signal);
                     break;
-                } catch (error) {
-                    lastStatus = chutesResponse.status || 500;
-                    lastErrorText = error instanceof Error ? error.message : 'Failed to parse image API response';
                 }
+
+                if (generated) break;
             }
 
             if (generated) {

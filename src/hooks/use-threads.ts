@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { type ReasoningEffort } from '@/lib/types';
+import { cleanupThreadAttachments } from '@/lib/uploads';
 
 export interface Thread {
     id: string;
@@ -387,6 +388,7 @@ export async function touchThread(id: string) {
 // Delete a thread and all its messages
 export async function deleteThread(id: string) {
     const supabase = createClient();
+    await cleanupThreadAttachments(id);
     const { error } = await supabase.from('threads').delete().eq('id', id);
     if (error) throw error;
     try {

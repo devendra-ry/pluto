@@ -23,6 +23,33 @@ export interface UploadTask {
     cancel: () => void;
 }
 
+export async function cleanupThreadAttachments(
+    threadId: string,
+    paths?: string[]
+): Promise<void> {
+    const response = await fetch('/api/uploads', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            threadId,
+            paths: paths && paths.length > 0 ? paths : undefined,
+        }),
+    });
+
+    if (response.ok) {
+        return;
+    }
+
+    let payload: unknown = null;
+    try {
+        payload = await response.json();
+    } catch {
+        payload = null;
+    }
+
+    throw new Error(extractErrorMessage(payload, 'Failed to cleanup attachments'));
+}
+
 export function startUploadFileForThread(
     threadId: string,
     file: File,

@@ -377,7 +377,18 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             });
 
             if (!response.ok) {
-                throw new Error('Failed to get response');
+                let message = `Failed to get response (${response.status})`;
+                try {
+                    const payload = await response.json() as Record<string, unknown>;
+                    const errorText = typeof payload.error === 'string' ? payload.error : '';
+                    const detailsText = typeof payload.details === 'string' ? payload.details : '';
+                    if (errorText) {
+                        message = detailsText ? `${errorText}: ${detailsText}` : errorText;
+                    }
+                } catch {
+                    // Ignore parse failures and keep fallback status message.
+                }
+                throw new Error(message);
             }
 
             const reader = response.body?.getReader();
@@ -398,11 +409,22 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                             if (data === '[DONE]') continue;
 
                             try {
-                                const parsed = JSON.parse(data);
-                                const delta = parsed.choices?.[0]?.delta;
+                                const parsed = JSON.parse(data) as Record<string, unknown>;
+                                const streamError = typeof parsed.error === 'string' ? parsed.error.trim() : '';
+                                if (streamError) {
+                                    const streamDetails = typeof parsed.details === 'string' ? parsed.details.trim() : '';
+                                    const normalizedStreamError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
+                                    throw new Error(`STREAM_ERROR:${normalizedStreamError}`);
+                                }
+                                const choices = Array.isArray(parsed.choices)
+                                    ? parsed.choices as Array<Record<string, unknown>>
+                                    : [];
+                                const delta = (choices[0]?.delta ?? {}) as Record<string, unknown>;
 
                                 // Check for reasoning content (some models use reasoning_content)
-                                const reasoningContent = delta?.reasoning_content || delta?.thinking || '';
+                                const reasoningContent =
+                                    (typeof delta.reasoning_content === 'string' ? delta.reasoning_content : '') ||
+                                    (typeof delta.thinking === 'string' ? delta.thinking : '');
                                 if (reasoningContent && supportsReasoning) {
                                     fullReasoning += reasoningContent;
                                     setMessages((prev) => {
@@ -422,7 +444,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                 }
 
                                 // Check for main content
-                                const content = delta?.content || '';
+                                const content = typeof delta.content === 'string' ? delta.content : '';
                                 if (content) {
                                     // Once we get main content, thinking is done
                                     setIsThinking(false);
@@ -441,7 +463,13 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                                         return updated;
                                     });
                                 }
-                            } catch {
+                            } catch (streamChunkError) {
+                                if (
+                                    streamChunkError instanceof Error
+                                    && streamChunkError.message.startsWith('STREAM_ERROR:')
+                                ) {
+                                    throw new Error(streamChunkError.message.slice('STREAM_ERROR:'.length));
+                                }
                                 // Skip malformed JSON
                             }
                         }
@@ -594,25 +622,32 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 deleteIds.forEach((id) => locallyDeletedMessageIdsRef.current.add(id));
             }
             await deleteMessagesByIds(deleteIds);
-            await refreshStoredMessages();
-
             const persistedUser = await addMessage(chatId, 'user', newContent, undefined, undefined, editedMessageAttachments);
-
-            // Refetch canonical state after delete + insert so generation starts from DB truth.
-            const refreshedMessages = await getThreadMessages(chatId);
-            const updatedMessages: ChatMessageType[] = refreshedMessages.map((m) => ({
+            const keptMessages = canonicalMessages.slice(0, deleteStartIndex).map((m) => ({
                 id: m.id,
                 role: m.role,
                 content: m.content,
                 attachments: m.attachments ?? [],
                 reasoning: m.reasoning,
                 model_id: m.model_id,
-            }));
+            })) as ChatMessageType[];
+            const updatedMessages: ChatMessageType[] = [
+                ...keptMessages,
+                {
+                    id: persistedUser.id,
+                    role: persistedUser.role,
+                    content: persistedUser.content,
+                    attachments: persistedUser.attachments ?? [],
+                    reasoning: persistedUser.reasoning,
+                    model_id: persistedUser.model_id,
+                },
+            ];
 
             setMessages(updatedMessages);
             if (persistedUser.id) {
                 justAddedMessageIdRef.current = persistedUser.id;
             }
+            void refreshStoredMessages();
 
             await generateResponse(updatedMessages);
         } catch (error) {
@@ -659,11 +694,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 deleteIds.forEach((id) => locallyDeletedMessageIdsRef.current.add(id));
             }
             await deleteMessagesByIds(deleteIds);
-            await refreshStoredMessages();
-
-            // Refetch canonical state after delete so we regenerate from DB truth.
-            const refreshedMessages = await getThreadMessages(chatId);
-            const previousMessages: ChatMessageType[] = refreshedMessages.map((m) => ({
+            const previousMessages: ChatMessageType[] = canonicalMessages.slice(0, anchorDbIndex + 1).map((m) => ({
                 id: m.id,
                 role: m.role,
                 content: m.content,
@@ -673,6 +704,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             }));
 
             setMessages(previousMessages);
+            void refreshStoredMessages();
             await generateResponse(previousMessages);
         } catch (error) {
             setIsLoading(false);

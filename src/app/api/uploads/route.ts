@@ -54,6 +54,66 @@ function jsonResponse(payload: Record<string, unknown>, status: number = 200) {
     });
 }
 
+function uniquePaths(paths: string[]) {
+    return Array.from(new Set(paths.filter((path) => typeof path === 'string' && path.length > 0)));
+}
+
+async function listThreadAttachmentPaths(
+    supabase: ReturnType<typeof createClient>,
+    bucket: string,
+    prefix: string
+) {
+    const allPaths: string[] = [];
+    const pageSize = 100;
+    let offset = 0;
+
+    while (true) {
+        const { data, error } = await supabase.storage.from(bucket).list(prefix, {
+            limit: pageSize,
+            offset,
+            sortBy: { column: 'name', order: 'asc' },
+        });
+
+        if (error) {
+            throw new Error(error.message || 'Failed to list thread attachments');
+        }
+
+        if (!data || data.length === 0) {
+            break;
+        }
+
+        for (const item of data) {
+            if (!item?.name || item.name.includes('/')) {
+                continue;
+            }
+            allPaths.push(`${prefix}/${item.name}`);
+        }
+
+        if (data.length < pageSize) {
+            break;
+        }
+        offset += data.length;
+    }
+
+    return allPaths;
+}
+
+async function removePathsInChunks(
+    supabase: ReturnType<typeof createClient>,
+    bucket: string,
+    paths: string[]
+) {
+    const chunkSize = 100;
+    for (let i = 0; i < paths.length; i += chunkSize) {
+        const batch = paths.slice(i, i + chunkSize);
+        if (batch.length === 0) continue;
+        const { error } = await supabase.storage.from(bucket).remove(batch);
+        if (error) {
+            throw new Error(error.message || 'Failed to delete attachments');
+        }
+    }
+}
+
 export async function POST(req: Request) {
     let supabase: ReturnType<typeof createClient>;
     let user: Awaited<ReturnType<typeof requireUser>>['user'];
@@ -131,6 +191,65 @@ export async function POST(req: Request) {
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Upload failed';
         return jsonResponse({ error: message }, 403);
+    }
+}
+
+export async function DELETE(req: Request) {
+    let supabase: ReturnType<typeof createClient>;
+    let user: Awaited<ReturnType<typeof requireUser>>['user'];
+    try {
+        assertValidPostOrigin(req);
+        const auth = await requireUser();
+        supabase = auth.supabase;
+        user = auth.user;
+    } catch (error) {
+        const response = toJsonErrorResponse(error);
+        if (response) {
+            return response;
+        }
+        return jsonResponse({ error: 'Internal server error' }, 500);
+    }
+
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+        return jsonResponse({ error: 'Invalid JSON body' }, 400);
+    }
+
+    const record = body as Record<string, unknown>;
+    const threadId = typeof record.threadId === 'string' ? record.threadId.trim() : '';
+    if (!threadId) {
+        return jsonResponse({ error: 'threadId is required' }, 400);
+    }
+
+    const rawPaths = Array.isArray(record.paths)
+        ? record.paths.filter((path): path is string => typeof path === 'string' && path.length > 0)
+        : [];
+
+    try {
+        await assertThreadOwnership(supabase, threadId, user.id);
+        const bucket = getBucketName();
+        const threadPrefix = `${user.id}/${threadId}`;
+
+        const explicitPaths = uniquePaths(rawPaths);
+        for (const path of explicitPaths) {
+            if (!path.startsWith(`${threadPrefix}/`)) {
+                return jsonResponse({ error: 'Invalid attachment path' }, 400);
+            }
+        }
+
+        const pathsToDelete = explicitPaths.length > 0
+            ? explicitPaths
+            : await listThreadAttachmentPaths(supabase, bucket, threadPrefix);
+
+        if (pathsToDelete.length === 0) {
+            return jsonResponse({ removed: 0 });
+        }
+
+        await removePathsInChunks(supabase, bucket, pathsToDelete);
+        return jsonResponse({ removed: pathsToDelete.length });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to cleanup attachments';
+        return jsonResponse({ error: message }, 500);
     }
 }
 

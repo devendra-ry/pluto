@@ -96,7 +96,6 @@ export default function HomePage() {
       router.push(`/c/${threadId}`);
       return true;
     } catch (error: unknown) {
-      console.error('Failed to create chat:', error);
       const errorRecord = toErrorRecord(error);
 
       const errorMessage = typeof errorRecord.message === 'string'
@@ -104,27 +103,10 @@ export default function HomePage() {
         : typeof errorRecord.error_description === 'string'
           ? errorRecord.error_description
           : String(error);
-      const errorDetails = typeof errorRecord.details === 'string' ? errorRecord.details : '';
-      const errorHint = typeof errorRecord.hint === 'string' ? errorRecord.hint : '';
-      const errorStack = typeof errorRecord.stack === 'string' ? errorRecord.stack : '';
-
-      console.error('--- ERROR DEBUG START ---');
-      console.error('Message:', errorMessage);
-      console.error('Details:', errorDetails);
-      console.error('Hint:', errorHint);
-      console.error('Stack:', errorStack);
-      console.error('Raw Error Object:', error);
-      try {
-        console.error('Internal Properties:', Object.getOwnPropertyNames(errorRecord).reduce<Record<string, unknown>>((acc, key) => {
-          acc[key] = errorRecord[key];
-          return acc;
-        }, {}));
-      } catch {
-        console.error('Could not log internal properties');
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('Failed to create chat:', error);
       }
-      console.error('--- ERROR DEBUG END ---');
-
-      alert(`Failed to create chat: ${errorMessage}`);
+      showToast(errorMessage || 'Failed to create chat', 'error');
       setIsLoading(false);
       return false;
     }
