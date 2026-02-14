@@ -7,7 +7,7 @@ import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/compo
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { useThread, updateThreadTitle, updateThreadModel, touchThread, updateReasoningEffort, updateThreadSystemPrompt } from '@/hooks/use-threads';
 import { useMessages, addMessage, deleteMessagesByIds, getThreadMessages } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY } from '@/lib/constants';
+import { DEFAULT_MODEL, AVAILABLE_MODELS, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY, SEARCH_ENABLED_MODELS } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { Wand2, BookOpen, Code, GraduationCap, ChevronDown, type LucideIcon } from 'lucide-react';
@@ -26,6 +26,12 @@ interface ChatMessageType {
     model_id?: string;
 }
 
+type RetryMode = 'chat' | 'search' | 'image';
+
+const RETRY_MODE_HINTS_KEY = 'retry-mode-hints';
+const MAX_RETRY_MODE_HINTS_PER_THREAD = 300;
+const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
+
 function isAttachment(value: unknown): value is Attachment {
     if (!value || typeof value !== 'object') return false;
     const record = value as Record<string, unknown>;
@@ -37,6 +43,106 @@ function isAttachment(value: unknown): value is Attachment {
         typeof record.path === 'string' &&
         typeof record.url === 'string'
     );
+}
+
+function hasImageAttachment(message: ChatMessageType): boolean {
+    return (message.attachments ?? []).some((attachment) => attachment.mimeType.startsWith('image/'));
+}
+
+function readRetryModeHints(): Record<string, Record<string, RetryMode>> {
+    if (typeof window === 'undefined') return {};
+    const raw = window.sessionStorage.getItem(RETRY_MODE_HINTS_KEY);
+    if (!raw) return {};
+    try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!parsed || typeof parsed !== 'object') return {};
+        return parsed as Record<string, Record<string, RetryMode>>;
+    } catch {
+        return {};
+    }
+}
+
+function writeRetryModeHints(hints: Record<string, Record<string, RetryMode>>) {
+    if (typeof window === 'undefined') return;
+    window.sessionStorage.setItem(RETRY_MODE_HINTS_KEY, JSON.stringify(hints));
+}
+
+function persistRetryModeHint(threadId: string, userMessageId: string, mode: RetryMode) {
+    if (!threadId || !userMessageId) return;
+    const hints = readRetryModeHints();
+    const threadHints = { ...(hints[threadId] ?? {}) };
+    threadHints[userMessageId] = mode;
+
+    const entries = Object.entries(threadHints);
+    if (entries.length > MAX_RETRY_MODE_HINTS_PER_THREAD) {
+        const trimmed = entries.slice(entries.length - MAX_RETRY_MODE_HINTS_PER_THREAD);
+        hints[threadId] = Object.fromEntries(trimmed);
+    } else {
+        hints[threadId] = threadHints;
+    }
+    writeRetryModeHints(hints);
+}
+
+function getRetryModeHint(threadId: string, userMessageId: string): RetryMode | undefined {
+    if (!threadId || !userMessageId) return undefined;
+    const hints = readRetryModeHints();
+    return hints[threadId]?.[userMessageId];
+}
+
+function looksLikeSearchResponse(content: string): boolean {
+    return /\[\d+\]\(https?:\/\/[^\s)]+\)/.test(content);
+}
+
+function inferRetrySearchMode(
+    localMessages: ChatMessageType[],
+    clickedMessageIndex: number,
+    anchorUserIndex: number,
+    threadId: string
+): boolean {
+    const anchorUser = localMessages[anchorUserIndex];
+    if (!anchorUser) return false;
+
+    const hint = getRetryModeHint(threadId, anchorUser.id);
+    if (hint) return hint === 'search';
+
+    const clickedMessage = localMessages[clickedMessageIndex];
+    const candidateAssistant = clickedMessage?.role === 'assistant'
+        ? clickedMessage
+        : localMessages.slice(anchorUserIndex + 1).find((message) => message.role === 'assistant');
+
+    if (!candidateAssistant) return false;
+    if (!candidateAssistant.model_id || !SEARCH_ENABLED_MODEL_SET.has(candidateAssistant.model_id)) return false;
+
+    return looksLikeSearchResponse(candidateAssistant.content);
+}
+
+function inferRetryModelId(
+    localMessages: ChatMessageType[],
+    clickedMessageIndex: number,
+    anchorUserIndex: number
+): string | undefined {
+    const clickedMessage = localMessages[clickedMessageIndex];
+    if (!clickedMessage) return undefined;
+
+    if (
+        clickedMessage.role === 'assistant'
+        && (clickedMessage.model_id === IMAGE_GENERATION_MODEL || hasImageAttachment(clickedMessage))
+    ) {
+        return IMAGE_GENERATION_MODEL;
+    }
+
+    const nextAssistantMessage = localMessages
+        .slice(anchorUserIndex + 1)
+        .find((message) => message.role === 'assistant');
+
+    if (
+        nextAssistantMessage
+        && (nextAssistantMessage.model_id === IMAGE_GENERATION_MODEL || hasImageAttachment(nextAssistantMessage))
+    ) {
+        return IMAGE_GENERATION_MODEL;
+    }
+
+    return undefined;
 }
 
 // Regex to fix markdown headings without space after #
@@ -244,6 +350,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         const isImageGenModel = activeModelId === IMAGE_GENERATION_MODEL;
         const useSearch = !isImageGenModel && forceSearchMode;
         const supportsReasoning = isImageGenModel ? false : (selectedModel?.supportsReasoning ?? true);
+        const retryMode: RetryMode = isImageGenModel ? 'image' : (useSearch ? 'search' : 'chat');
+        persistRetryModeHint(chatId, lastMsg.id, retryMode);
 
         const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && reasoningEffort === 'low');
 
@@ -660,11 +768,12 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const handleRetry = useCallback(async (messageId: string) => {
         setIsLoading(true);
         const localMessages = messages;
-        let msgIndex = localMessages.findIndex(m => m.id === messageId);
-        if (msgIndex === -1) {
+        const clickedMessageIndex = localMessages.findIndex(m => m.id === messageId);
+        if (clickedMessageIndex === -1) {
             setIsLoading(false);
             return;
         }
+        let msgIndex = clickedMessageIndex;
 
         // If retrying an assistant message, find the preceding user message
         if (localMessages[msgIndex].role === 'assistant') {
@@ -679,6 +788,9 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
 
         const anchorMessageId = localMessages[msgIndex].id;
+        const forcedModelId = inferRetryModelId(localMessages, clickedMessageIndex, msgIndex);
+        const forceSearchMode = forcedModelId !== IMAGE_GENERATION_MODEL
+            && inferRetrySearchMode(localMessages, clickedMessageIndex, msgIndex, chatId);
 
         try {
             const canonicalMessages = await getThreadMessages(chatId);
@@ -705,7 +817,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
             setMessages(previousMessages);
             void refreshStoredMessages();
-            await generateResponse(previousMessages);
+            await generateResponse(previousMessages, forcedModelId, undefined, forceSearchMode);
         } catch (error) {
             setIsLoading(false);
             console.error('Failed to retry message:', error);

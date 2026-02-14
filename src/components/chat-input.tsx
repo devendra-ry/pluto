@@ -368,14 +368,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         }
     };
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = Array.from(e.target.files ?? []);
+    const enqueueLocalFiles = useCallback((files: File[], source: 'picker' | 'paste') => {
         if (files.length === 0) return;
+        if (!supportsAttachments) {
+            showToast('Attachments are not supported for the current mode/model', 'error');
+            return;
+        }
 
         const availableSlots = Math.max(0, MAX_ATTACHMENTS_PER_MESSAGE - activeAttachmentItems.length);
         const selectedFiles = files.slice(0, availableSlots);
         if (selectedFiles.length === 0) {
-            e.target.value = '';
+            showToast(`Maximum ${MAX_ATTACHMENTS_PER_MESSAGE} attachments allowed per message`, 'error');
             return;
         }
 
@@ -412,7 +415,56 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             }
         }
 
+        if (files.length > selectedFiles.length) {
+            const addedCount = selectedFiles.length;
+            showToast(
+                source === 'paste'
+                    ? `Only ${addedCount} pasted image(s) were added due to attachment limit`
+                    : `Only ${addedCount} file(s) were added due to attachment limit`,
+                'error'
+            );
+        }
+    }, [
+        supportsAttachments,
+        activeAttachmentItems.length,
+        supportsImages,
+        supportsPdfs,
+        supportsTexts,
+        uploadLocalFile,
+        showToast,
+    ]);
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files ?? []);
+        enqueueLocalFiles(files, 'picker');
         e.target.value = '';
+    };
+
+    const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        const clipboardItems = Array.from(e.clipboardData?.items ?? []);
+        if (clipboardItems.length === 0) return;
+
+        const pastedImageFiles = clipboardItems
+            .filter((item) => item.kind === 'file')
+            .map((item) => item.getAsFile())
+            .filter((file): file is File => Boolean(file))
+            .filter((file) => isImageAttachment(file.type || ''));
+
+        if (pastedImageFiles.length === 0) return;
+
+        e.preventDefault();
+
+        if (isLoading) {
+            showToast('Please wait for current response to finish before attaching images', 'error');
+            return;
+        }
+
+        if (!supportsAttachments || !supportsImages) {
+            showToast('Pasted images are not supported for the current mode/model', 'error');
+            return;
+        }
+
+        enqueueLocalFiles(pastedImageFiles, 'paste');
     };
 
     const handleRemoveAttachment = (localId: string) => {
@@ -454,6 +506,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         value={value}
                         onChange={handleChange}
                         onKeyDown={handleKeyDown}
+                        onPaste={handlePaste}
                         placeholder={
                             isImageMode
                                 ? 'Describe the image you want to generate...'
