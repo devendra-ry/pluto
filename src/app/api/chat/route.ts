@@ -4,6 +4,7 @@ import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 import { createClient } from '@/utils/supabase/server';
 import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
+import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
 import {
     DEFAULT_ATTACHMENTS_BUCKET,
     MAX_ATTACHMENTS_PER_MESSAGE,
@@ -208,7 +209,7 @@ async function resolveOpenRouterModelLimits(model: string, signal?: AbortSignal)
 }
 
 async function resolveChutesModelLimits(model: string, signal?: AbortSignal): Promise<ResolvedModelLimits | null> {
-    const apiKey = process.env.CHUTES_API_KEY;
+    const apiKey = getChutesApiKey();
     if (!apiKey) return null;
 
     const response = await fetch('https://llm.chutes.ai/v1/models', {
@@ -722,8 +723,8 @@ async function getChutesStream(
     systemPrompt?: string,
     signal?: AbortSignal
 ) {
-    const apiKey = process.env.CHUTES_API_KEY;
-    if (!apiKey) throw new Error('Chutes API key missing');
+    const apiKey = getChutesApiKey();
+    if (!apiKey) throw new Error(CHUTES_MISSING_API_KEY_MESSAGE);
 
     const requestBody: Record<string, unknown> = {
         model,
@@ -770,15 +771,6 @@ async function getGoogleStream(
 
     const ai = new GoogleGenAI({ apiKey });
     const contents = buildGoogleContents(messages);
-    const effectiveContents = systemPrompt && systemPrompt.trim().length > 0
-        ? [
-            {
-                role: 'user',
-                parts: [{ text: `System instruction:\n${systemPrompt.trim()}` }],
-            },
-            ...contents,
-        ]
-        : contents;
 
     const config: {
         maxOutputTokens: number;
@@ -788,6 +780,7 @@ async function getGoogleStream(
             thinkingBudget?: number;
         };
         tools?: Array<{ googleSearch: Record<string, never> }>;
+        systemInstruction?: string;
     } = { maxOutputTokens: resolveOutputTokenCap(maxOutputTokens) };
     const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
 
@@ -812,8 +805,11 @@ async function getGoogleStream(
     if (useSearch) {
         config.tools = [{ googleSearch: {} }];
     }
+    if (systemPrompt && systemPrompt.trim().length > 0) {
+        config.systemInstruction = systemPrompt.trim();
+    }
 
-    const response = await ai.models.generateContentStream({ model, config, contents: effectiveContents });
+    const response = await ai.models.generateContentStream({ model, config, contents });
 
     const encoder = new TextEncoder();
     return new ReadableStream({

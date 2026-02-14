@@ -126,6 +126,60 @@ export function useThreads() {
         let isActive = true;
         let localUserId: string | null = null;
 
+        const unsubscribeRealtime = () => {
+            if (channelRef.current) {
+                supabase.removeChannel(channelRef.current);
+                channelRef.current = null;
+            }
+        };
+
+        const subscribeRealtime = () => {
+            if (!isActive || !localUserId || channelRef.current) {
+                return;
+            }
+            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+                return;
+            }
+
+            const channel = supabase
+                .channel(`threads_changes_${localUserId}`)
+                .on('postgres_changes', {
+                    event: '*',
+                    schema: 'public',
+                    table: 'threads',
+                    filter: `user_id=eq.${localUserId}`,
+                }, (payload) => {
+                    if (!isActive) return;
+
+                    if (payload.eventType === 'DELETE') {
+                        const deletedId = typeof payload.old?.id === 'string' ? payload.old.id : null;
+                        if (!deletedId) return;
+                        setThreads((prev) => prev.filter((thread) => thread.id !== deletedId));
+                        return;
+                    }
+
+                    const nextThread = toThread(payload.new);
+                    if (!nextThread) return;
+
+                    setThreads((prev) => {
+                        const existingIndex = prev.findIndex((thread) => thread.id === nextThread.id);
+                        if (existingIndex === -1) {
+                            return sortThreadsByUpdatedAt([...prev, nextThread]);
+                        }
+
+                        const updated = [...prev];
+                        updated[existingIndex] = nextThread;
+                        return sortThreadsByUpdatedAt(updated);
+                    });
+                })
+                .subscribe((status) => {
+                    if (status === 'CHANNEL_ERROR') {
+                        console.error('[useThreads] Realtime channel error');
+                    }
+                });
+            channelRef.current = channel;
+        };
+
         const fetchThreads = async () => {
             if (!localUserId) {
                 if (isActive) {
@@ -174,6 +228,7 @@ export function useThreads() {
 
             if (!localUserId) {
                 setThreads([]);
+                unsubscribeRealtime();
                 return;
             }
 
@@ -182,65 +237,40 @@ export function useThreads() {
                 return;
             }
 
-            if (channelRef.current) {
-                supabase.removeChannel(channelRef.current);
-                channelRef.current = null;
-            }
-
-            // 1. Realtime subscription scoped to current user only
-            const channel = supabase
-                .channel(`threads_changes_${localUserId}`)
-                .on('postgres_changes', {
-                    event: '*',
-                    schema: 'public',
-                    table: 'threads',
-                    filter: `user_id=eq.${localUserId}`,
-                }, (payload) => {
-                    if (!isActive) return;
-
-                    if (payload.eventType === 'DELETE') {
-                        const deletedId = typeof payload.old?.id === 'string' ? payload.old.id : null;
-                        if (!deletedId) return;
-                        setThreads((prev) => prev.filter((thread) => thread.id !== deletedId));
-                        return;
-                    }
-
-                    const nextThread = toThread(payload.new);
-                    if (!nextThread) return;
-
-                    setThreads((prev) => {
-                        const existingIndex = prev.findIndex((thread) => thread.id === nextThread.id);
-                        if (existingIndex === -1) {
-                            return sortThreadsByUpdatedAt([...prev, nextThread]);
-                        }
-
-                        const updated = [...prev];
-                        updated[existingIndex] = nextThread;
-                        return sortThreadsByUpdatedAt(updated);
-                    });
-                })
-                .subscribe((status) => {
-                    if (status === 'CHANNEL_ERROR') {
-                        console.error('[useThreads] Realtime channel error');
-                    }
-                });
-            channelRef.current = channel;
+            unsubscribeRealtime();
+            subscribeRealtime();
         };
 
         void setup();
 
-        // 2. Local CustomEvent sync for immediate updates
+        // Local CustomEvent sync for immediate updates
         const handleRefresh = () => {
             void fetchThreads();
         };
         window.addEventListener(REFRESH_THREADS_EVENT, handleRefresh);
 
+        const handleVisibilityChange = () => {
+            if (!isActive || !localUserId) return;
+            if (document.visibilityState === 'hidden') {
+                unsubscribeRealtime();
+                return;
+            }
+            void (async () => {
+                await fetchThreads();
+                if (!isActive) return;
+                subscribeRealtime();
+            })();
+        };
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+        }
+
         return () => {
             isActive = false;
-            if (channelRef.current) {
-                supabase.removeChannel(channelRef.current);
-                channelRef.current = null;
+            if (typeof document !== 'undefined') {
+                document.removeEventListener('visibilitychange', handleVisibilityChange);
             }
+            unsubscribeRealtime();
             window.removeEventListener(REFRESH_THREADS_EVENT, handleRefresh);
         };
     }, [supabase]);

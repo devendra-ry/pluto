@@ -5,7 +5,7 @@ import {
     isSupportedAttachmentMimeType,
 } from '@/lib/attachments';
 import { type Attachment } from '@/lib/types';
-import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
+import { ApiRequestError, assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 
 export const runtime = 'nodejs';
 
@@ -35,7 +35,7 @@ async function assertThreadOwnership(
         .single();
 
     if (error || !data) {
-        throw new Error('Thread not found or access denied');
+        throw new ApiRequestError(403, 'Thread not found or access denied');
     }
 }
 
@@ -58,6 +58,14 @@ function uniquePaths(paths: string[]) {
     return Array.from(new Set(paths.filter((path) => typeof path === 'string' && path.length > 0)));
 }
 
+function mapStorageErrorStatus(message: string) {
+    const normalized = message.toLowerCase();
+    if (normalized.includes('not found')) return 404;
+    if (normalized.includes('forbidden') || normalized.includes('denied') || normalized.includes('unauthorized')) return 403;
+    if (normalized.includes('invalid') || normalized.includes('bad request')) return 400;
+    return 500;
+}
+
 async function listThreadAttachmentPaths(
     supabase: ReturnType<typeof createClient>,
     bucket: string,
@@ -75,7 +83,8 @@ async function listThreadAttachmentPaths(
         });
 
         if (error) {
-            throw new Error(error.message || 'Failed to list thread attachments');
+            const message = error.message || 'Failed to list thread attachments';
+            throw new ApiRequestError(mapStorageErrorStatus(message), message);
         }
 
         if (!data || data.length === 0) {
@@ -109,7 +118,8 @@ async function removePathsInChunks(
         if (batch.length === 0) continue;
         const { error } = await supabase.storage.from(bucket).remove(batch);
         if (error) {
-            throw new Error(error.message || 'Failed to delete attachments');
+            const message = error.message || 'Failed to delete attachments';
+            throw new ApiRequestError(mapStorageErrorStatus(message), message);
         }
     }
 }
@@ -189,8 +199,12 @@ export async function POST(req: Request) {
 
         return jsonResponse({ attachment });
     } catch (error) {
+        const response = toJsonErrorResponse(error);
+        if (response) {
+            return response;
+        }
         const message = error instanceof Error ? error.message : 'Upload failed';
-        return jsonResponse({ error: message }, 403);
+        return jsonResponse({ error: message }, 500);
     }
 }
 
@@ -248,6 +262,10 @@ export async function DELETE(req: Request) {
         await removePathsInChunks(supabase, bucket, pathsToDelete);
         return jsonResponse({ removed: pathsToDelete.length });
     } catch (error) {
+        const response = toJsonErrorResponse(error);
+        if (response) {
+            return response;
+        }
         const message = error instanceof Error ? error.message : 'Failed to cleanup attachments';
         return jsonResponse({ error: message }, 500);
     }
@@ -299,7 +317,12 @@ export async function GET(req: Request) {
                 'Content-Disposition': `inline; filename="${filename}"`,
             },
         });
-    } catch {
-        return new Response('Forbidden', { status: 403 });
+    } catch (error) {
+        const response = toJsonErrorResponse(error);
+        if (response) {
+            return response;
+        }
+        const message = error instanceof Error ? error.message : 'Forbidden';
+        return new Response(message, { status: 403 });
     }
 }

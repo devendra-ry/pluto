@@ -107,6 +107,7 @@ export function useMessages(threadId: string | null) {
         }
 
         let isActive = true;
+        let channel: ReturnType<ReturnType<typeof createClient>['channel']> | null = null;
 
         const fetchMessages = async () => {
             const { data, error } = await supabase
@@ -124,51 +125,89 @@ export function useMessages(threadId: string | null) {
             }
         };
 
-        void fetchMessages();
+        const unsubscribeRealtime = () => {
+            if (channel) {
+                supabase.removeChannel(channel);
+                channel = null;
+            }
+        };
 
-        // Realtime subscription
-        const channel = supabase
-            .channel(`messages_${threadId}`)
-            .on('postgres_changes', {
-                event: '*',
-                schema: 'public',
-                table: 'messages',
-                filter: `thread_id=eq.${threadId}`
-            }, (payload) => {
+        const subscribeRealtime = () => {
+            if (!isActive || channel) {
+                return;
+            }
+            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+                return;
+            }
+
+            channel = supabase
+                .channel(`messages_${threadId}`)
+                .on('postgres_changes', {
+                    event: '*',
+                    schema: 'public',
+                    table: 'messages',
+                    filter: `thread_id=eq.${threadId}`
+                }, (payload) => {
+                    if (!isActive) return;
+
+                    if (payload.eventType === 'DELETE') {
+                        const deletedId = typeof payload.old?.id === 'string' ? payload.old.id : null;
+                        if (!deletedId) return;
+                        setMessages((prev) => prev ? prev.filter((message) => message.id !== deletedId) : prev);
+                        return;
+                    }
+
+                    const nextMessage = toMessage(payload.new);
+                    if (!nextMessage || nextMessage.thread_id !== threadId) {
+                        return;
+                    }
+
+                    setMessages((prev) => {
+                        if (!prev) {
+                            return [nextMessage];
+                        }
+
+                        const existingIndex = prev.findIndex((message) => message.id === nextMessage.id);
+                        if (existingIndex === -1) {
+                            return sortMessagesByCreatedAt([...prev, nextMessage]);
+                        }
+
+                        const updated = [...prev];
+                        updated[existingIndex] = nextMessage;
+                        return updated;
+                    });
+                })
+                .subscribe();
+        };
+
+        void (async () => {
+            await fetchMessages();
+            if (!isActive) return;
+            subscribeRealtime();
+        })();
+
+        const handleVisibilityChange = () => {
+            if (!isActive) return;
+            if (document.visibilityState === 'hidden') {
+                unsubscribeRealtime();
+                return;
+            }
+            void (async () => {
+                await fetchMessages();
                 if (!isActive) return;
-
-                if (payload.eventType === 'DELETE') {
-                    const deletedId = typeof payload.old?.id === 'string' ? payload.old.id : null;
-                    if (!deletedId) return;
-                    setMessages((prev) => prev ? prev.filter((message) => message.id !== deletedId) : prev);
-                    return;
-                }
-
-                const nextMessage = toMessage(payload.new);
-                if (!nextMessage || nextMessage.thread_id !== threadId) {
-                    return;
-                }
-
-                setMessages((prev) => {
-                    if (!prev) {
-                        return [nextMessage];
-                    }
-
-                    const existingIndex = prev.findIndex((message) => message.id === nextMessage.id);
-                    if (existingIndex === -1) {
-                        return sortMessagesByCreatedAt([...prev, nextMessage]);
-                    }
-
-                    const updated = [...prev];
-                    updated[existingIndex] = nextMessage;
-                    return updated;
-                });
-            })
-            .subscribe();
+                subscribeRealtime();
+            })();
+        };
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+        }
 
         return () => {
             isActive = false;
-            supabase.removeChannel(channel);
+            if (typeof document !== 'undefined') {
+                document.removeEventListener('visibilitychange', handleVisibilityChange);
+            }
+            unsubscribeRealtime();
         };
     }, [threadId, supabase]);
 

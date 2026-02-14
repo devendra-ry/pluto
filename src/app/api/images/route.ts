@@ -1,6 +1,7 @@
 import { DEFAULT_ATTACHMENTS_BUCKET } from '@/lib/attachments';
 import { IMAGE_GENERATION_MODEL } from '@/lib/constants';
 import { type Attachment } from '@/lib/types';
+import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
 import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { createClient } from '@/utils/supabase/server';
 
@@ -225,9 +226,9 @@ export async function POST(req: Request) {
         return jsonResponse({ error: 'Image mode uses an internal model and does not accept model overrides' }, 400);
     }
 
-    const apiKey = process.env.CHUTES_API_KEY || process.env.CHUTES_API_TOKEN;
+    const apiKey = getChutesApiKey();
     if (!apiKey) {
-        return jsonResponse({ error: 'Chutes API key missing (set CHUTES_API_KEY or CHUTES_API_TOKEN)' }, 500);
+        return jsonResponse({ error: CHUTES_MISSING_API_KEY_MESSAGE }, 500);
     }
 
     try {

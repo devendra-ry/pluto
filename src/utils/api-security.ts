@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 
 import { createClient } from '@/utils/supabase/server';
 
-class ApiRequestError extends Error {
+export class ApiRequestError extends Error {
     status: number;
 
     constructor(status: number, message: string) {

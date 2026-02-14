@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { createThread, updateThreadSystemPrompt } from '@/hooks/use-threads';
+import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
 import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY } from '@/lib/constants';
 import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
@@ -55,6 +55,38 @@ export default function HomePage() {
         showToast(message, 'error');
       }
     }
+  };
+
+  const handleModelChange = (nextModel: string) => {
+    const previousModel = model;
+    setModel(nextModel);
+    if (!draftThreadId) return;
+
+    void (async () => {
+      try {
+        await updateThreadModel(draftThreadId, nextModel);
+      } catch (error) {
+        setModel((current) => current === nextModel ? previousModel : current);
+        const message = error instanceof Error ? error.message : 'Failed to update model';
+        showToast(message, 'error');
+      }
+    })();
+  };
+
+  const handleReasoningEffortChange = (nextEffort: ReasoningEffort) => {
+    const previousEffort = reasoningEffort;
+    setReasoningEffort(nextEffort);
+    if (!draftThreadId) return;
+
+    void (async () => {
+      try {
+        await updateReasoningEffort(draftThreadId, nextEffort);
+      } catch (error) {
+        setReasoningEffort((current) => current === nextEffort ? previousEffort : current);
+        const message = error instanceof Error ? error.message : 'Failed to update reasoning effort';
+        showToast(message, 'error');
+      }
+    })();
   };
 
   const handleSend = async (
@@ -186,9 +218,9 @@ export default function HomePage() {
         threadId={draftThreadId}
         isLoading={isLoading}
         currentModel={model}
-        onModelChange={setModel}
+        onModelChange={handleModelChange}
         reasoningEffort={reasoningEffort}
-        onReasoningEffortChange={setReasoningEffort}
+        onReasoningEffortChange={handleReasoningEffortChange}
         systemPrompt={systemPrompt}
         onSystemPromptChange={handleSystemPromptChange}
       />
