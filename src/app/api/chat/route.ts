@@ -66,6 +66,7 @@ const ATTACHMENTS_BUCKET =
     process.env.NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET ||
     DEFAULT_ATTACHMENTS_BUCKET;
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
+const DEBUG_MODEL_LIMITS = process.env.CHAT_DEBUG_MODEL_LIMITS === '1';
 
 function readPositiveInt(value: string | undefined, fallback: number) {
     if (!value) return fallback;
@@ -92,6 +93,15 @@ function toPositiveInt(value: unknown): number | null {
 function resolveOutputTokenCap(maxOutputTokens: number | null | undefined) {
     const parsed = toPositiveInt(maxOutputTokens);
     return parsed ?? DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS;
+}
+
+function logModelLimits(label: string, payload: Record<string, unknown>) {
+    if (!DEBUG_MODEL_LIMITS) return;
+    try {
+        console.log(`[chat][limits] ${label} ${JSON.stringify(payload)}`);
+    } catch {
+        console.log(`[chat][limits] ${label}`);
+    }
 }
 
 function getCachedLimits(cacheKey: string): ResolvedModelLimits | null {
@@ -138,6 +148,13 @@ async function resolveModelLimits(model: string, modelConfig: ModelConfig, signa
     }
 
     const finalLimits = resolved ?? getFallbackLimits();
+    logModelLimits('resolved-model-limits', {
+        model,
+        provider: modelConfig.provider,
+        source: finalLimits.source,
+        contextWindowTokens: finalLimits.contextWindowTokens,
+        maxOutputTokens: finalLimits.maxOutputTokens,
+    });
     setCachedLimits(cacheKey, finalLimits);
     return finalLimits;
 }
@@ -155,9 +172,22 @@ async function resolveGoogleModelLimits(model: string, signal?: AbortSignal): Pr
     const contextWindowTokens = toPositiveInt(payload.inputTokenLimit);
     if (!contextWindowTokens) return null;
 
+    const resolvedMaxOutput = toPositiveInt(payload.outputTokenLimit);
+    logModelLimits('google-model-limits', {
+        model,
+        raw: {
+            inputTokenLimit: payload.inputTokenLimit,
+            outputTokenLimit: payload.outputTokenLimit,
+        },
+        resolved: {
+            contextWindowTokens,
+            maxOutputTokens: resolvedMaxOutput,
+        },
+    });
+
     return {
         contextWindowTokens,
-        maxOutputTokens: toPositiveInt(payload.outputTokenLimit),
+        maxOutputTokens: resolvedMaxOutput,
         source: 'google',
     };
 }
@@ -198,12 +228,28 @@ async function resolveOpenRouterModelLimits(model: string, signal?: AbortSignal)
 
     if (!contextWindowTokens) return null;
 
+    const resolvedMaxOutput =
+        toPositiveInt(topProvider?.max_completion_tokens) ??
+        toPositiveInt(modelEntry.max_completion_tokens) ??
+        toPositiveInt(modelEntry.max_output_length);
+    logModelLimits('openrouter-model-limits', {
+        model,
+        raw: {
+            context_length: modelEntry.context_length,
+            top_provider_context_length: topProvider?.context_length,
+            max_completion_tokens: modelEntry.max_completion_tokens,
+            top_provider_max_completion_tokens: topProvider?.max_completion_tokens,
+            max_output_length: modelEntry.max_output_length,
+        },
+        resolved: {
+            contextWindowTokens,
+            maxOutputTokens: resolvedMaxOutput,
+        },
+    });
+
     return {
         contextWindowTokens,
-        maxOutputTokens:
-            toPositiveInt(topProvider?.max_completion_tokens) ??
-            toPositiveInt(modelEntry.max_completion_tokens) ??
-            toPositiveInt(modelEntry.max_output_length),
+        maxOutputTokens: resolvedMaxOutput,
         source: 'openrouter',
     };
 }
@@ -241,13 +287,31 @@ async function resolveChutesModelLimits(model: string, signal?: AbortSignal): Pr
 
     if (!contextWindowTokens) return null;
 
+    const resolvedMaxOutput =
+        toPositiveInt(modelEntry.max_completion_tokens) ??
+        toPositiveInt(modelEntry.max_output_tokens) ??
+        toPositiveInt(modelEntry.output_token_limit) ??
+        toPositiveInt(modelEntry.max_output_length);
+    logModelLimits('chutes-model-limits', {
+        model,
+        raw: {
+            context_length: modelEntry.context_length,
+            max_prompt_tokens: modelEntry.max_prompt_tokens,
+            input_token_limit: modelEntry.input_token_limit,
+            max_completion_tokens: modelEntry.max_completion_tokens,
+            max_output_tokens: modelEntry.max_output_tokens,
+            output_token_limit: modelEntry.output_token_limit,
+            max_output_length: modelEntry.max_output_length,
+        },
+        resolved: {
+            contextWindowTokens,
+            maxOutputTokens: resolvedMaxOutput,
+        },
+    });
+
     return {
         contextWindowTokens,
-        maxOutputTokens:
-            toPositiveInt(modelEntry.max_completion_tokens) ??
-            toPositiveInt(modelEntry.max_output_tokens) ??
-            toPositiveInt(modelEntry.output_token_limit) ??
-            toPositiveInt(modelEntry.max_output_length),
+        maxOutputTokens: resolvedMaxOutput,
         source: 'chutes',
     };
 }
@@ -735,6 +799,13 @@ async function getChutesStream(
         max_tokens: resolveOutputTokenCap(maxOutputTokens),
     };
 
+    logModelLimits('chutes-request', {
+        model,
+        resolvedMaxOutputTokens: maxOutputTokens,
+        requestMaxTokens: requestBody.max_tokens,
+        messageCount: messages.length,
+    });
+
     if (reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
     if (modelConfig?.usesThinkingParam) {
         requestBody.chat_template_kwargs = { thinking: reasoningEffort !== 'low' };
@@ -782,6 +853,13 @@ async function getGoogleStream(
         tools?: Array<{ googleSearch: Record<string, never> }>;
         systemInstruction?: string;
     } = { maxOutputTokens: resolveOutputTokenCap(maxOutputTokens) };
+    logModelLimits('google-request', {
+        model,
+        resolvedMaxOutputTokens: maxOutputTokens,
+        requestMaxOutputTokens: config.maxOutputTokens,
+        messageCount: messages.length,
+        useSearch,
+    });
     const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
 
     if (modelConfig?.supportsReasoning && reasoningEffort) {
@@ -858,6 +936,14 @@ async function getOpenRouterStream(
 ) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error('OpenRouter API key missing');
+    const requestMaxTokens = resolveOutputTokenCap(maxOutputTokens);
+    logModelLimits('openrouter-request', {
+        model,
+        resolvedMaxOutputTokens: maxOutputTokens,
+        requestMaxTokens,
+        messageCount: messages.length,
+    });
+
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -870,7 +956,7 @@ async function getOpenRouterStream(
             model,
             messages: buildOpenAICompatibleMessages(messages, systemPrompt),
             stream: true,
-            max_tokens: resolveOutputTokenCap(maxOutputTokens),
+            max_tokens: requestMaxTokens,
             reasoning: { effort: reasoningEffort },
         }),
         signal,
