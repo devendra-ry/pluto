@@ -47,6 +47,13 @@ interface TrimmedContext {
     outputReserve: number;
 }
 
+interface OutputTokenPlan {
+    requestedOutputTokens: number;
+    requestMaxTokens: number;
+    promptTokenEstimate: number;
+    remainingForOutput: number;
+}
+
 interface PreparedAttachment {
     name: string;
     mimeType: string;
@@ -327,6 +334,39 @@ function estimateConversationTokens(messages: ChatMessage[]) {
     return messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
 }
 
+function estimatePreparedMessageTokens(message: PreparedChatMessage) {
+    const attachmentCount = message.attachments?.length ?? 0;
+    const attachmentBudget = attachmentCount * 1200;
+    return Math.ceil(message.content.length / 3.5) + 8 + attachmentBudget;
+}
+
+function estimatePreparedConversationTokens(messages: PreparedChatMessage[]) {
+    return messages.reduce((sum, message) => sum + estimatePreparedMessageTokens(message), 0);
+}
+
+function estimateSystemPromptTokens(systemPrompt: string) {
+    if (!systemPrompt) return 0;
+    const trimmed = systemPrompt.trim();
+    if (!trimmed) return 0;
+    return Math.ceil(trimmed.length / 3.5) + 8;
+}
+
+function resolveOutputTokenPlan(
+    limits: ResolvedModelLimits,
+    maxOutputTokens: number | null | undefined,
+    promptTokenEstimate: number
+): OutputTokenPlan {
+    const requestedOutputTokens = resolveOutputTokenCap(maxOutputTokens);
+    const remainingForOutput = limits.contextWindowTokens - promptTokenEstimate - DEFAULT_SAFETY_MARGIN_TOKENS;
+    const requestMaxTokens = Math.max(1, Math.min(requestedOutputTokens, remainingForOutput));
+    return {
+        requestedOutputTokens,
+        requestMaxTokens,
+        promptTokenEstimate,
+        remainingForOutput,
+    };
+}
+
 function findLastUserIndex(messages: ChatMessage[]) {
     for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].role === 'user') return i;
@@ -337,19 +377,21 @@ function findLastUserIndex(messages: ChatMessage[]) {
 function trimMessagesToInputBudget(
     messages: ChatMessage[],
     limits: ResolvedModelLimits,
-    budgetScale: number = 1
+    budgetScale: number = 1,
+    reservedInputTokens: number = 0
 ): TrimmedContext {
     const outputCeiling = limits.maxOutputTokens ?? DEFAULT_OUTPUT_RESERVE_TOKENS;
     const outputReserve = Math.max(512, Math.min(DEFAULT_OUTPUT_RESERVE_TOKENS, outputCeiling));
-    const baseInputBudget = Math.max(
-        MIN_INPUT_BUDGET_TOKENS,
-        limits.contextWindowTokens - outputReserve - DEFAULT_SAFETY_MARGIN_TOKENS
+    const reserved = Math.max(0, Math.floor(reservedInputTokens));
+    const availableInputBudget = Math.max(
+        0,
+        limits.contextWindowTokens - outputReserve - DEFAULT_SAFETY_MARGIN_TOKENS - reserved
     );
     const normalizedScale = Math.min(1, Math.max(0.2, budgetScale));
-    const inputBudget = Math.max(
-        MIN_INPUT_BUDGET_TOKENS,
-        Math.floor(baseInputBudget * normalizedScale)
-    );
+    const scaledInputBudget = Math.floor(availableInputBudget * normalizedScale);
+    const inputBudget = availableInputBudget <= 0
+        ? 0
+        : Math.max(1, Math.min(availableInputBudget, Math.max(MIN_INPUT_BUDGET_TOKENS, scaledInputBudget)));
 
     if (messages.length === 0) {
         return {
@@ -690,12 +732,21 @@ export async function POST(req: Request) {
                 }
 
                 const limits = await resolveModelLimits(model, modelConfig, signal);
-                let trimmedContext = trimMessagesToInputBudget(messages, limits);
+                const systemPromptTokenEstimate = estimateSystemPromptTokens(normalizedSystemPrompt);
+                const systemPromptPlan = resolveOutputTokenPlan(limits, limits.maxOutputTokens, systemPromptTokenEstimate);
+                if (systemPromptPlan.remainingForOutput <= 0) {
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'System prompt is too long for the selected model context window.' })}\n\n`);
+                    controller.close();
+                    return;
+                }
+
+                let trimmedContext = trimMessagesToInputBudget(messages, limits, 1, systemPromptTokenEstimate);
                 if (trimmedContext.trimmedCount > 0) {
                     console.log(
                         `[chat] context-trimmed model=${model} source=${limits.source} trimmed=${trimmedContext.trimmedCount} ` +
                         `kept=${trimmedContext.messages.length} estTokens=${trimmedContext.estimatedTokens} ` +
                         `inputBudget=${trimmedContext.inputBudget} outputReserve=${trimmedContext.outputReserve} ` +
+                        `systemPromptTokens=${systemPromptTokenEstimate} ` +
                         `window=${trimmedContext.contextWindow}`
                     );
                 }
@@ -705,33 +756,73 @@ export async function POST(req: Request) {
                     safeEnqueue(controller, ': keep-alive\n\n');
                 }, 15000);
 
-                const getSourceStream = async (contextMessages: ChatMessage[]) => {
+                const getSourceStream = async (context: TrimmedContext) => {
+                    const outputPlan = resolveOutputTokenPlan(
+                        limits,
+                        limits.maxOutputTokens,
+                        context.estimatedTokens + systemPromptTokenEstimate
+                    );
+                    if (outputPlan.remainingForOutput <= 0) {
+                        throw new Error('Input is too long for selected model context window.');
+                    }
+
                     const preparedMessages = await prepareMessageAttachments(
-                        contextMessages,
+                        context.messages,
                         supabase,
                         user.id,
                         modelConfig,
                         signal
                     );
+                    const estimatedInputTokens = estimatePreparedConversationTokens(preparedMessages);
+                    const estimatedInputTokensWithSystemPrompt = estimatedInputTokens + systemPromptTokenEstimate;
                     if (modelConfig.provider === 'google') {
-                        return getGoogleStream(model, preparedMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, normalizedSystemPrompt, useSearch, signal);
+                        return getGoogleStream(
+                            model,
+                            preparedMessages,
+                            reasoningEffort ?? 'low',
+                            outputPlan.requestMaxTokens,
+                            normalizedSystemPrompt,
+                            useSearch,
+                            estimatedInputTokens,
+                            estimatedInputTokensWithSystemPrompt,
+                            signal
+                        );
                     }
                     if (modelConfig.provider === 'openrouter') {
-                        return getOpenRouterStream(model, preparedMessages, reasoningEffort ?? 'low', limits.maxOutputTokens, normalizedSystemPrompt, signal);
+                        return getOpenRouterStream(
+                            model,
+                            preparedMessages,
+                            reasoningEffort ?? 'low',
+                            outputPlan.requestMaxTokens,
+                            normalizedSystemPrompt,
+                            estimatedInputTokens,
+                            estimatedInputTokensWithSystemPrompt,
+                            signal
+                        );
                     }
-                    return getChutesStream(model, preparedMessages, reasoningEffort || 'low', modelConfig, limits.maxOutputTokens, normalizedSystemPrompt, signal);
+                    return getChutesStream(
+                        model,
+                        preparedMessages,
+                        reasoningEffort || 'low',
+                        modelConfig,
+                        outputPlan.requestMaxTokens,
+                        normalizedSystemPrompt,
+                        estimatedInputTokens,
+                        estimatedInputTokensWithSystemPrompt,
+                        signal
+                    );
                 };
 
                 let sourceStream: ReadableStream;
                 try {
-                    sourceStream = await getSourceStream(trimmedContext.messages);
+                    sourceStream = await getSourceStream(trimmedContext);
                 } catch (error) {
                     const shouldRetry = isContextOverflowError(error);
                     if (!shouldRetry || signal.aborted) {
                         throw error;
                     }
 
-                    const retryContext = trimMessagesToInputBudget(messages, limits, CONTEXT_RETRY_SCALE);
+                    const retryContext = trimMessagesToInputBudget(messages, limits, CONTEXT_RETRY_SCALE, systemPromptTokenEstimate);
                     const canTighten = retryContext.messages.length < trimmedContext.messages.length
                         || retryContext.inputBudget < trimmedContext.inputBudget;
                     if (!canTighten) {
@@ -743,7 +834,7 @@ export async function POST(req: Request) {
                         `(inputBudget=${retryContext.inputBudget}, kept=${retryContext.messages.length})`
                     );
                     trimmedContext = retryContext;
-                    sourceStream = await getSourceStream(trimmedContext.messages);
+                    sourceStream = await getSourceStream(trimmedContext);
                 }
 
                 // Clear heartbeat once we have the source stream
@@ -785,6 +876,8 @@ async function getChutesStream(
     modelConfig: ModelConfig,
     maxOutputTokens?: number | null,
     systemPrompt?: string,
+    estimatedInputTokens?: number,
+    estimatedInputTokensWithSystemPrompt?: number,
     signal?: AbortSignal
 ) {
     const apiKey = getChutesApiKey();
@@ -804,6 +897,8 @@ async function getChutesStream(
         resolvedMaxOutputTokens: maxOutputTokens,
         requestMaxTokens: requestBody.max_tokens,
         messageCount: messages.length,
+        estimatedInputTokens,
+        estimatedInputTokensWithSystemPrompt,
     });
 
     if (reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
@@ -835,6 +930,8 @@ async function getGoogleStream(
     maxOutputTokens?: number | null,
     systemPrompt?: string,
     useSearch: boolean = false,
+    estimatedInputTokens?: number,
+    estimatedInputTokensWithSystemPrompt?: number,
     signal?: AbortSignal
 ) {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -859,6 +956,8 @@ async function getGoogleStream(
         requestMaxOutputTokens: config.maxOutputTokens,
         messageCount: messages.length,
         useSearch,
+        estimatedInputTokens,
+        estimatedInputTokensWithSystemPrompt,
     });
     const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
 
@@ -932,6 +1031,8 @@ async function getOpenRouterStream(
     reasoningEffort: ReasoningEffort = 'low',
     maxOutputTokens?: number | null,
     systemPrompt?: string,
+    estimatedInputTokens?: number,
+    estimatedInputTokensWithSystemPrompt?: number,
     signal?: AbortSignal
 ) {
     const apiKey = process.env.OPENROUTER_API_KEY;
@@ -942,6 +1043,8 @@ async function getOpenRouterStream(
         resolvedMaxOutputTokens: maxOutputTokens,
         requestMaxTokens,
         messageCount: messages.length,
+        estimatedInputTokens,
+        estimatedInputTokensWithSystemPrompt,
     });
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
