@@ -36,6 +36,11 @@ export function ChatMessageList({
     onEdit,
     onRetry,
 }: ChatMessageListProps) {
+    const followOutput = useCallback(
+        (isAtBottom: boolean) => (isAtBottom ? 'auto' : false),
+        [],
+    );
+
     const computeItemKey = useCallback(
         (_index: number, message: ChatViewMessage) => message.id,
         [],
@@ -71,7 +76,7 @@ export function ChatMessageList({
             ref={virtuosoRef}
             className="scrollbar-none"
             data={messages}
-            followOutput={false}
+            followOutput={followOutput}
             atBottomThreshold={60}
             atBottomStateChange={setIsAtBottom}
             defaultItemHeight={150}
