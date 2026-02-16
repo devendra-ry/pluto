@@ -167,6 +167,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
     const [systemPrompt, setSystemPrompt] = useState('');
     const [isAtBottom, setIsAtBottom] = useState(true);
+    const [messagesReady, setMessagesReady] = useState(false);
     const hasInitialized = useRef(false);
     const currentMessagesChatId = useRef<string | null>(null);
     const justAddedMessageIdRef = useRef<string | null>(null);
@@ -250,12 +251,14 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (hasInitialized.current && storedMessages && storedMessages.length === 0 && messages.length > 0) {
             setMessages([]);
             hasInitialized.current = false;
+            setMessagesReady(false);
         }
 
         if (!hasInitialized.current && storedMessages) {
             hasInitialized.current = true;
             currentMessagesChatId.current = chatId;
             applyStoredMessages(storedMessages);
+            setMessagesReady(true);
         } else {
             // Update messages from storage only when not generating.
             if (!isLoading && !isThinking && storedMessages) {
@@ -292,6 +295,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         hasInitialized.current = false;
         currentMessagesChatId.current = null;
         setMessages([]);
+        setMessagesReady(false);
 
         if (chatInputRef.current) {
             chatInputRef.current.setValue('');
@@ -324,6 +328,18 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             virtuosoRef.current.scrollToIndex({ index: messages.length - 1, align: 'end' });
         }
     }, [messages.length, isThinking, isAtBottom]);
+
+    // Scroll to bottom after initial messages load for a thread.
+    useEffect(() => {
+        if (messagesReady && messages.length > 0 && virtuosoRef.current) {
+            // Give Virtuoso a frame to measure the new items before scrolling.
+            requestAnimationFrame(() => {
+                virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, align: 'end' });
+            });
+        }
+        // Only fire when messagesReady transitions (not on every messages.length change).
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [messagesReady]);
 
     const handleModelChange = async (newModel: string) => {
         if (!isSelectableChatModel(newModel)) {
@@ -517,9 +533,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
     }, [messages, chatId, showToast, generateResponse, refreshStoredMessages, setIsLoading, model]);
 
-    const shouldShowLoadingBlank =
-        storedMessages === null || (storedMessages && storedMessages.length > 0 && messages.length === 0);
-    const shouldShowEmptyState = !!storedMessages && storedMessages.length === 0 && !isThinking;
+    const shouldShowLoadingBlank = !messagesReady;
+    const shouldShowEmptyState = messagesReady && messages.length === 0 && !isThinking;
 
     return (
         <div className="flex flex-col h-full bg-[#1a1520]">

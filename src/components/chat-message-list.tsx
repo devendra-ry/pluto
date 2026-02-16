@@ -41,6 +41,7 @@ export function ChatMessageList({
             atBottomThreshold={60}
             atBottomStateChange={setIsAtBottom}
             initialTopMostItemIndex={messages.length - 1}
+            increaseViewportBy={{ top: 600, bottom: 200 }}
             itemContent={(index, message) => {
                 const messageModelId = message.model_id || (message.role === 'assistant' ? model : undefined);
                 const selectedModel = AVAILABLE_MODELS.find((m) => m.id === messageModelId);
