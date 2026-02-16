@@ -172,6 +172,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const justAddedMessageIdRef = useRef<string | null>(null);
     const locallyDeletedMessageIdsRef = useRef<Set<string>>(new Set());
     const persistRetryModeHintRef = useRef<((userMessageId: string, mode: RetryMode) => void) | null>(null);
+    const prevChatIdRef = useRef<string | null>(null);
     const { showToast } = useToast();
 
     const {
@@ -303,9 +304,12 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     }, [resetStreamState]);
 
     useEffect(() => {
-        // Prepare for new chat ID.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        resetLocalChatState();
+        // Only reset when actually switching between different chats, not on initial mount.
+        if (prevChatIdRef.current !== null && prevChatIdRef.current !== chatId) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            resetLocalChatState();
+        }
+        prevChatIdRef.current = chatId;
     }, [chatId, resetLocalChatState]);
 
     const scrollToBottom = useCallback(() => {

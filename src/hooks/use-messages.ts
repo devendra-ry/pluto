@@ -297,7 +297,15 @@ export function useMessages(threadId: string | null) {
         };
 
         void (async () => {
-            setMessages(null);
+            // Only null-out if switching to a DIFFERENT thread so we don't flash stale
+            // content from another thread. When re-opening the same thread, keep existing
+            // messages visible while the fresh fetch completes.
+            setMessages((prev) => {
+                if (prev && prev.length > 0 && prev[0].thread_id !== threadId) {
+                    return null;
+                }
+                return prev;
+            });
             await fetchMessages();
             if (!isActive) return;
             subscribeRealtime();
