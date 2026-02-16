@@ -112,6 +112,10 @@ interface UseRetryLogicParams {
     ) => Promise<void>;
     refreshStoredMessages: () => Promise<RefreshMessagesResult>;
     locallyDeletedMessageIdsRef: MutableRefObject<Set<string>>;
+    confirmDestructiveDelete: (context: {
+        action: 'retry';
+        deleteCount: number;
+    }) => Promise<boolean>;
 }
 
 export function useRetryLogic({
@@ -124,6 +128,7 @@ export function useRetryLogic({
     generateResponse,
     refreshStoredMessages,
     locallyDeletedMessageIdsRef,
+    confirmDestructiveDelete,
 }: UseRetryLogicParams) {
     const persistRetryModeHint = useCallback((userMessageId: string, mode: RetryMode) => {
         if (!chatId || !userMessageId) return;
@@ -194,9 +199,22 @@ export function useRetryLogic({
 
             const deleteIds = canonicalMessages.slice(anchorDbIndex + 1).map((m) => m.id);
             if (deleteIds.length > 0) {
+                const confirmed = await confirmDestructiveDelete({
+                    action: 'retry',
+                    deleteCount: deleteIds.length,
+                });
+                if (!confirmed) {
+                    setIsLoading(false);
+                    return;
+                }
+            }
+            if (deleteIds.length > 0) {
                 deleteIds.forEach((id) => locallyDeletedMessageIdsRef.current.add(id));
             }
-            await deleteMessagesByIds(deleteIds);
+            await deleteMessagesByIds(deleteIds, {
+                reason: 'retry',
+                anchorMessageId,
+            });
             const previousMessages: ChatViewMessage[] = canonicalMessages.slice(0, anchorDbIndex + 1).map((m) => ({
                 id: m.id,
                 role: m.role,
@@ -229,6 +247,7 @@ export function useRetryLogic({
         setMessages,
         refreshStoredMessages,
         generateResponse,
+        confirmDestructiveDelete,
     ]);
 
     return {

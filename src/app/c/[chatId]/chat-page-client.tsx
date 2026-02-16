@@ -38,6 +38,12 @@ interface ChatPageClientProps {
     chatId: string;
 }
 
+type DestructiveDeleteConfirm = {
+    action: 'retry' | 'edit';
+    deleteCount: number;
+    resolve: (confirmed: boolean) => void;
+};
+
 const ChatMessageList = dynamic(
     () => import('@/components/chat-message-list').then((mod) => mod.ChatMessageList),
     { ssr: false }
@@ -175,6 +181,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [messagesReady, setMessagesReady] = useState(false);
     const [messagesChatId, setMessagesChatId] = useState<string | null>(null);
+    const [deleteConfirm, setDeleteConfirm] = useState<DestructiveDeleteConfirm | null>(null);
     const hasInitialized = useRef(false);
     const justAddedMessageIdRef = useRef<string | null>(null);
     const locallyDeletedMessageIdsRef = useRef<Set<string>>(new Set());
@@ -206,6 +213,28 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
     const getInputMode = useCallback(() => chatInputRef.current?.getMode(), []);
 
+    const confirmDestructiveDelete = useCallback((context: {
+        action: 'retry' | 'edit';
+        deleteCount: number;
+    }) => {
+        return new Promise<boolean>((resolve) => {
+            setDeleteConfirm({
+                action: context.action,
+                deleteCount: context.deleteCount,
+                resolve,
+            });
+        });
+    }, []);
+
+    const closeDeleteConfirm = useCallback((confirmed: boolean) => {
+        setDeleteConfirm((current) => {
+            if (current) {
+                current.resolve(confirmed);
+            }
+            return null;
+        });
+    }, []);
+
     const { handleRetry, persistRetryModeHint } = useRetryLogic({
         chatId,
         messages,
@@ -216,6 +245,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         generateResponse,
         refreshStoredMessages,
         locallyDeletedMessageIdsRef,
+        confirmDestructiveDelete,
     });
 
     useEffect(() => {
@@ -532,9 +562,22 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
             const deleteIds = canonicalMessages.slice(deleteStartIndex).map((m) => m.id);
             if (deleteIds.length > 0) {
+                const confirmed = await confirmDestructiveDelete({
+                    action: 'edit',
+                    deleteCount: deleteIds.length,
+                });
+                if (!confirmed) {
+                    setIsLoading(false);
+                    return;
+                }
+            }
+            if (deleteIds.length > 0) {
                 deleteIds.forEach((id) => locallyDeletedMessageIdsRef.current.add(id));
             }
-            await deleteMessagesByIds(deleteIds);
+            await deleteMessagesByIds(deleteIds, {
+                reason: 'edit',
+                anchorMessageId: anchorBeforeEditId,
+            });
             const persistedUser = await addMessage(chatId, 'user', newContent, undefined, editModelId, editedMessageAttachments);
             const keptMessages = canonicalMessages.slice(0, deleteStartIndex).map((m) => ({
                 id: m.id,
@@ -573,7 +616,16 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             console.error('Failed to edit message:', error);
             showToast('Failed to edit message history. Please try again.', 'error');
         }
-    }, [messages, chatId, showToast, generateResponse, refreshStoredMessages, setIsLoading, model]);
+    }, [
+        messages,
+        chatId,
+        showToast,
+        generateResponse,
+        refreshStoredMessages,
+        setIsLoading,
+        model,
+        confirmDestructiveDelete,
+    ]);
 
     const shouldShowEmptyState = messagesReady && isThreadSynchronized && visibleMessages.length === 0 && !isThinking;
     // Keep Virtuoso permanently mounted so it never loses scroll position or
@@ -645,6 +697,47 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 systemPrompt={systemPrompt}
                 onSystemPromptChange={handleSystemPromptChange}
             />
+
+            {deleteConfirm && (
+                <div
+                    className="fixed inset-0 z-[150] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+                    onClick={() => closeDeleteConfirm(false)}
+                >
+                    <div
+                        className="w-full max-w-md rounded-xl border border-[#3a2a40] bg-[#17101c] p-5 shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="delete-history-title"
+                    >
+                        <h2 id="delete-history-title" className="text-base font-semibold text-zinc-100">
+                            Confirm history rewrite
+                        </h2>
+                        <p className="mt-2 text-sm text-zinc-400">
+                            {deleteConfirm.action === 'retry'
+                                ? `Retry will remove ${deleteConfirm.deleteCount} later message${deleteConfirm.deleteCount === 1 ? '' : 's'} from this thread and regenerate from that point.`
+                                : `Edit & resend will remove ${deleteConfirm.deleteCount} later message${deleteConfirm.deleteCount === 1 ? '' : 's'} from this thread and regenerate from the edited message.`}
+                        </p>
+                        <p className="mt-1 text-sm text-zinc-400">
+                            This is now a soft delete and can be restored from audit history.
+                        </p>
+                        <div className="mt-5 flex items-center justify-end gap-2">
+                            <button
+                                className="rounded-md border border-white/20 px-3 py-2 text-sm text-zinc-300 hover:text-zinc-100 hover:bg-white/10"
+                                onClick={() => closeDeleteConfirm(false)}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                className="rounded-md bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-500"
+                                onClick={() => closeDeleteConfirm(true)}
+                            >
+                                Confirm
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

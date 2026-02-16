@@ -19,6 +19,8 @@ export type Database = {
           attachments: Json
           content: string | null
           created_at: string
+          deleted_at: string | null
+          deleted_by: string | null
           id: string
           model_id: string | null
           reasoning: string | null
@@ -29,6 +31,8 @@ export type Database = {
           attachments?: Json
           content?: string | null
           created_at?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           id?: string
           model_id?: string | null
           reasoning?: string | null
@@ -39,6 +43,8 @@ export type Database = {
           attachments?: Json
           content?: string | null
           created_at?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           id?: string
           model_id?: string | null
           reasoning?: string | null
@@ -98,6 +104,14 @@ export type Database = {
     Functions: {
       cleanup_empty_new_chat_threads: {
         Args: { exclude_thread_id?: string }
+        Returns: number
+      }
+      restore_soft_deleted_messages: {
+        Args: { p_message_ids: string[]; p_restore_window_minutes?: number }
+        Returns: number
+      }
+      soft_delete_messages: {
+        Args: { p_anchor_message_id?: string | null; p_message_ids: string[]; p_reason?: string }
         Returns: number
       }
     }
