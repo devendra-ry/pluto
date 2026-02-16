@@ -112,6 +112,14 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         capabilities: ['reasoning'],
     },
     {
+        id: 'MiniMaxAI/MiniMax-M2.5-TEE',
+        name: 'MiniMax M2.5',
+        description: 'MiniMax latest flagship model',
+        provider: 'MiniMaxAI',
+        supportsReasoning: true,
+        capabilities: ['reasoning'],
+    },
+    {
         id: 'zai-org/GLM-4.7-TEE',
         name: 'GLM 4.7 TEE',
         description: 'GLM with TEE security (toggle thinking)',
@@ -203,6 +211,15 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         provider: 'Qwen',
         supportsReasoning: false,
         capabilities: ['toolCalling'],
+    },
+    {
+        id: 'Qwen/Qwen3.5-397B-A17B-TEE',
+        name: 'Qwen 3.5 397B A17B TEE',
+        description: 'Qwen 3.5 large TEE model',
+        provider: 'Qwen',
+        supportsReasoning: true,
+        usesThinkingParam: true,
+        capabilities: ['reasoning', 'effortControl', 'toolCalling'],
     },
     {
         id: 'moonshotai/Kimi-K2-Thinking-TEE',
