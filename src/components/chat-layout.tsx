@@ -1,9 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Sidebar } from '@/components/sidebar';
+import dynamic from 'next/dynamic';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { type User } from '@supabase/supabase-js';
+
+const SidebarClient = dynamic(
+    () => import('@/components/sidebar').then((mod) => mod.Sidebar),
+    { ssr: false }
+);
 
 export function ChatLayout({ children, initialUser }: { children: React.ReactNode; initialUser: User | null }) {
     const [isMobile, setIsMobile] = useState(false);
@@ -21,7 +26,7 @@ export function ChatLayout({ children, initialUser }: { children: React.ReactNod
 
     return (
         <div className="flex h-screen bg-[#1a1520]">
-            <Sidebar isMobileSize={isMobile} initialUser={initialUser} />
+            <SidebarClient isMobileSize={isMobile} initialUser={initialUser} />
             <main className="flex-1 overflow-hidden relative">
                 <ErrorBoundary
                     onError={(error) => {

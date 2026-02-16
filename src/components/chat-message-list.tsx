@@ -71,10 +71,9 @@ export function ChatMessageList({
             ref={virtuosoRef}
             className="scrollbar-none"
             data={messages}
-            followOutput="auto"
+            followOutput={false}
             atBottomThreshold={60}
             atBottomStateChange={setIsAtBottom}
-            initialTopMostItemIndex={messages.length - 1}
             defaultItemHeight={150}
             increaseViewportBy={OVERSCAN}
             computeItemKey={computeItemKey}

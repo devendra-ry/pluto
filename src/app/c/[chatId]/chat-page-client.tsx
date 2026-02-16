@@ -180,6 +180,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const locallyDeletedMessageIdsRef = useRef<Set<string>>(new Set());
     const persistRetryModeHintRef = useRef<((userMessageId: string, mode: RetryMode) => void) | null>(null);
     const prevChatIdRef = useRef<string | null>(null);
+    const isAtBottomRef = useRef(true);
+    const initialBottomScrollChatIdRef = useRef<string | null>(null);
     const { showToast } = useToast();
 
     const {
@@ -319,6 +321,9 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             // eslint-disable-next-line react-hooks/set-state-in-effect
             resetLocalChatState();
         }
+        if (prevChatIdRef.current !== chatId) {
+            initialBottomScrollChatIdRef.current = null;
+        }
         prevChatIdRef.current = chatId;
     }, [chatId, resetLocalChatState]);
 
@@ -335,29 +340,48 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
     }, [visibleMessages.length]);
 
-    // Keep viewport pinned to the bottom while streaming / when new messages arrive.
-    // Do NOT include isAtBottom in the dependency array — we only want this to fire
-    // when the data actually changes, not when the user manually scrolls.
+    useEffect(() => {
+        isAtBottomRef.current = isAtBottom;
+    }, [isAtBottom]);
+
+    // Keep viewport pinned only while actively streaming and only if user stayed at bottom.
     useEffect(() => {
         if (!isThreadSynchronized || visibleMessages.length === 0) {
             return;
         }
-        if (virtuosoRef.current && isAtBottom) {
-            virtuosoRef.current.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' });
+        if (!isAtBottomRef.current) {
+            return;
         }
-    }, [visibleMessages.length, isThinking, isAtBottom, isThreadSynchronized]);
-
-    // Scroll to bottom after initial messages load for a thread.
-    useEffect(() => {
-        if (messagesReady && isThreadSynchronized && visibleMessages.length > 0 && virtuosoRef.current) {
-            // Give Virtuoso two frames to measure the new items before scrolling.
+        if (!isLoading && !isThinking) {
+            return;
+        }
+        if (virtuosoRef.current) {
             scheduleFrame(() => {
-                scheduleFrame(() => {
-                    virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' });
-                });
+                virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' });
             });
         }
-    }, [messagesReady, isThreadSynchronized, visibleMessages.length]);
+    }, [visibleMessages.length, isLoading, isThinking, isThreadSynchronized]);
+
+    // Scroll to bottom exactly once when a thread finishes initial message sync.
+    useEffect(() => {
+        if (!messagesReady || !isThreadSynchronized || visibleMessages.length === 0) {
+            return;
+        }
+        if (initialBottomScrollChatIdRef.current === chatId) {
+            return;
+        }
+
+        initialBottomScrollChatIdRef.current = chatId;
+        scheduleFrame(() => {
+            scheduleFrame(() => {
+                virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' });
+            });
+        });
+    }, [chatId, messagesReady, isThreadSynchronized, visibleMessages.length]);
+
+    const handleAtBottomStateChange = useCallback((nextIsAtBottom: boolean) => {
+        setIsAtBottom((prev) => (prev === nextIsAtBottom ? prev : nextIsAtBottom));
+    }, []);
 
     const handleModelChange = async (newModel: string) => {
         if (!isSelectableChatModel(newModel)) {
@@ -594,7 +618,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                             isLoading={isLoading}
                             isThinking={isThinking}
                             virtuosoRef={virtuosoRef}
-                            setIsAtBottom={setIsAtBottom}
+                            setIsAtBottom={handleAtBottomStateChange}
                             onEdit={handleEdit}
                             onRetry={handleRetry}
                         />
