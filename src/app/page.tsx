@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
@@ -31,17 +31,39 @@ export default function HomePage() {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [draftThreadId, setDraftThreadId] = useState<string | null>(null);
+  const draftThreadIdRef = useRef<string | null>(null);
+  const ensureThreadPromiseRef = useRef<Promise<string> | null>(null);
   const { showToast } = useToast();
 
-  const ensureThread = async () => {
-    if (draftThreadId) {
-      return draftThreadId;
+  useEffect(() => {
+    draftThreadIdRef.current = draftThreadId;
+  }, [draftThreadId]);
+
+  const ensureThread = useCallback(async () => {
+    if (draftThreadIdRef.current) {
+      return draftThreadIdRef.current;
     }
 
-    const thread = await createThread(model, reasoningEffort, systemPrompt);
-    setDraftThreadId(thread.id);
-    return thread.id;
-  };
+    if (ensureThreadPromiseRef.current) {
+      return ensureThreadPromiseRef.current;
+    }
+
+    const createPromise = (async () => {
+      const thread = await createThread(model, reasoningEffort, systemPrompt);
+      draftThreadIdRef.current = thread.id;
+      setDraftThreadId(thread.id);
+      return thread.id;
+    })();
+
+    ensureThreadPromiseRef.current = createPromise;
+    try {
+      return await createPromise;
+    } finally {
+      if (ensureThreadPromiseRef.current === createPromise) {
+        ensureThreadPromiseRef.current = null;
+      }
+    }
+  }, [model, reasoningEffort, systemPrompt]);
 
   const handleSystemPromptChange = async (nextPrompt: string) => {
     const previousPrompt = systemPrompt;
@@ -98,6 +120,7 @@ export default function HomePage() {
     const isImageMode = options.mode === 'image';
     const isSearchMode = options.mode === 'search';
     const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : null;
+    const messageModel = isImageMode ? IMAGE_GENERATION_MODEL : model;
 
     setIsLoading(true);
     try {
@@ -105,7 +128,7 @@ export default function HomePage() {
       const threadId = await ensureThread();
 
       // 2. Add the user message
-      await addMessage(threadId, 'user', value.trim(), undefined, undefined, attachments);
+      await addMessage(threadId, 'user', value.trim(), undefined, messageModel, attachments);
 
       // 3. Navigate to the new chat
       // The ChatPageClient will pick up the user message and start generating

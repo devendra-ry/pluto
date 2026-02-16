@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { type ReasoningEffort } from '@/lib/types';
 import { cleanupThreadAttachments } from '@/lib/uploads';
 import { sanitizeThreadTitle } from '@/lib/sanitize';
+import { DEFAULT_MODEL } from '@/lib/constants';
+import type { Database } from '@/utils/supabase/database.types';
 
 export interface Thread {
     id: string;
@@ -20,13 +22,65 @@ export interface Thread {
 
 export const REFRESH_THREADS_EVENT = 'pluto:refresh_threads';
 const THREAD_SELECT_COLUMNS = 'id,title,model,reasoning_effort,system_prompt,is_pinned,created_at,updated_at,user_id';
+const THREADS_PAGE_SIZE = 50;
+type ThreadRow = Database['public']['Tables']['threads']['Row'];
 
-function sortThreadsByUpdatedAt(threads: Thread[]) {
-    return [...threads].sort((a, b) => {
-        const byUpdatedAt = b.updated_at.localeCompare(a.updated_at);
-        if (byUpdatedAt !== 0) return byUpdatedAt;
-        return b.id.localeCompare(a.id);
-    });
+function compareThreadsByUpdatedAtDesc(a: Thread, b: Thread) {
+    const byUpdatedAt = b.updated_at.localeCompare(a.updated_at);
+    if (byUpdatedAt !== 0) return byUpdatedAt;
+    return b.id.localeCompare(a.id);
+}
+
+function upsertThreadSorted(threads: Thread[], nextThread: Thread): Thread[] {
+    const withoutNext = threads.filter((thread) => thread.id !== nextThread.id);
+    let insertAt = withoutNext.length;
+    for (let i = 0; i < withoutNext.length; i += 1) {
+        if (compareThreadsByUpdatedAtDesc(nextThread, withoutNext[i]) < 0) {
+            insertAt = i;
+            break;
+        }
+    }
+
+    return [
+        ...withoutNext.slice(0, insertAt),
+        nextThread,
+        ...withoutNext.slice(insertAt),
+    ];
+}
+
+function mergeThreadsSorted(existing: Thread[], incoming: Thread[]) {
+    if (incoming.length === 0) return existing;
+
+    const byId = new Map(existing.map((thread) => [thread.id, thread]));
+    for (const thread of incoming) {
+        // Keep local/realtime-updated thread versions if already present.
+        if (!byId.has(thread.id)) {
+            byId.set(thread.id, thread);
+        }
+    }
+
+    return Array.from(byId.values()).sort(compareThreadsByUpdatedAtDesc);
+}
+
+function toReasoningEffort(value: unknown): ReasoningEffort | undefined {
+    if (value === 'low' || value === 'medium' || value === 'high') {
+        return value;
+    }
+    return undefined;
+}
+
+function mapThreadRowToThread(row: ThreadRow): Thread {
+    return {
+        id: row.id,
+        title: row.title ?? 'New Chat',
+        model: row.model ?? DEFAULT_MODEL,
+        reasoning_effort: toReasoningEffort(row.reasoning_effort),
+        system_prompt: row.system_prompt,
+        is_pinned: row.is_pinned ?? undefined,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        user_id: row.user_id,
+    };
 }
 
 function toThread(value: unknown): Thread | null {
@@ -46,9 +100,7 @@ function toThread(value: unknown): Thread | null {
         id: record.id,
         title: record.title,
         model: record.model,
-        reasoning_effort: typeof record.reasoning_effort === 'string'
-            ? record.reasoning_effort as ReasoningEffort
-            : undefined,
+        reasoning_effort: toReasoningEffort(record.reasoning_effort),
         system_prompt: typeof record.system_prompt === 'string' ? record.system_prompt : null,
         is_pinned: typeof record.is_pinned === 'boolean' ? record.is_pinned : undefined,
         created_at: record.created_at,
@@ -62,34 +114,74 @@ export function useThreads() {
     const [threads, setThreads] = useState<Thread[]>([]);
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const channelRef = useRef<ReturnType<ReturnType<typeof createClient>['channel']> | null>(null);
+    const backfillRunRef = useRef(0);
     // Use useState to ensure client is created once and stable
     const [supabase] = useState(() => createClient());
 
-    const refreshThreads = async () => {
-        if (!currentUserId) {
-            setThreads([]);
-            return;
-        }
+    const fetchThreadsPage = useCallback(async (userId: string, offset: number) => {
+        return await supabase
+            .from('threads')
+            .select(THREAD_SELECT_COLUMNS)
+            .eq('user_id', userId)
+            .order('updated_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(offset, offset + THREADS_PAGE_SIZE - 1);
+    }, [supabase]);
+
+    const loadThreadsPaged = useCallback(async (userId: string, isActive: () => boolean = () => true) => {
+        const runId = ++backfillRunRef.current;
+        const isCurrentRun = () => isActive() && backfillRunRef.current === runId;
 
         try {
-            const { data, error } = await supabase
-                .from('threads')
-                .select(THREAD_SELECT_COLUMNS)
-                .eq('user_id', currentUserId)
-                .order('updated_at', { ascending: false });
-
+            const { data, error } = await fetchThreadsPage(userId, 0);
+            if (!isCurrentRun()) return;
             if (error) {
                 console.error('[useThreads] Error fetching threads:', error);
                 return;
             }
 
-            if (data) {
-                setThreads(data as Thread[]);
+            const firstPage = (data ?? []).map(mapThreadRowToThread);
+            setThreads(firstPage);
+
+            if (firstPage.length < THREADS_PAGE_SIZE) {
+                return;
+            }
+
+            let offset = THREADS_PAGE_SIZE;
+            while (isCurrentRun()) {
+                const next = await fetchThreadsPage(userId, offset);
+                if (!isCurrentRun()) return;
+
+                if (next.error) {
+                    console.error('[useThreads] Error fetching threads page:', next.error);
+                    return;
+                }
+
+                const page = (next.data ?? []).map(mapThreadRowToThread);
+                if (page.length === 0) {
+                    return;
+                }
+
+                setThreads((prev) => mergeThreadsSorted(prev, page));
+
+                if (page.length < THREADS_PAGE_SIZE) {
+                    return;
+                }
+                offset += THREADS_PAGE_SIZE;
             }
         } catch (err) {
-            console.error('[useThreads] Unexpected error in refreshThreads:', err);
+            if (!isCurrentRun()) return;
+            console.error('[useThreads] Unexpected error in loadThreadsPaged:', err);
         }
-    };
+    }, [fetchThreadsPage]);
+
+    const refreshThreads = useCallback(async () => {
+        if (!currentUserId) {
+            setThreads([]);
+            return;
+        }
+        await loadThreadsPaged(currentUserId);
+    }, [currentUserId, loadThreadsPaged]);
 
     useEffect(() => {
         let isActive = true;
@@ -131,14 +223,7 @@ export function useThreads() {
                     if (!nextThread) return;
 
                     setThreads((prev) => {
-                        const existingIndex = prev.findIndex((thread) => thread.id === nextThread.id);
-                        if (existingIndex === -1) {
-                            return sortThreadsByUpdatedAt([...prev, nextThread]);
-                        }
-
-                        const updated = [...prev];
-                        updated[existingIndex] = nextThread;
-                        return sortThreadsByUpdatedAt(updated);
+                        return upsertThreadSorted(prev, nextThread);
                     });
                 })
                 .subscribe((status) => {
@@ -157,24 +242,7 @@ export function useThreads() {
                 return;
             }
 
-            try {
-                const { data, error } = await supabase
-                    .from('threads')
-                    .select(THREAD_SELECT_COLUMNS)
-                    .eq('user_id', localUserId)
-                    .order('updated_at', { ascending: false });
-
-                if (error) {
-                    console.error('[useThreads] Error fetching threads:', error);
-                    return;
-                }
-
-                if (data && isActive) {
-                    setThreads(data as Thread[]);
-                }
-            } catch (err) {
-                console.error('[useThreads] Unexpected error in fetchThreads:', err);
-            }
+            await loadThreadsPaged(localUserId, () => isActive);
         };
 
         const setup = async () => {
@@ -235,13 +303,14 @@ export function useThreads() {
 
         return () => {
             isActive = false;
+            backfillRunRef.current += 1;
             if (typeof document !== 'undefined') {
                 document.removeEventListener('visibilitychange', handleVisibilityChange);
             }
             unsubscribeRealtime();
             window.removeEventListener(REFRESH_THREADS_EVENT, handleRefresh);
         };
-    }, [supabase]);
+    }, [supabase, loadThreadsPaged]);
 
     return { threads, refreshThreads };
 }
@@ -259,7 +328,7 @@ export function useThread(id: string | null) {
                 .select(THREAD_SELECT_COLUMNS)
                 .eq('id', id)
                 .single();
-            if (data) setThread(data);
+            if (data) setThread(mapThreadRowToThread(data));
         };
 
         fetchThread();
@@ -311,7 +380,7 @@ export async function createThread(model: string, reasoningEffort?: ReasoningEff
     }
 
     triggerRefresh();
-    return data;
+    return mapThreadRowToThread(data);
 }
 
 // Update thread title
@@ -426,7 +495,7 @@ export async function deleteThread(id: string) {
 export async function cleanupEmptyThreads(excludeId?: string) {
     const supabase = createClient();
     const { data, error } = await supabase.rpc('cleanup_empty_new_chat_threads', {
-        exclude_thread_id: excludeId ?? null,
+        exclude_thread_id: excludeId,
     });
     if (error) {
         throw error;

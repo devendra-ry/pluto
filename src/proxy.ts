@@ -9,11 +9,18 @@ export async function proxy(request: NextRequest) {
 
     const { pathname } = request.nextUrl;
 
-    // Protect chat routes
-    if (pathname.startsWith('/c/') && !user) {
-        const url = request.nextUrl.clone();
-        url.pathname = '/login';
-        return NextResponse.redirect(url);
+    if (!user) {
+        // Protect API routes with a 401 response shape suitable for fetch callers.
+        if (pathname.startsWith('/api/')) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        // Protect chat routes with login redirect UX.
+        if (pathname.startsWith('/c/')) {
+            const url = request.nextUrl.clone();
+            url.pathname = '/login';
+            return NextResponse.redirect(url);
+        }
     }
 
     return supabaseResponse;
@@ -21,7 +28,8 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
     matcher: [
-        // Restrict middleware auth checks to protected chat routes.
+        // Restrict middleware auth checks to protected chat and API routes.
         '/c/:path*',
+        '/api/:path*',
     ],
 };

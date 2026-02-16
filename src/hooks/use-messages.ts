@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { type Attachment } from '@/lib/types';
 import { cleanupThreadAttachments } from '@/lib/uploads';
+import type { Database, Json } from '@/utils/supabase/database.types';
 
 export interface Message {
     id: string;
@@ -17,6 +18,8 @@ export interface Message {
 }
 
 const MESSAGE_SELECT_COLUMNS = 'id,thread_id,role,content,attachments,reasoning,model_id,created_at';
+const MESSAGES_PAGE_SIZE = 80;
+type MessageRow = Database['public']['Tables']['messages']['Row'];
 
 export type RefreshMessagesResult =
     | { ok: true }
@@ -28,6 +31,20 @@ function sortMessagesByCreatedAt(messages: Message[]) {
         if (byCreatedAt !== 0) return byCreatedAt;
         return a.id.localeCompare(b.id);
     });
+}
+
+function mergeMessagesSorted(existing: Message[], incoming: Message[]) {
+    if (incoming.length === 0) return existing;
+
+    const byId = new Map(existing.map((message) => [message.id, message]));
+    for (const message of incoming) {
+        // Preserve locally updated/realtime message versions when already present.
+        if (!byId.has(message.id)) {
+            byId.set(message.id, message);
+        }
+    }
+
+    return sortMessagesByCreatedAt(Array.from(byId.values()));
 }
 
 function toMessage(value: unknown): Message | null {
@@ -49,11 +66,38 @@ function toMessage(value: unknown): Message | null {
         thread_id: record.thread_id,
         role: record.role,
         content: record.content,
-        attachments: Array.isArray(record.attachments) ? record.attachments as Attachment[] : [],
+        attachments: attachmentsFromUnknown(record.attachments),
         reasoning: typeof record.reasoning === 'string' ? record.reasoning : undefined,
         model_id: typeof record.model_id === 'string' ? record.model_id : undefined,
         created_at: record.created_at,
     };
+}
+
+function attachmentsFromUnknown(value: unknown): Attachment[] {
+    if (!Array.isArray(value)) return [];
+    const attachments: Attachment[] = [];
+    for (const item of value) {
+        if (!item || typeof item !== 'object') continue;
+        const record = item as Record<string, unknown>;
+        if (
+            typeof record.id === 'string' &&
+            typeof record.name === 'string' &&
+            typeof record.mimeType === 'string' &&
+            typeof record.size === 'number' &&
+            typeof record.path === 'string' &&
+            typeof record.url === 'string'
+        ) {
+            attachments.push({
+                id: record.id,
+                name: record.name,
+                mimeType: record.mimeType,
+                size: record.size,
+                path: record.path,
+                url: record.url,
+            });
+        }
+    }
+    return attachments;
 }
 
 function attachmentPathsFromUnknown(value: unknown) {
@@ -69,6 +113,19 @@ function attachmentPathsFromUnknown(value: unknown) {
     return paths;
 }
 
+function mapMessageRowToMessage(row: MessageRow): Message {
+    return {
+        id: row.id,
+        thread_id: row.thread_id,
+        role: row.role === 'assistant' ? 'assistant' : 'user',
+        content: row.content ?? '',
+        attachments: attachmentsFromUnknown(row.attachments),
+        reasoning: row.reasoning ?? undefined,
+        model_id: row.model_id ?? undefined,
+        created_at: row.created_at,
+    };
+}
+
 // Fetch canonical message history for a thread
 export async function getThreadMessages(threadId: string): Promise<Message[]> {
     const supabase = createClient();
@@ -80,32 +137,81 @@ export async function getThreadMessages(threadId: string): Promise<Message[]> {
         .order('id', { ascending: true });
 
     if (error) throw error;
-    return (data ?? []) as Message[];
+    return (data ?? []).map(mapMessageRowToMessage);
 }
 
 // Get all messages for a thread
 export function useMessages(threadId: string | null) {
     const [messages, setMessages] = useState<Message[] | null>(() => (threadId ? null : []));
     const [supabase] = useState(() => createClient());
-    const refreshMessages = useCallback(async (): Promise<RefreshMessagesResult> => {
-        if (!threadId) return { ok: true };
+    const backfillRunRef = useRef(0);
 
-        const { data, error } = await supabase
+    const fetchMessagesPage = useCallback(async (targetThreadId: string, offset: number) => {
+        return await supabase
             .from('messages')
             .select(MESSAGE_SELECT_COLUMNS)
-            .eq('thread_id', threadId)
-            .order('created_at', { ascending: true })
-            .order('id', { ascending: true });
+            .eq('thread_id', targetThreadId)
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(offset, offset + MESSAGES_PAGE_SIZE - 1);
+    }, [supabase]);
+
+    const startBackfillMessages = useCallback((
+        targetThreadId: string,
+        initialOffset: number,
+        shouldContinue: () => boolean
+    ) => {
+        const runId = ++backfillRunRef.current;
+        const shouldRun = () => shouldContinue() && backfillRunRef.current === runId;
+
+        void (async () => {
+            let offset = initialOffset;
+            while (shouldRun()) {
+                const { data, error } = await fetchMessagesPage(targetThreadId, offset);
+                if (!shouldRun()) return;
+
+                if (error) {
+                    console.error('[useMessages] Error fetching messages page:', error);
+                    return;
+                }
+
+                const descending = (data ?? []).map(mapMessageRowToMessage);
+                if (descending.length === 0) {
+                    return;
+                }
+
+                const ascending = [...descending].reverse();
+                setMessages((prevMessages) => mergeMessagesSorted(prevMessages ?? [], ascending));
+
+                if (descending.length < MESSAGES_PAGE_SIZE) {
+                    return;
+                }
+                offset += MESSAGES_PAGE_SIZE;
+            }
+        })();
+    }, [fetchMessagesPage]);
+
+    const refreshMessages = useCallback(async (): Promise<RefreshMessagesResult> => {
+        if (!threadId) return { ok: true };
+        backfillRunRef.current += 1;
+
+        const { data, error } = await fetchMessagesPage(threadId, 0);
 
         if (error) {
             console.error('[useMessages] Error refreshing messages:', error);
             return { ok: false, error: error.message || 'Failed to refresh messages' };
         }
-        if (data) {
-            setMessages(data as Message[]);
+
+        const descending = (data ?? []).map(mapMessageRowToMessage);
+        const ascending = [...descending].reverse();
+        setMessages(ascending);
+
+        if (descending.length === MESSAGES_PAGE_SIZE) {
+            startBackfillMessages(threadId, MESSAGES_PAGE_SIZE, () => true);
         }
+
         return { ok: true };
-    }, [threadId, supabase]);
+    }, [threadId, fetchMessagesPage, startBackfillMessages]);
 
     useEffect(() => {
         if (!threadId) {
@@ -114,14 +220,10 @@ export function useMessages(threadId: string | null) {
 
         let isActive = true;
         let channel: ReturnType<ReturnType<typeof createClient>['channel']> | null = null;
+        backfillRunRef.current += 1;
 
         const fetchMessages = async () => {
-            const { data, error } = await supabase
-                .from('messages')
-                .select(MESSAGE_SELECT_COLUMNS)
-                .eq('thread_id', threadId)
-                .order('created_at', { ascending: true })
-                .order('id', { ascending: true });
+            const { data, error } = await fetchMessagesPage(threadId, 0);
 
             if (!isActive) {
                 return;
@@ -130,8 +232,12 @@ export function useMessages(threadId: string | null) {
                 console.error('[useMessages] Error fetching messages:', error);
                 return;
             }
-            if (data) {
-                setMessages(data as Message[]);
+            const descending = (data ?? []).map(mapMessageRowToMessage);
+            const ascending = [...descending].reverse();
+            setMessages(ascending);
+
+            if (descending.length === MESSAGES_PAGE_SIZE) {
+                startBackfillMessages(threadId, MESSAGES_PAGE_SIZE, () => isActive);
             }
         };
 
@@ -191,6 +297,7 @@ export function useMessages(threadId: string | null) {
         };
 
         void (async () => {
+            setMessages(null);
             await fetchMessages();
             if (!isActive) return;
             subscribeRealtime();
@@ -214,12 +321,13 @@ export function useMessages(threadId: string | null) {
 
         return () => {
             isActive = false;
+            backfillRunRef.current += 1;
             if (typeof document !== 'undefined') {
                 document.removeEventListener('visibilitychange', handleVisibilityChange);
             }
             unsubscribeRealtime();
         };
-    }, [threadId, supabase]);
+    }, [threadId, supabase, fetchMessagesPage, startBackfillMessages]);
 
     return {
         messages: threadId ? messages : [],
@@ -243,7 +351,7 @@ export async function addMessage(
             thread_id: threadId,
             role,
             content,
-            attachments,
+            attachments: attachments as Json,
             reasoning,
             model_id: modelId,
         })
@@ -251,7 +359,7 @@ export async function addMessage(
         .single();
 
     if (error) throw error;
-    return data;
+    return mapMessageRowToMessage(data);
 }
 
 // Update message content (for streaming updates)

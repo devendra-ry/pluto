@@ -12,8 +12,15 @@ export const SUPPORTED_ATTACHMENT_MIME_TYPES = [
     'text/plain',
 ] as const;
 
+const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+]);
+
 export function isImageAttachment(mimeType: string) {
-    return mimeType.startsWith('image/');
+    return SUPPORTED_IMAGE_MIME_TYPES.has(mimeType);
 }
 
 export function isPdfAttachment(mimeType: string) {

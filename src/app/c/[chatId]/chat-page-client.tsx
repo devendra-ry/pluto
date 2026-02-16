@@ -9,8 +9,9 @@ import { ChatHeader } from '@/components/chat-header';
 import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
 import { ChatMessageList } from '@/components/chat-message-list';
 import { useToast } from '@/components/ui/toast';
+import { isImageAttachment } from '@/lib/attachments';
 import { useChatStream } from '@/hooks/use-chat-stream';
-import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages } from '@/hooks/use-messages';
+import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages, type Message } from '@/hooks/use-messages';
 import { useRetryLogic } from '@/hooks/use-retry-logic';
 import {
     updateReasoningEffort,
@@ -27,12 +28,127 @@ import {
     PENDING_GENERATION_SEARCH_KEY,
     PENDING_GENERATION_THREAD_KEY,
     PENDING_SYSTEM_PROMPT_KEY,
+    SEARCH_ENABLED_MODELS,
 } from '@/lib/constants';
 import { type ChatViewMessage, type RetryMode } from '@/lib/chat-view';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 
 interface ChatPageClientProps {
     chatId: string;
+}
+
+const RETRY_MODE_HINTS_KEY = 'retry-mode-hints';
+const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
+
+function areAttachmentListsEqual(left: Attachment[] | undefined, right: Attachment[] | undefined) {
+    const a = left ?? [];
+    const b = right ?? [];
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (
+            a[i].id !== b[i].id
+            || a[i].name !== b[i].name
+            || a[i].mimeType !== b[i].mimeType
+            || a[i].size !== b[i].size
+            || a[i].path !== b[i].path
+            || a[i].url !== b[i].url
+        ) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function mapStoredMessageToViewMessage(message: Message): ChatViewMessage {
+    return {
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        attachments: message.attachments ?? [],
+        reasoning: message.reasoning,
+        model_id: message.model_id,
+    };
+}
+
+function isSameMessageSnapshot(view: ChatViewMessage, stored: Message) {
+    return (
+        view.id === stored.id
+        && view.role === stored.role
+        && view.content === stored.content
+        && (view.reasoning ?? undefined) === (stored.reasoning ?? undefined)
+        && (view.model_id ?? undefined) === (stored.model_id ?? undefined)
+        && areAttachmentListsEqual(view.attachments, stored.attachments)
+    );
+}
+
+function readRetryModeHints(): Record<string, Record<string, RetryMode>> {
+    if (typeof window === 'undefined') return {};
+    const raw = window.sessionStorage.getItem(RETRY_MODE_HINTS_KEY);
+    if (!raw) return {};
+    try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!parsed || typeof parsed !== 'object') return {};
+        return parsed as Record<string, Record<string, RetryMode>>;
+    } catch {
+        return {};
+    }
+}
+
+function getRetryModeHint(threadId: string, userMessageId: string): RetryMode | undefined {
+    if (!threadId || !userMessageId) return undefined;
+    const hints = readRetryModeHints();
+    return hints[threadId]?.[userMessageId];
+}
+
+function hasImageAttachment(message: ChatViewMessage): boolean {
+    return (message.attachments ?? []).some((attachment) => isImageAttachment(attachment.mimeType));
+}
+
+function looksLikeSearchResponse(content: string): boolean {
+    return /\[\d+\]\(https?:\/\/[^\s)]+\)/.test(content);
+}
+
+function inferEditGenerationMode(
+    localMessages: ChatViewMessage[],
+    anchorUserIndex: number,
+    threadId: string
+) {
+    const anchorUser = localMessages[anchorUserIndex];
+    if (!anchorUser || anchorUser.role !== 'user') {
+        return { forcedModelId: undefined as string | undefined, forceSearchMode: false };
+    }
+
+    const hint = getRetryModeHint(threadId, anchorUser.id);
+    if (hint === 'image') {
+        return { forcedModelId: IMAGE_GENERATION_MODEL, forceSearchMode: false };
+    }
+    if (hint === 'search') {
+        return { forcedModelId: undefined as string | undefined, forceSearchMode: true };
+    }
+
+    const nextAssistantMessage = localMessages
+        .slice(anchorUserIndex + 1)
+        .find((message) => message.role === 'assistant');
+    if (!nextAssistantMessage) {
+        return { forcedModelId: undefined as string | undefined, forceSearchMode: false };
+    }
+
+    if (
+        nextAssistantMessage.model_id === IMAGE_GENERATION_MODEL
+        || hasImageAttachment(nextAssistantMessage)
+    ) {
+        return { forcedModelId: IMAGE_GENERATION_MODEL, forceSearchMode: false };
+    }
+
+    if (
+        nextAssistantMessage.model_id
+        && SEARCH_ENABLED_MODEL_SET.has(nextAssistantMessage.model_id)
+        && looksLikeSearchResponse(nextAssistantMessage.content)
+    ) {
+        return { forcedModelId: undefined as string | undefined, forceSearchMode: true };
+    }
+
+    return { forcedModelId: undefined as string | undefined, forceSearchMode: false };
 }
 
 function isSelectableChatModel(modelId: string): boolean {
@@ -64,7 +180,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         setIsLoading,
         handleStop,
         generateResponse,
-        lastRequestFailedRef,
+        lastRequestFailed,
+        clearLastRequestFailure,
         resetStreamState,
     } = useChatStream({
         chatId,
@@ -110,6 +227,21 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         applyThreadState();
     }, [applyThreadState]);
 
+    const applyStoredMessages = useCallback((nextStoredMessages: Message[]) => {
+        setMessages((prev) => {
+            if (prev.length === nextStoredMessages.length) {
+                const unchanged = prev.every((message, index) =>
+                    isSameMessageSnapshot(message, nextStoredMessages[index])
+                );
+                if (unchanged) {
+                    return prev;
+                }
+            }
+
+            return nextStoredMessages.map(mapStoredMessageToViewMessage);
+        });
+    }, []);
+
     const syncLocalMessages = useCallback(() => {
         if (storedMessages === null) return;
 
@@ -122,16 +254,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (!hasInitialized.current && storedMessages) {
             hasInitialized.current = true;
             currentMessagesChatId.current = chatId;
-            setMessages(
-                storedMessages.map((m) => ({
-                    id: m.id,
-                    role: m.role,
-                    content: m.content,
-                    attachments: m.attachments ?? [],
-                    reasoning: m.reasoning,
-                    model_id: m.model_id,
-                }))
-            );
+            applyStoredMessages(storedMessages);
         } else {
             // Update messages from storage only when not generating.
             if (!isLoading && !isThinking && storedMessages) {
@@ -154,19 +277,10 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 }
 
                 currentMessagesChatId.current = chatId;
-                setMessages(
-                    storedMessages.map((m) => ({
-                        id: m.id,
-                        role: m.role,
-                        content: m.content,
-                        attachments: m.attachments ?? [],
-                        reasoning: m.reasoning,
-                        model_id: m.model_id,
-                    }))
-                );
+                applyStoredMessages(storedMessages);
             }
         }
-    }, [storedMessages, messages.length, chatId, isLoading, isThinking]);
+    }, [storedMessages, messages.length, chatId, isLoading, isThinking, applyStoredMessages]);
 
     useEffect(() => {
         // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -249,7 +363,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     // Check for pending user message on load (e.g. new chat from home).
     useEffect(() => {
         // Don't auto-retry if the last request failed or if messages don't belong to current chat.
-        if (lastRequestFailedRef.current || currentMessagesChatId.current !== chatId) {
+        if (lastRequestFailed || currentMessagesChatId.current !== chatId) {
             return;
         }
         if (hasInitialized.current && messages.length > 0 && !isLoading && !isThinking) {
@@ -273,7 +387,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 generateResponse(messages, undefined, pendingSystemPrompt || undefined, pendingGenerationSearch === '1');
             }
         }
-    }, [messages, isLoading, isThinking, generateResponse, chatId, lastRequestFailedRef]);
+    }, [messages, isLoading, isThinking, generateResponse, chatId, lastRequestFailed]);
 
     const sendMessage = useCallback(async (
         userMessage: string,
@@ -283,7 +397,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     ) => {
         setIsLoading(true);
         // Reset the failure flag when user manually sends a message.
-        lastRequestFailedRef.current = false;
+        clearLastRequestFailure();
         const targetModel = options.mode === 'image' ? IMAGE_GENERATION_MODEL : model;
         const useSearch = options.mode === 'search';
 
@@ -292,13 +406,14 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             role: 'user',
             content: userMessage,
             attachments,
+            model_id: targetModel,
         };
 
         const updatedMessages = [...existingMessages, userMsg];
         setMessages(updatedMessages);
 
         try {
-            const persistedUser = await addMessage(chatId, 'user', userMessage, undefined, undefined, attachments);
+            const persistedUser = await addMessage(chatId, 'user', userMessage, undefined, targetModel, attachments);
             const persistedMessages = updatedMessages.map((m) =>
                 m.id === userMsg.id ? { ...m, id: persistedUser.id } : m
             );
@@ -312,7 +427,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             showToast('Failed to send message. Please try again.', 'error');
             return false;
         }
-    }, [chatId, generateResponse, showToast, model, setIsLoading, lastRequestFailedRef]);
+    }, [chatId, generateResponse, showToast, model, setIsLoading, clearLastRequestFailure]);
 
     const handleSend = useCallback(async (value: string, attachments: Attachment[], options: ChatSubmitOptions) => {
         if ((!value.trim() && attachments.length === 0) || isLoading) return false;
@@ -336,6 +451,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             return;
         }
         const editedMessageAttachments = localMessages[msgIndex].attachments ?? [];
+        const { forcedModelId, forceSearchMode } = inferEditGenerationMode(localMessages, msgIndex, chatId);
+        const editModelId = forcedModelId ?? model;
 
         const anchorBeforeEditId = msgIndex > 0 ? localMessages[msgIndex - 1].id : null;
         try {
@@ -356,7 +473,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 deleteIds.forEach((id) => locallyDeletedMessageIdsRef.current.add(id));
             }
             await deleteMessagesByIds(deleteIds);
-            const persistedUser = await addMessage(chatId, 'user', newContent, undefined, undefined, editedMessageAttachments);
+            const persistedUser = await addMessage(chatId, 'user', newContent, undefined, editModelId, editedMessageAttachments);
             const keptMessages = canonicalMessages.slice(0, deleteStartIndex).map((m) => ({
                 id: m.id,
                 role: m.role,
@@ -388,13 +505,13 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 }
             })();
 
-            await generateResponse(updatedMessages);
+            await generateResponse(updatedMessages, forcedModelId, undefined, forceSearchMode);
         } catch (error) {
             setIsLoading(false);
             console.error('Failed to edit message:', error);
             showToast('Failed to edit message history. Please try again.', 'error');
         }
-    }, [messages, chatId, showToast, generateResponse, refreshStoredMessages, setIsLoading]);
+    }, [messages, chatId, showToast, generateResponse, refreshStoredMessages, setIsLoading, model]);
 
     const shouldShowLoadingBlank =
         storedMessages === null || (storedMessages && storedMessages.length > 0 && messages.length === 0);

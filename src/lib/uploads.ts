@@ -43,7 +43,10 @@ export async function cleanupThreadAttachments(
     let payload: unknown = null;
     try {
         payload = await response.json();
-    } catch {
+    } catch (error) {
+        if (process.env.NODE_ENV !== 'production') {
+            console.warn('[uploads] Failed to parse cleanup response payload', error);
+        }
         payload = null;
     }
 

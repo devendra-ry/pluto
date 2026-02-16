@@ -1,6 +1,14 @@
 'use client';
 
-import { useCallback, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import {
+    useCallback,
+    useEffect,
+    useReducer,
+    useRef,
+    type Dispatch,
+    type MutableRefObject,
+    type SetStateAction,
+} from 'react';
 
 import { addMessage } from '@/hooks/use-messages';
 import { touchThread, updateThreadTitleIfNewChat } from '@/hooks/use-threads';
@@ -10,6 +18,98 @@ import { sanitizeThreadTitle } from '@/lib/sanitize';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 
 type ToastType = 'success' | 'error' | 'info';
+type StreamPhase = 'idle' | 'preparing' | 'requesting' | 'streaming' | 'persisting';
+
+interface StreamState {
+    phase: StreamPhase;
+    isThinking: boolean;
+    activeUserMessageId: string | null;
+    lastRequestFailed: boolean;
+}
+
+type StreamAction =
+    | { type: 'SET_LOADING'; loading: boolean }
+    | { type: 'BEGIN'; messageId: string; thinking: boolean }
+    | { type: 'STREAMING' }
+    | { type: 'SET_THINKING'; thinking: boolean }
+    | { type: 'PERSISTING' }
+    | { type: 'COMPLETE'; failed: boolean }
+    | { type: 'CLEAR_FAILURE' }
+    | { type: 'RESET' };
+
+const INITIAL_STATE: StreamState = {
+    phase: 'idle',
+    isThinking: false,
+    activeUserMessageId: null,
+    lastRequestFailed: false,
+};
+
+function streamReducer(state: StreamState, action: StreamAction): StreamState {
+    switch (action.type) {
+        case 'SET_LOADING':
+            if (action.loading) {
+                if (state.phase !== 'idle') {
+                    return state;
+                }
+                return {
+                    ...state,
+                    phase: 'preparing',
+                    isThinking: false,
+                    activeUserMessageId: null,
+                    lastRequestFailed: false,
+                };
+            }
+            return {
+                ...state,
+                phase: 'idle',
+                isThinking: false,
+                activeUserMessageId: null,
+            };
+        case 'BEGIN':
+            return {
+                ...state,
+                phase: 'requesting',
+                activeUserMessageId: action.messageId,
+                isThinking: action.thinking,
+                lastRequestFailed: false,
+            };
+        case 'STREAMING':
+            if (state.phase === 'idle') return state;
+            return {
+                ...state,
+                phase: 'streaming',
+            };
+        case 'SET_THINKING':
+            return {
+                ...state,
+                isThinking: action.thinking,
+            };
+        case 'PERSISTING':
+            if (state.phase === 'idle') return state;
+            return {
+                ...state,
+                phase: 'persisting',
+            };
+        case 'COMPLETE':
+            return {
+                ...state,
+                phase: 'idle',
+                isThinking: false,
+                activeUserMessageId: null,
+                lastRequestFailed: action.failed,
+            };
+        case 'CLEAR_FAILURE':
+            if (!state.lastRequestFailed) return state;
+            return {
+                ...state,
+                lastRequestFailed: false,
+            };
+        case 'RESET':
+            return INITIAL_STATE;
+        default:
+            return state;
+    }
+}
 
 interface UseChatStreamParams {
     chatId: string;
@@ -45,21 +145,30 @@ export function useChatStream({
     persistRetryModeHintRef,
     showToast,
 }: UseChatStreamParams) {
-    const [isLoading, setIsLoading] = useState(false);
-    const [isThinking, setIsThinking] = useState(false);
+    const [state, dispatch] = useReducer(streamReducer, INITIAL_STATE);
+    const stateRef = useRef(state);
     const abortControllerRef = useRef<AbortController | null>(null);
-    const generatingRef = useRef<string | null>(null);
-    const lastRequestFailedRef = useRef(false); // Prevent auto-retry after failures
+
+    useEffect(() => {
+        stateRef.current = state;
+    }, [state]);
+
+    const setIsLoading = useCallback((next: SetStateAction<boolean>) => {
+        const currentlyLoading = stateRef.current.phase !== 'idle';
+        const loading = typeof next === 'function' ? next(currentlyLoading) : next;
+        dispatch({ type: 'SET_LOADING', loading });
+    }, []);
+
+    const clearLastRequestFailure = useCallback(() => {
+        dispatch({ type: 'CLEAR_FAILURE' });
+    }, []);
 
     const resetStreamState = useCallback(() => {
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
             abortControllerRef.current = null;
         }
-        setIsLoading(false);
-        setIsThinking(false);
-        generatingRef.current = null;
-        lastRequestFailedRef.current = false;
+        dispatch({ type: 'RESET' });
     }, []);
 
     const handleStop = useCallback(() => {
@@ -77,8 +186,15 @@ export function useChatStream({
     ) => {
         const lastMsg = currentMessages[currentMessages.length - 1];
         if (!lastMsg || lastMsg.role !== 'user') return;
-        if (generatingRef.current === lastMsg.id) return;
-        generatingRef.current = lastMsg.id;
+
+        const machine = stateRef.current;
+        if (machine.phase !== 'idle') {
+            // Never overlap runs. Prevent duplicate run for same anchor message.
+            if (machine.activeUserMessageId === lastMsg.id) {
+                return;
+            }
+            return;
+        }
 
         const activeModelId = forcedModelId || model;
         const selectedModel = AVAILABLE_MODELS.find(m => m.id === activeModelId);
@@ -90,6 +206,9 @@ export function useChatStream({
 
         const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && reasoningEffort === 'low');
 
+        dispatch({ type: 'BEGIN', messageId: lastMsg.id, thinking: !isImageGenModel && willThink });
+        abortControllerRef.current = new AbortController();
+
         const assistantMsgId = crypto.randomUUID();
         const assistantMsg: ChatViewMessage = {
             id: assistantMsgId,
@@ -99,10 +218,6 @@ export function useChatStream({
             model_id: activeModelId,
         };
         setMessages(prev => [...prev, assistantMsg]);
-
-        setIsThinking(!isImageGenModel && willThink);
-        setIsLoading(true);
-        abortControllerRef.current = new AbortController();
 
         const updateTitleIfNeeded = async () => {
             if (currentMessages.length > 0) {
@@ -125,6 +240,7 @@ export function useChatStream({
         let fullReasoning = '';
         let hasPendingAssistantUpdate = false;
         let streamFlushFrame: number | null = null;
+        let requestFailed = false;
 
         const flushAssistantUpdate = () => {
             if (!hasPendingAssistantUpdate) return;
@@ -168,6 +284,7 @@ export function useChatStream({
                 return false;
             }
 
+            dispatch({ type: 'PERSISTING' });
             const newMsg = await addMessage(chatId, 'assistant', content, reasoning, activeModelId, attachments);
             setMessages(prev =>
                 prev.map((m) => (m.id === assistantMsgId ? { ...m, id: newMsg.id } : m))
@@ -235,6 +352,7 @@ export function useChatStream({
                 return;
             }
 
+            dispatch({ type: 'STREAMING' });
             const decoder = new TextDecoder();
             const effectiveSystemPrompt = (forcedSystemPrompt ?? systemPrompt).trim();
             const response = await fetch('/api/chat', {
@@ -306,12 +424,12 @@ export function useChatStream({
                                     fullReasoning += reasoningContent;
                                     hasPendingAssistantUpdate = true;
                                     scheduleAssistantUpdate();
-                                    setIsThinking(true);
+                                    dispatch({ type: 'SET_THINKING', thinking: true });
                                 }
 
                                 const content = typeof delta.content === 'string' ? delta.content : '';
                                 if (content) {
-                                    setIsThinking(false);
+                                    dispatch({ type: 'SET_THINKING', thinking: false });
                                     fullContent += content;
                                     hasPendingAssistantUpdate = true;
                                     scheduleAssistantUpdate();
@@ -336,7 +454,7 @@ export function useChatStream({
             if (!persisted) {
                 hasPendingAssistantUpdate = false;
                 setMessages(currentMessages);
-                lastRequestFailedRef.current = true;
+                requestFailed = true;
                 showToast('No response returned. Please try again.', 'error');
             }
         } catch (error) {
@@ -350,7 +468,7 @@ export function useChatStream({
                 flushAssistantUpdate();
                 const persisted = await persistAssistantMessage(fullContent, fullReasoning);
                 if (!persisted) {
-                    lastRequestFailedRef.current = true;
+                    requestFailed = true;
                     hasPendingAssistantUpdate = false;
                     setMessages(currentMessages);
                 }
@@ -362,24 +480,23 @@ export function useChatStream({
                 showToast(errorMessage, 'error');
                 hasPendingAssistantUpdate = false;
                 setMessages(currentMessages);
-                lastRequestFailedRef.current = true;
+                requestFailed = true;
             }
         } finally {
             cancelScheduledAssistantFrame();
-            setIsLoading(false);
-            setIsThinking(false);
-            generatingRef.current = null;
             abortControllerRef.current = null;
+            dispatch({ type: 'COMPLETE', failed: requestFailed });
         }
     }, [chatId, model, reasoningEffort, systemPrompt, showToast, setMessages, justAddedMessageIdRef, persistRetryModeHintRef]);
 
     return {
-        isLoading,
-        isThinking,
+        isLoading: state.phase !== 'idle',
+        isThinking: state.isThinking,
         setIsLoading,
         handleStop,
         generateResponse,
-        lastRequestFailedRef,
+        lastRequestFailed: state.lastRequestFailed,
+        clearLastRequestFailure,
         resetStreamState,
     };
 }

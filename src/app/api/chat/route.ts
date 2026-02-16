@@ -9,8 +9,8 @@ import {
     type TrimmedContext,
 } from '@/lib/context-budget';
 import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/lib/constants';
-import { getChutesStream, getGoogleStream, getOpenRouterStream } from '@/lib/providers/chat-streams';
 import { resolveModelLimits } from '@/lib/providers/model-limits';
+import { resolveChatProvider } from '@/lib/providers/provider-registry';
 import { processAndTransformStream } from '@/lib/stream-transform';
 import { ChatRequestSchema } from '@/lib/types';
 
@@ -19,6 +19,8 @@ import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils
 export const runtime = 'nodejs';
 
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
+const GENERIC_CHAT_ERROR_MESSAGE = 'Unable to complete request right now. Please try again.';
+const IS_DEV = process.env.NODE_ENV !== 'production';
 
 export async function POST(req: Request) {
     let supabase: Awaited<ReturnType<typeof requireUser>>['supabase'];
@@ -47,7 +49,10 @@ export async function POST(req: Request) {
             if (signal.aborted) return;
             const encoded = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
             controller.enqueue(encoded);
-        } catch {
+        } catch (error) {
+            if (IS_DEV) {
+                console.warn('[chat][route] Failed to enqueue stream chunk', error);
+            }
             // Ignore closed controller errors
         }
     };
@@ -77,6 +82,7 @@ export async function POST(req: Request) {
 
                 const useSearch = search === true;
                 const normalizedSystemPrompt = systemPrompt?.trim() ?? '';
+                const chatProvider = resolveChatProvider(modelConfig);
 
                 if (modelConfig.capabilities.includes('imageGen')) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Selected model is image-generation only. Use image generation flow.' })}\n\n`);
@@ -84,7 +90,7 @@ export async function POST(req: Request) {
                     return;
                 }
 
-                if (useSearch && (modelConfig.provider !== 'google' || !SEARCH_ENABLED_MODEL_SET.has(model))) {
+                if (useSearch && (chatProvider.id !== 'google' || !SEARCH_ENABLED_MODEL_SET.has(model))) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Search is supported only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite.' })}\n\n`);
                     controller.close();
                     return;
@@ -138,39 +144,17 @@ export async function POST(req: Request) {
                         estimatedInputTokensWithSystemPrompt,
                     };
 
-                    if (modelConfig.provider === 'google') {
-                        return getGoogleStream(
-                            model,
-                            preparedMessages,
-                            reasoningEffort ?? 'low',
-                            outputPlan.requestMaxTokens,
-                            normalizedSystemPrompt,
-                            useSearch,
-                            tokenEstimates,
-                            signal
-                        );
-                    }
-                    if (modelConfig.provider === 'openrouter') {
-                        return getOpenRouterStream(
-                            model,
-                            preparedMessages,
-                            reasoningEffort ?? 'low',
-                            outputPlan.requestMaxTokens,
-                            normalizedSystemPrompt,
-                            tokenEstimates,
-                            signal
-                        );
-                    }
-                    return getChutesStream(
+                    return chatProvider.getStream({
                         model,
-                        preparedMessages,
-                        reasoningEffort || 'low',
+                        messages: preparedMessages,
+                        reasoningEffort: reasoningEffort || 'low',
                         modelConfig,
-                        outputPlan.requestMaxTokens,
-                        normalizedSystemPrompt,
+                        maxOutputTokens: outputPlan.requestMaxTokens,
+                        systemPrompt: normalizedSystemPrompt,
+                        useSearch,
                         tokenEstimates,
-                        signal
-                    );
+                        signal,
+                    });
                 };
 
                 let sourceStream: ReadableStream;
@@ -208,9 +192,12 @@ export async function POST(req: Request) {
 
                 if (!signal.aborted) {
                     console.error('Chat API error:', error);
-                    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'AI service error', details: errorMsg })}\n\n`);
-                    try { controller.close(); } catch { }
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: GENERIC_CHAT_ERROR_MESSAGE })}\n\n`);
+                    try { controller.close(); } catch (closeError) {
+                        if (IS_DEV) {
+                            console.warn('[chat][route] Failed to close stream controller', closeError);
+                        }
+                    }
                 }
             }
         }

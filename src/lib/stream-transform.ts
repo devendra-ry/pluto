@@ -10,15 +10,51 @@ export async function processAndTransformStream(
     const reader = sourceStream.getReader();
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
+    const isDev = process.env.NODE_ENV !== 'production';
     let isThinking = false;
     let buffer = '';
+    let pendingTagFragment = '';
+
+    const THINK_START_TAG = '<think>';
+    const THINK_END_TAG = '</think>';
 
     const safeEnqueue = (chunk: string | Uint8Array) => {
         try {
             if (signal?.aborted) return;
             const encoded = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
             controller.enqueue(encoded);
-        } catch { }
+        } catch (error) {
+            if (isDev) {
+                console.warn('[stream-transform] Failed to enqueue chunk', error);
+            }
+        }
+    };
+
+    const flushPendingTagFragment = () => {
+        if (!pendingTagFragment) return;
+        const tailData = JSON.stringify({
+            choices: [{
+                delta: {
+                    content: isThinking ? undefined : pendingTagFragment,
+                    reasoning_content: isThinking ? pendingTagFragment : undefined
+                }
+            }]
+        });
+        safeEnqueue(`data: ${tailData}\n\n`);
+        pendingTagFragment = '';
+    };
+
+    const splitTrailingTagFragment = (text: string, tag: string) => {
+        const maxFragmentLen = Math.min(tag.length - 1, text.length);
+        for (let len = maxFragmentLen; len > 0; len--) {
+            if (text.endsWith(tag.slice(0, len))) {
+                return {
+                    emittable: text.slice(0, -len),
+                    fragment: text.slice(-len)
+                };
+            }
+        }
+        return { emittable: text, fragment: '' };
     };
 
     try {
@@ -46,6 +82,7 @@ export async function processAndTransformStream(
 
                 const dataStr = trimmedLine.slice(6);
                 if (dataStr === '[DONE]') {
+                    flushPendingTagFragment();
                     safeEnqueue('data: [DONE]\n\n');
                     continue;
                 }
@@ -60,27 +97,32 @@ export async function processAndTransformStream(
                     if (content || reasoning) {
                         let newContent = '';
                         let newReasoning = reasoning;
-                        let remaining = content;
+                        let remaining = pendingTagFragment + content;
+                        pendingTagFragment = '';
 
                         while (remaining.length > 0) {
                             if (!isThinking) {
-                                const thinkStartIdx = remaining.indexOf('<think>');
+                                const thinkStartIdx = remaining.indexOf(THINK_START_TAG);
                                 if (thinkStartIdx !== -1) {
                                     newContent += remaining.slice(0, thinkStartIdx);
                                     isThinking = true;
-                                    remaining = remaining.slice(thinkStartIdx + 7);
+                                    remaining = remaining.slice(thinkStartIdx + THINK_START_TAG.length);
                                 } else {
-                                    newContent += remaining;
+                                    const { emittable, fragment } = splitTrailingTagFragment(remaining, THINK_START_TAG);
+                                    newContent += emittable;
+                                    pendingTagFragment = fragment;
                                     remaining = '';
                                 }
                             } else {
-                                const thinkEndIdx = remaining.indexOf('</think>');
+                                const thinkEndIdx = remaining.indexOf(THINK_END_TAG);
                                 if (thinkEndIdx !== -1) {
                                     newReasoning += remaining.slice(0, thinkEndIdx);
                                     isThinking = false;
-                                    remaining = remaining.slice(thinkEndIdx + 8);
+                                    remaining = remaining.slice(thinkEndIdx + THINK_END_TAG.length);
                                 } else {
-                                    newReasoning += remaining;
+                                    const { emittable, fragment } = splitTrailingTagFragment(remaining, THINK_END_TAG);
+                                    newReasoning += emittable;
+                                    pendingTagFragment = fragment;
                                     remaining = '';
                                 }
                             }
@@ -102,11 +144,17 @@ export async function processAndTransformStream(
                         // Pass through non-content chunks (reasoning, metadata)
                         safeEnqueue(`data: ${dataStr}\n\n`);
                     }
-                } catch {
+                } catch (error) {
+                    if (isDev) {
+                        console.warn('[stream-transform] Failed to parse SSE data chunk', error);
+                    }
                     safeEnqueue(line + '\n');
                 }
             }
         }
+
+        // Flush any unresolved trailing fragment so no model text is dropped at stream end.
+        flushPendingTagFragment();
     } finally {
         reader.releaseLock();
     }

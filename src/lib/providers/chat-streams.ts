@@ -3,17 +3,13 @@ import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { isImageAttachment } from '@/lib/attachments';
 import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
 import { AVAILABLE_MODELS, type ModelConfig } from '@/lib/constants';
+import { serverEnv } from '@/lib/env/server';
 import type { PreparedChatMessage } from '@/lib/chat-attachments';
+import { logModelLimits, resolveOutputTokenCap } from '@/lib/providers/limits-utils';
+import type { RequestTokenEstimates } from '@/lib/providers/provider-types';
 import type { ReasoningEffort } from '@/lib/types';
 
-import { logModelLimits, resolveOutputTokenCap } from '@/lib/providers/model-limits';
-
-interface RequestTokenEstimates {
-    estimatedInputTokens?: number;
-    estimatedInputTokensWithSystemPrompt?: number;
-}
-
-function buildGoogleContents(messages: PreparedChatMessage[]) {
+export function buildGoogleContents(messages: PreparedChatMessage[]) {
     return messages.map((message) => {
         const parts: Array<Record<string, unknown>> = [];
 
@@ -41,7 +37,7 @@ function buildGoogleContents(messages: PreparedChatMessage[]) {
     });
 }
 
-function buildOpenAICompatibleMessages(messages: PreparedChatMessage[], systemPrompt?: string) {
+export function buildOpenAICompatibleMessages(messages: PreparedChatMessage[], systemPrompt?: string) {
     const prepared = messages.map((message) => {
         if (message.attachments.length === 0) {
             return {
@@ -161,10 +157,7 @@ export async function getGoogleStream(
     tokenEstimates?: RequestTokenEstimates,
     signal?: AbortSignal
 ) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('Gemini API key missing');
-
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey: serverEnv.GEMINI_API_KEY });
     const contents = buildGoogleContents(messages);
 
     const config: {
@@ -261,7 +254,7 @@ export async function getOpenRouterStream(
     tokenEstimates?: RequestTokenEstimates,
     signal?: AbortSignal
 ) {
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const apiKey = serverEnv.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error('OpenRouter API key missing');
     const requestMaxTokens = resolveOutputTokenCap(maxOutputTokens);
     logModelLimits('openrouter-request', {
@@ -278,7 +271,7 @@ export async function getOpenRouterStream(
         headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${apiKey}`,
-            'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+            'HTTP-Referer': serverEnv.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
             'X-Title': 'Pluto Chat',
         },
         body: JSON.stringify({

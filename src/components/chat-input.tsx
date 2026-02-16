@@ -291,7 +291,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                 }
                 return;
             }
-        } catch {
+        } catch (error) {
+            if (process.env.NODE_ENV !== 'production') {
+                console.warn('[chat-input] Submit failed, restoring local draft state', error);
+            }
             // Parent handles toast/error feedback.
             // Restore only if user has not started drafting a new message yet.
             if (valueRef.current.trim().length === 0 && attachmentItemsRef.current.length === 0) {

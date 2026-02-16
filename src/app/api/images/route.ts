@@ -18,6 +18,7 @@ const DEFAULT_Z_IMAGE_GENERATE_URL = 'https://chutes-z-image-turbo.chutes.ai/gen
 const IMAGE_RETRYABLE_STATUSES = new Set([502, 503]);
 const IMAGE_RETRY_ATTEMPTS = 2;
 const IMAGE_RETRY_BACKOFF_MS = 350;
+const IS_DEV = process.env.NODE_ENV !== 'production';
 
 function uniqueUrls(urls: Array<string | undefined>) {
     const set = new Set<string>();
@@ -278,7 +279,14 @@ export async function POST(req: Request) {
                             if (parsed && typeof parsed === 'object') {
                                 parsedPayload = parsed as Record<string, unknown>;
                             }
-                        } catch {
+                        } catch (error) {
+                            if (IS_DEV) {
+                                console.warn('[images] Failed to parse upstream JSON response', {
+                                    attempt: attempt.label,
+                                    apiUrl,
+                                    error,
+                                });
+                            }
                             parsedPayload = null;
                         }
 

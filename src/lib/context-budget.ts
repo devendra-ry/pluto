@@ -4,7 +4,6 @@ import type { ChatMessage } from '@/lib/types';
 
 import { resolveOutputTokenCap } from '@/lib/providers/model-limits';
 
-const DEFAULT_OUTPUT_RESERVE_TOKENS = 4096;
 const DEFAULT_SAFETY_MARGIN_TOKENS = 2048;
 const MIN_INPUT_BUDGET_TOKENS = 2048;
 
@@ -70,6 +69,20 @@ export function resolveOutputTokenPlan(
     };
 }
 
+function resolveTrimOutputReserve(
+    limits: ResolvedModelLimits,
+    maxOutputTokens: number | null | undefined,
+    reservedInputTokens: number
+) {
+    const requestedOutputTokens = resolveOutputTokenCap(maxOutputTokens);
+    const reserved = Math.max(0, Math.floor(reservedInputTokens));
+    const maxReserveByWindow = Math.max(
+        512,
+        limits.contextWindowTokens - DEFAULT_SAFETY_MARGIN_TOKENS - reserved - MIN_INPUT_BUDGET_TOKENS
+    );
+    return Math.max(512, Math.min(requestedOutputTokens, maxReserveByWindow));
+}
+
 function findLastUserIndex(messages: ChatMessage[]) {
     for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].role === 'user') return i;
@@ -83,8 +96,7 @@ export function trimMessagesToInputBudget(
     budgetScale: number = 1,
     reservedInputTokens: number = 0
 ): TrimmedContext {
-    const outputCeiling = limits.maxOutputTokens ?? DEFAULT_OUTPUT_RESERVE_TOKENS;
-    const outputReserve = Math.max(512, Math.min(DEFAULT_OUTPUT_RESERVE_TOKENS, outputCeiling));
+    const outputReserve = resolveTrimOutputReserve(limits, limits.maxOutputTokens, reservedInputTokens);
     const reserved = Math.max(0, Math.floor(reservedInputTokens));
     const availableInputBudget = Math.max(
         0,

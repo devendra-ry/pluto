@@ -17,6 +17,20 @@ function sanitizeFileName(fileName: string) {
         .slice(0, 120);
 }
 
+function toContentDispositionFallbackFilename(fileName: string) {
+    const sanitized = fileName
+        .replace(/[\r\n"]/g, '')
+        .replace(/[^ -~]+/g, '_')
+        .trim();
+    return sanitized || 'attachment';
+}
+
+function encodeRfc5987Value(value: string) {
+    return encodeURIComponent(value).replace(/['()*]/g, (char) =>
+        `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+    );
+}
+
 function uniquePaths(paths: string[]) {
     return Array.from(new Set(paths.filter((path) => typeof path === 'string' && path.length > 0)));
 }
@@ -286,13 +300,15 @@ export async function GET(req: Request) {
 
         const contentType = data.type || 'application/octet-stream';
         const filename = path.split('/').pop() || 'attachment';
+        const fallbackFilename = toContentDispositionFallbackFilename(filename);
+        const encodedFilename = encodeRfc5987Value(filename);
 
         return new Response(data, {
             status: 200,
             headers: {
                 'Content-Type': contentType,
                 'Cache-Control': 'private, max-age=3600',
-                'Content-Disposition': `inline; filename="${filename}"`,
+                'Content-Disposition': `inline; filename="${fallbackFilename}"; filename*=UTF-8''${encodedFilename}`,
             },
         });
     } catch (error) {
