@@ -12,6 +12,7 @@ import {
 
 import { addMessage } from '@/hooks/use-messages';
 import { touchThread, updateThreadTitleIfNewChat } from '@/hooks/use-threads';
+import { cancelScheduledFrame, scheduleFrame, type ScheduledFrame } from '@/lib/animation-frame';
 import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL } from '@/lib/constants';
 import { type ChatViewMessage, type RetryMode } from '@/lib/chat-view';
 import { sanitizeThreadTitle } from '@/lib/sanitize';
@@ -239,7 +240,7 @@ export function useChatStream({
         let fullContent = '';
         let fullReasoning = '';
         let hasPendingAssistantUpdate = false;
-        let streamFlushFrame: number | null = null;
+        let streamFlushFrame: ScheduledFrame | null = null;
         let requestFailed = false;
 
         const flushAssistantUpdate = () => {
@@ -262,14 +263,14 @@ export function useChatStream({
 
         const cancelScheduledAssistantFrame = () => {
             if (streamFlushFrame !== null) {
-                cancelAnimationFrame(streamFlushFrame);
+                cancelScheduledFrame(streamFlushFrame);
                 streamFlushFrame = null;
             }
         };
 
         const scheduleAssistantUpdate = () => {
             if (streamFlushFrame !== null) return;
-            streamFlushFrame = requestAnimationFrame(() => {
+            streamFlushFrame = scheduleFrame(() => {
                 streamFlushFrame = null;
                 flushAssistantUpdate();
             });

@@ -9,6 +9,7 @@ import { ChatHeader } from '@/components/chat-header';
 import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
 import { ChatMessageList } from '@/components/chat-message-list';
 import { useToast } from '@/components/ui/toast';
+import { scheduleFrame } from '@/lib/animation-frame';
 import { isImageAttachment } from '@/lib/attachments';
 import { useChatStream } from '@/hooks/use-chat-stream';
 import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages, type Message } from '@/hooks/use-messages';
@@ -348,8 +349,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     useEffect(() => {
         if (messagesReady && isThreadSynchronized && visibleMessages.length > 0 && virtuosoRef.current) {
             // Give Virtuoso two frames to measure the new items before scrolling.
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
+            scheduleFrame(() => {
+                scheduleFrame(() => {
                     virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' });
                 });
             });

@@ -16,6 +16,7 @@ import { ModelSelector } from '@/components/model-selector';
 import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment, isPdfAttachment, isSupportedAttachmentMimeType, isTextAttachment } from '@/lib/attachments';
 import { startUploadFileForThread } from '@/lib/uploads';
 import { useToast } from '@/components/ui/toast';
+import { scheduleFrame } from '@/lib/animation-frame';
 
 export interface ChatInputHandle {
     setValue: (value: string) => void;
@@ -139,7 +140,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     useImperativeHandle(ref, () => ({
         setValue: (newValue: string) => {
             setValue(newValue);
-            requestAnimationFrame(() => {
+            scheduleFrame(() => {
                 if (textareaRef.current) {
                     textareaRef.current.style.height = 'auto';
                     textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
