@@ -1,6 +1,6 @@
 'use client';
 
-import { type RefObject } from 'react';
+import { type RefObject, useCallback } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { ChatMessage } from '@/components/chat-message';
@@ -22,6 +22,10 @@ interface ChatMessageListProps {
 // Regex to fix markdown headings without space after #.
 const HEADING_FIX_REGEX = /^(#{1,6})([^#\s])/gm;
 
+// Pre-render items well outside the viewport to avoid layout
+// jumps when scrolling into unmeasured territory.
+const OVERSCAN = { top: 1200, bottom: 400 };
+
 export function ChatMessageList({
     messages,
     model,
@@ -32,6 +36,36 @@ export function ChatMessageList({
     onEdit,
     onRetry,
 }: ChatMessageListProps) {
+    const computeItemKey = useCallback(
+        (_index: number, message: ChatViewMessage) => message.id,
+        [],
+    );
+
+    const renderItem = useCallback(
+        (index: number, message: ChatViewMessage) => {
+            const messageModelId = message.model_id || (message.role === 'assistant' ? model : undefined);
+            const selectedModel = AVAILABLE_MODELS.find((m) => m.id === messageModelId);
+            return (
+                <div className={cn('max-w-3xl mx-auto', index === 0 ? 'pt-12' : 'pt-4')}>
+                    <ChatMessage
+                        key={message.id}
+                        id={message.id}
+                        role={message.role}
+                        content={message.content.replace(HEADING_FIX_REGEX, '$1 $2')}
+                        attachments={message.attachments}
+                        reasoning={message.reasoning}
+                        isStreaming={isLoading && index === messages.length - 1 && message.role === 'assistant'}
+                        isThinking={isThinking && index === messages.length - 1 && message.role === 'assistant'}
+                        modelName={message.role === 'assistant' ? selectedModel?.name : undefined}
+                        onEdit={message.role === 'user' ? onEdit : undefined}
+                        onRetry={onRetry}
+                    />
+                </div>
+            );
+        },
+        [model, isLoading, isThinking, messages.length, onEdit, onRetry],
+    );
+
     return (
         <Virtuoso
             ref={virtuosoRef}
@@ -41,28 +75,10 @@ export function ChatMessageList({
             atBottomThreshold={60}
             atBottomStateChange={setIsAtBottom}
             initialTopMostItemIndex={messages.length - 1}
-            increaseViewportBy={{ top: 600, bottom: 200 }}
-            itemContent={(index, message) => {
-                const messageModelId = message.model_id || (message.role === 'assistant' ? model : undefined);
-                const selectedModel = AVAILABLE_MODELS.find((m) => m.id === messageModelId);
-                return (
-                    <div className={cn('max-w-3xl mx-auto', index === 0 ? 'pt-12' : 'pt-4')}>
-                        <ChatMessage
-                            key={message.id}
-                            id={message.id}
-                            role={message.role}
-                            content={message.content.replace(HEADING_FIX_REGEX, '$1 $2')}
-                            attachments={message.attachments}
-                            reasoning={message.reasoning}
-                            isStreaming={isLoading && index === messages.length - 1 && message.role === 'assistant'}
-                            isThinking={isThinking && index === messages.length - 1 && message.role === 'assistant'}
-                            modelName={message.role === 'assistant' ? selectedModel?.name : undefined}
-                            onEdit={message.role === 'user' ? onEdit : undefined}
-                            onRetry={onRetry}
-                        />
-                    </div>
-                );
-            }}
+            defaultItemHeight={150}
+            increaseViewportBy={OVERSCAN}
+            computeItemKey={computeItemKey}
+            itemContent={renderItem}
         />
     );
 }

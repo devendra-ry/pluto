@@ -323,18 +323,24 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
     }, [messages.length]);
 
+    // Keep viewport pinned to the bottom while streaming / when new messages arrive.
+    // Do NOT include isAtBottom in the dependency array — we only want this to fire
+    // when the data actually changes, not when the user manually scrolls.
     useEffect(() => {
         if (virtuosoRef.current && isAtBottom) {
             virtuosoRef.current.scrollToIndex({ index: messages.length - 1, align: 'end' });
         }
-    }, [messages.length, isThinking, isAtBottom]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [messages.length, isThinking]);
 
     // Scroll to bottom after initial messages load for a thread.
     useEffect(() => {
         if (messagesReady && messages.length > 0 && virtuosoRef.current) {
-            // Give Virtuoso a frame to measure the new items before scrolling.
+            // Give Virtuoso two frames to measure the new items before scrolling.
             requestAnimationFrame(() => {
-                virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, align: 'end' });
+                requestAnimationFrame(() => {
+                    virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, align: 'end' });
+                });
             });
         }
         // Only fire when messagesReady transitions (not on every messages.length change).
@@ -533,8 +539,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
     }, [messages, chatId, showToast, generateResponse, refreshStoredMessages, setIsLoading, model]);
 
-    const shouldShowLoadingBlank = !messagesReady;
     const shouldShowEmptyState = messagesReady && messages.length === 0 && !isThinking;
+    // Keep Virtuoso permanently mounted so it never loses scroll position or
+    // measured item sizes across thread switches.  Hide it with CSS when we
+    // need to show the empty state or while messages are still loading.
+    const hideMessageList = !messagesReady || shouldShowEmptyState;
 
     return (
         <div className="flex flex-col h-full bg-[#1a1520]">
@@ -560,9 +569,13 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                         </div>
                     )}
                 >
-                    {shouldShowLoadingBlank ? null : shouldShowEmptyState ? (
+                    {shouldShowEmptyState && (
                         <ChatEmptyState onPromptClick={handlePromptClick} />
-                    ) : (
+                    )}
+                    <div
+                        className="absolute inset-0"
+                        style={hideMessageList ? { opacity: 0, pointerEvents: 'none' } : undefined}
+                    >
                         <ChatMessageList
                             messages={messages}
                             model={model}
@@ -573,7 +586,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                             onEdit={handleEdit}
                             onRetry={handleRetry}
                         />
-                    )}
+                    </div>
                 </ErrorBoundary>
             </div>
 
