@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type VirtuosoHandle } from 'react-virtuoso';
+import dynamic from 'next/dynamic';
 
 import { ChatEmptyState } from '@/components/chat-empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatHeader } from '@/components/chat-header';
 import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
-import { ChatMessageList } from '@/components/chat-message-list';
 import { useToast } from '@/components/ui/toast';
 import { scheduleFrame } from '@/lib/animation-frame';
 import { isImageAttachment } from '@/lib/attachments';
@@ -37,6 +37,11 @@ import { type Attachment, type ReasoningEffort } from '@/lib/types';
 interface ChatPageClientProps {
     chatId: string;
 }
+
+const ChatMessageList = dynamic(
+    () => import('@/components/chat-message-list').then((mod) => mod.ChatMessageList),
+    { ssr: false }
+);
 
 const RETRY_MODE_HINTS_KEY = 'retry-mode-hints';
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
@@ -175,7 +180,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const locallyDeletedMessageIdsRef = useRef<Set<string>>(new Set());
     const persistRetryModeHintRef = useRef<((userMessageId: string, mode: RetryMode) => void) | null>(null);
     const prevChatIdRef = useRef<string | null>(null);
-    const threadSwitchAtRef = useRef<number>(0);
     const { showToast } = useToast();
 
     const {
@@ -314,7 +318,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (prevChatIdRef.current !== null && prevChatIdRef.current !== chatId) {
             // eslint-disable-next-line react-hooks/set-state-in-effect
             resetLocalChatState();
-            threadSwitchAtRef.current = Date.now();
         }
         prevChatIdRef.current = chatId;
     }, [chatId, resetLocalChatState]);
@@ -339,8 +342,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (!isThreadSynchronized || visibleMessages.length === 0) {
             return;
         }
-        const isWithinThreadSwitchWindow = Date.now() - threadSwitchAtRef.current < 2500;
-        if (virtuosoRef.current && (isAtBottom || isWithinThreadSwitchWindow)) {
+        if (virtuosoRef.current && isAtBottom) {
             virtuosoRef.current.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' });
         }
     }, [visibleMessages.length, isThinking, isAtBottom, isThreadSynchronized]);
