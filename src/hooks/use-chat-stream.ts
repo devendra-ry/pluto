@@ -188,7 +188,7 @@ export function useChatStream({
         if (!lastMsg || lastMsg.role !== 'user') return;
 
         const machine = stateRef.current;
-        if (machine.phase !== 'idle') {
+        if (machine.phase !== 'idle' && machine.phase !== 'preparing') {
             // Never overlap runs. Prevent duplicate run for same anchor message.
             if (machine.activeUserMessageId === lastMsg.id) {
                 return;
