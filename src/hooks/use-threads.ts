@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { type ReasoningEffort } from '@/lib/types';
 import { cleanupThreadAttachments } from '@/lib/uploads';
+import { sanitizeThreadTitle } from '@/lib/sanitize';
 
 export interface Thread {
     id: string;
@@ -19,38 +20,6 @@ export interface Thread {
 
 export const REFRESH_THREADS_EVENT = 'pluto:refresh_threads';
 const THREAD_SELECT_COLUMNS = 'id,title,model,reasoning_effort,system_prompt,is_pinned,created_at,updated_at,user_id';
-type BrowserSupabaseClient = ReturnType<typeof createClient>;
-
-let cachedUserId: string | null | undefined;
-let cachedUserIdPromise: Promise<string | null> | null = null;
-
-function setCachedUserId(userId: string | null) {
-    cachedUserId = userId;
-}
-
-async function getCurrentUserId(supabase: BrowserSupabaseClient): Promise<string | null> {
-    if (cachedUserId !== undefined) {
-        return cachedUserId;
-    }
-
-    if (!cachedUserIdPromise) {
-        cachedUserIdPromise = (async () => {
-            const { data, error } = await supabase.auth.getUser();
-            if (error) {
-                throw error;
-            }
-            return data.user?.id ?? null;
-        })();
-    }
-
-    try {
-        const userId = await cachedUserIdPromise;
-        cachedUserId = userId;
-        return userId;
-    } finally {
-        cachedUserIdPromise = null;
-    }
-}
 
 function sortThreadsByUpdatedAt(threads: Thread[]) {
     return [...threads].sort((a, b) => {
@@ -218,7 +187,6 @@ export function useThreads() {
                 }
 
                 localUserId = authData?.user?.id ?? null;
-                setCachedUserId(localUserId);
                 setCurrentUserId(localUserId);
             } catch (err) {
                 if (!isActive) return;
@@ -309,7 +277,11 @@ const triggerRefresh = () => {
 export async function createThread(model: string, reasoningEffort?: ReasoningEffort, systemPrompt?: string | null): Promise<Thread> {
     const supabase = createClient();
 
-    const userId = await getCurrentUserId(supabase);
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError) {
+        throw authError;
+    }
+    const userId = authData.user?.id ?? null;
     if (!userId) {
         throw new Error('You must be signed in to create a chat.');
     }
@@ -345,13 +317,34 @@ export async function createThread(model: string, reasoningEffort?: ReasoningEff
 // Update thread title
 export async function updateThreadTitle(id: string, title: string) {
     const supabase = createClient();
+    const normalizedTitle = sanitizeThreadTitle(title);
     const { error } = await supabase
         .from('threads')
-        .update({ title, updated_at: new Date().toISOString() })
+        .update({ title: normalizedTitle, updated_at: new Date().toISOString() })
         .eq('id', id);
 
     if (error) throw error;
     triggerRefresh();
+}
+
+// Update thread title only if it's still the default "New Chat".
+// Returns true when a row was updated, false when no-op (already renamed elsewhere).
+export async function updateThreadTitleIfNewChat(id: string, title: string): Promise<boolean> {
+    const supabase = createClient();
+    const normalizedTitle = sanitizeThreadTitle(title);
+    const { data, error } = await supabase
+        .from('threads')
+        .update({ title: normalizedTitle, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('title', 'New Chat')
+        .select('id');
+
+    if (error) throw error;
+    const updated = Array.isArray(data) && data.length > 0;
+    if (updated) {
+        triggerRefresh();
+    }
+    return updated;
 }
 
 // Update thread model

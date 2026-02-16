@@ -1,57 +1,20 @@
 import { createClient } from '@/utils/supabase/server';
 import {
-    DEFAULT_ATTACHMENTS_BUCKET,
     MAX_ATTACHMENT_BYTES,
     isSupportedAttachmentMimeType,
 } from '@/lib/attachments';
+import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/lib/attachment-route-utils';
+import { assertThreadOwnership } from '@/lib/thread-ownership';
 import { type Attachment } from '@/lib/types';
 import { ApiRequestError, assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 
 export const runtime = 'nodejs';
-
-function getBucketName() {
-    return process.env.SUPABASE_ATTACHMENTS_BUCKET
-        || process.env.NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET
-        || DEFAULT_ATTACHMENTS_BUCKET;
-}
 
 function sanitizeFileName(fileName: string) {
     return fileName
         .replace(/[^\w.\-]+/g, '_')
         .replace(/_+/g, '_')
         .slice(0, 120);
-}
-
-async function assertThreadOwnership(
-    supabase: ReturnType<typeof createClient>,
-    threadId: string,
-    userId: string
-) {
-    const { data, error } = await supabase
-        .from('threads')
-        .select('id')
-        .eq('id', threadId)
-        .eq('user_id', userId)
-        .single();
-
-    if (error || !data) {
-        throw new ApiRequestError(403, 'Thread not found or access denied');
-    }
-}
-
-function buildAttachmentUrl(threadId: string, path: string) {
-    const query = new URLSearchParams({
-        threadId,
-        path,
-    });
-    return `/api/uploads?${query.toString()}`;
-}
-
-function jsonResponse(payload: Record<string, unknown>, status: number = 200) {
-    return new Response(JSON.stringify(payload), {
-        status,
-        headers: { 'Content-Type': 'application/json' },
-    });
 }
 
 function uniquePaths(paths: string[]) {
@@ -151,7 +114,7 @@ export async function POST(req: Request) {
         return jsonResponse({ error: 'file is required' }, 400);
     }
 
-    const bucket = getBucketName();
+    const bucket = getAttachmentsBucketName();
     const mimeType = file.type || 'application/octet-stream';
 
     if (!isSupportedAttachmentMimeType(mimeType)) {
@@ -169,7 +132,12 @@ export async function POST(req: Request) {
     }
 
     try {
-        await assertThreadOwnership(supabase, threadId, user.id);
+        await assertThreadOwnership(
+            supabase,
+            threadId,
+            user.id,
+            () => new ApiRequestError(403, 'Thread not found or access denied')
+        );
 
         const attachmentId = crypto.randomUUID();
         const sanitizedName = sanitizeFileName(file.name || 'upload');
@@ -240,8 +208,13 @@ export async function DELETE(req: Request) {
         : [];
 
     try {
-        await assertThreadOwnership(supabase, threadId, user.id);
-        const bucket = getBucketName();
+        await assertThreadOwnership(
+            supabase,
+            threadId,
+            user.id,
+            () => new ApiRequestError(403, 'Thread not found or access denied')
+        );
+        const bucket = getAttachmentsBucketName();
         const threadPrefix = `${user.id}/${threadId}`;
 
         const explicitPaths = uniquePaths(rawPaths);
@@ -295,12 +268,17 @@ export async function GET(req: Request) {
     }
 
     try {
-        await assertThreadOwnership(supabase, threadId, user.id);
+        await assertThreadOwnership(
+            supabase,
+            threadId,
+            user.id,
+            () => new ApiRequestError(403, 'Thread not found or access denied')
+        );
         if (!path.startsWith(`${user.id}/${threadId}/`)) {
             return new Response('Forbidden', { status: 403 });
         }
 
-        const bucket = getBucketName();
+        const bucket = getAttachmentsBucketName();
         const { data, error } = await supabase.storage.from(bucket).download(path);
         if (error || !data) {
             return new Response('Not found', { status: 404 });

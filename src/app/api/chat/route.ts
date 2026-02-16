@@ -1,667 +1,27 @@
-import { ChatRequestSchema, ChatMessage, type ReasoningEffort } from '@/lib/types';
-import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS, type ModelConfig } from '@/lib/constants';
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-
-import { createClient } from '@/utils/supabase/server';
-import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
-import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
+import { prepareMessageAttachments } from '@/lib/chat-attachments';
 import {
-    DEFAULT_ATTACHMENTS_BUCKET,
-    MAX_ATTACHMENTS_PER_MESSAGE,
-    MAX_ATTACHMENT_BYTES_FOR_MODEL,
-    isImageAttachment,
-    isPdfAttachment,
-    isTextAttachment,
-} from '@/lib/attachments';
+    CONTEXT_RETRY_SCALE,
+    estimatePreparedConversationTokens,
+    estimateSystemPromptTokens,
+    isContextOverflowError,
+    resolveOutputTokenPlan,
+    trimMessagesToInputBudget,
+    type TrimmedContext,
+} from '@/lib/context-budget';
+import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/lib/constants';
+import { getChutesStream, getGoogleStream, getOpenRouterStream } from '@/lib/providers/chat-streams';
+import { resolveModelLimits } from '@/lib/providers/model-limits';
+import { processAndTransformStream } from '@/lib/stream-transform';
+import { ChatRequestSchema } from '@/lib/types';
+
+import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 
 export const runtime = 'nodejs';
 
-const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000;
-const DEFAULT_OUTPUT_RESERVE_TOKENS = 4096;
-const DEFAULT_SAFETY_MARGIN_TOKENS = 2048;
-const DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS = 65536;
-const MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL = 12 * 1024 * 1024;
-const MIN_INPUT_BUDGET_TOKENS = 2048;
-const CONTEXT_RETRY_SCALE = 0.7;
-const DEFAULT_LIMITS_CACHE_TTL_MS = 30 * 60 * 1000;
-
-type LimitsSource = 'google' | 'openrouter' | 'chutes' | 'fallback';
-
-interface ResolvedModelLimits {
-    contextWindowTokens: number;
-    maxOutputTokens: number | null;
-    source: LimitsSource;
-}
-
-interface CachedLimitsEntry {
-    value: ResolvedModelLimits;
-    expiresAt: number;
-}
-
-interface TrimmedContext {
-    messages: ChatMessage[];
-    trimmedCount: number;
-    estimatedTokens: number;
-    inputBudget: number;
-    contextWindow: number;
-    outputReserve: number;
-}
-
-interface OutputTokenPlan {
-    requestedOutputTokens: number;
-    requestMaxTokens: number;
-    promptTokenEstimate: number;
-    remainingForOutput: number;
-}
-
-interface PreparedAttachment {
-    name: string;
-    mimeType: string;
-    base64Data: string;
-}
-
-interface PreparedChatMessage {
-    role: 'user' | 'assistant';
-    content: string;
-    attachments: PreparedAttachment[];
-}
-
-const LIMITS_CACHE_TTL_MS = readPositiveInt(process.env.CHAT_LIMITS_CACHE_TTL_MS, DEFAULT_LIMITS_CACHE_TTL_MS);
-const limitsCache = new Map<string, CachedLimitsEntry>();
-const ATTACHMENTS_BUCKET =
-    process.env.SUPABASE_ATTACHMENTS_BUCKET ||
-    process.env.NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET ||
-    DEFAULT_ATTACHMENTS_BUCKET;
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
-const DEBUG_MODEL_LIMITS = process.env.CHAT_DEBUG_MODEL_LIMITS === '1';
-
-function readPositiveInt(value: string | undefined, fallback: number) {
-    if (!value) return fallback;
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-        return fallback;
-    }
-    return parsed;
-}
-
-function toPositiveInt(value: unknown): number | null {
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-        return Math.floor(value);
-    }
-    if (typeof value === 'string') {
-        const parsed = Number.parseInt(value, 10);
-        if (Number.isFinite(parsed) && parsed > 0) {
-            return parsed;
-        }
-    }
-    return null;
-}
-
-function resolveOutputTokenCap(maxOutputTokens: number | null | undefined) {
-    const parsed = toPositiveInt(maxOutputTokens);
-    return parsed ?? DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS;
-}
-
-function logModelLimits(label: string, payload: Record<string, unknown>) {
-    if (!DEBUG_MODEL_LIMITS) return;
-    try {
-        console.log(`[chat][limits] ${label} ${JSON.stringify(payload)}`);
-    } catch {
-        console.log(`[chat][limits] ${label}`);
-    }
-}
-
-function getCachedLimits(cacheKey: string): ResolvedModelLimits | null {
-    const cached = limitsCache.get(cacheKey);
-    if (!cached) return null;
-    if (cached.expiresAt <= Date.now()) {
-        limitsCache.delete(cacheKey);
-        return null;
-    }
-    return cached.value;
-}
-
-function setCachedLimits(cacheKey: string, value: ResolvedModelLimits) {
-    limitsCache.set(cacheKey, {
-        value,
-        expiresAt: Date.now() + LIMITS_CACHE_TTL_MS,
-    });
-}
-
-function getFallbackLimits(): ResolvedModelLimits {
-    return {
-        contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
-        maxOutputTokens: null,
-        source: 'fallback',
-    };
-}
-
-async function resolveModelLimits(model: string, modelConfig: ModelConfig, signal?: AbortSignal): Promise<ResolvedModelLimits> {
-    const cacheKey = `${modelConfig.provider}:${model}`;
-    const cached = getCachedLimits(cacheKey);
-    if (cached) return cached;
-
-    let resolved: ResolvedModelLimits | null = null;
-    try {
-        if (modelConfig.provider === 'google') {
-            resolved = await resolveGoogleModelLimits(model, signal);
-        } else if (modelConfig.provider === 'openrouter') {
-            resolved = await resolveOpenRouterModelLimits(model, signal);
-        } else {
-            resolved = await resolveChutesModelLimits(model, signal);
-        }
-    } catch (error) {
-        console.warn(`[chat] failed to resolve provider limits for model=${model}`, error);
-    }
-
-    const finalLimits = resolved ?? getFallbackLimits();
-    logModelLimits('resolved-model-limits', {
-        model,
-        provider: modelConfig.provider,
-        source: finalLimits.source,
-        contextWindowTokens: finalLimits.contextWindowTokens,
-        maxOutputTokens: finalLimits.maxOutputTokens,
-    });
-    setCachedLimits(cacheKey, finalLimits);
-    return finalLimits;
-}
-
-async function resolveGoogleModelLimits(model: string, signal?: AbortSignal): Promise<ResolvedModelLimits | null> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return null;
-
-    const modelId = model.startsWith('models/') ? model.slice('models/'.length) : model;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}?key=${encodeURIComponent(apiKey)}`;
-    const response = await fetch(url, { method: 'GET', signal });
-    if (!response.ok) return null;
-
-    const payload = await response.json() as Record<string, unknown>;
-    const contextWindowTokens = toPositiveInt(payload.inputTokenLimit);
-    if (!contextWindowTokens) return null;
-
-    const resolvedMaxOutput = toPositiveInt(payload.outputTokenLimit);
-    logModelLimits('google-model-limits', {
-        model,
-        raw: {
-            inputTokenLimit: payload.inputTokenLimit,
-            outputTokenLimit: payload.outputTokenLimit,
-        },
-        resolved: {
-            contextWindowTokens,
-            maxOutputTokens: resolvedMaxOutput,
-        },
-    });
-
-    return {
-        contextWindowTokens,
-        maxOutputTokens: resolvedMaxOutput,
-        source: 'google',
-    };
-}
-
-async function resolveOpenRouterModelLimits(model: string, signal?: AbortSignal): Promise<ResolvedModelLimits | null> {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) return null;
-
-    const response = await fetch('https://openrouter.ai/api/v1/models', {
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-        },
-        signal,
-    });
-
-    if (!response.ok) return null;
-
-    const payload = await response.json() as Record<string, unknown>;
-    const data = payload.data;
-    if (!Array.isArray(data)) return null;
-
-    const modelEntry = data.find((item) => {
-        if (!item || typeof item !== 'object') return false;
-        const record = item as Record<string, unknown>;
-        return record.id === model;
-    }) as Record<string, unknown> | undefined;
-
-    if (!modelEntry) return null;
-
-    const topProvider = (modelEntry.top_provider && typeof modelEntry.top_provider === 'object')
-        ? modelEntry.top_provider as Record<string, unknown>
-        : null;
-
-    const contextWindowTokens =
-        toPositiveInt(modelEntry.context_length) ??
-        toPositiveInt(topProvider?.context_length);
-
-    if (!contextWindowTokens) return null;
-
-    const resolvedMaxOutput =
-        toPositiveInt(topProvider?.max_completion_tokens) ??
-        toPositiveInt(modelEntry.max_completion_tokens) ??
-        toPositiveInt(modelEntry.max_output_length);
-    logModelLimits('openrouter-model-limits', {
-        model,
-        raw: {
-            context_length: modelEntry.context_length,
-            top_provider_context_length: topProvider?.context_length,
-            max_completion_tokens: modelEntry.max_completion_tokens,
-            top_provider_max_completion_tokens: topProvider?.max_completion_tokens,
-            max_output_length: modelEntry.max_output_length,
-        },
-        resolved: {
-            contextWindowTokens,
-            maxOutputTokens: resolvedMaxOutput,
-        },
-    });
-
-    return {
-        contextWindowTokens,
-        maxOutputTokens: resolvedMaxOutput,
-        source: 'openrouter',
-    };
-}
-
-async function resolveChutesModelLimits(model: string, signal?: AbortSignal): Promise<ResolvedModelLimits | null> {
-    const apiKey = getChutesApiKey();
-    if (!apiKey) return null;
-
-    const response = await fetch('https://llm.chutes.ai/v1/models', {
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-        },
-        signal,
-    });
-
-    if (!response.ok) return null;
-
-    const payload = await response.json() as Record<string, unknown>;
-    const data = payload.data;
-    if (!Array.isArray(data)) return null;
-
-    const modelEntry = data.find((item) => {
-        if (!item || typeof item !== 'object') return false;
-        const record = item as Record<string, unknown>;
-        return record.id === model;
-    }) as Record<string, unknown> | undefined;
-
-    if (!modelEntry) return null;
-
-    const contextWindowTokens =
-        toPositiveInt(modelEntry.context_length) ??
-        toPositiveInt(modelEntry.max_prompt_tokens) ??
-        toPositiveInt(modelEntry.input_token_limit);
-
-    if (!contextWindowTokens) return null;
-
-    const resolvedMaxOutput =
-        toPositiveInt(modelEntry.max_completion_tokens) ??
-        toPositiveInt(modelEntry.max_output_tokens) ??
-        toPositiveInt(modelEntry.output_token_limit) ??
-        toPositiveInt(modelEntry.max_output_length);
-    logModelLimits('chutes-model-limits', {
-        model,
-        raw: {
-            context_length: modelEntry.context_length,
-            max_prompt_tokens: modelEntry.max_prompt_tokens,
-            input_token_limit: modelEntry.input_token_limit,
-            max_completion_tokens: modelEntry.max_completion_tokens,
-            max_output_tokens: modelEntry.max_output_tokens,
-            output_token_limit: modelEntry.output_token_limit,
-            max_output_length: modelEntry.max_output_length,
-        },
-        resolved: {
-            contextWindowTokens,
-            maxOutputTokens: resolvedMaxOutput,
-        },
-    });
-
-    return {
-        contextWindowTokens,
-        maxOutputTokens: resolvedMaxOutput,
-        source: 'chutes',
-    };
-}
-
-function estimateMessageTokens(message: ChatMessage) {
-    // Simple, fast approximation for mixed text/markdown/code content.
-    const attachmentCount = message.attachments?.length ?? 0;
-    const attachmentBudget = attachmentCount * 1200;
-    return Math.ceil(message.content.length / 3.5) + 8 + attachmentBudget;
-}
-
-function estimateConversationTokens(messages: ChatMessage[]) {
-    return messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
-}
-
-function estimatePreparedMessageTokens(message: PreparedChatMessage) {
-    const attachmentCount = message.attachments?.length ?? 0;
-    const attachmentBudget = attachmentCount * 1200;
-    return Math.ceil(message.content.length / 3.5) + 8 + attachmentBudget;
-}
-
-function estimatePreparedConversationTokens(messages: PreparedChatMessage[]) {
-    return messages.reduce((sum, message) => sum + estimatePreparedMessageTokens(message), 0);
-}
-
-function estimateSystemPromptTokens(systemPrompt: string) {
-    if (!systemPrompt) return 0;
-    const trimmed = systemPrompt.trim();
-    if (!trimmed) return 0;
-    return Math.ceil(trimmed.length / 3.5) + 8;
-}
-
-function resolveOutputTokenPlan(
-    limits: ResolvedModelLimits,
-    maxOutputTokens: number | null | undefined,
-    promptTokenEstimate: number
-): OutputTokenPlan {
-    const requestedOutputTokens = resolveOutputTokenCap(maxOutputTokens);
-    const remainingForOutput = limits.contextWindowTokens - promptTokenEstimate - DEFAULT_SAFETY_MARGIN_TOKENS;
-    const requestMaxTokens = Math.max(1, Math.min(requestedOutputTokens, remainingForOutput));
-    return {
-        requestedOutputTokens,
-        requestMaxTokens,
-        promptTokenEstimate,
-        remainingForOutput,
-    };
-}
-
-function findLastUserIndex(messages: ChatMessage[]) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === 'user') return i;
-    }
-    return -1;
-}
-
-function trimMessagesToInputBudget(
-    messages: ChatMessage[],
-    limits: ResolvedModelLimits,
-    budgetScale: number = 1,
-    reservedInputTokens: number = 0
-): TrimmedContext {
-    const outputCeiling = limits.maxOutputTokens ?? DEFAULT_OUTPUT_RESERVE_TOKENS;
-    const outputReserve = Math.max(512, Math.min(DEFAULT_OUTPUT_RESERVE_TOKENS, outputCeiling));
-    const reserved = Math.max(0, Math.floor(reservedInputTokens));
-    const availableInputBudget = Math.max(
-        0,
-        limits.contextWindowTokens - outputReserve - DEFAULT_SAFETY_MARGIN_TOKENS - reserved
-    );
-    const normalizedScale = Math.min(1, Math.max(0.2, budgetScale));
-    const scaledInputBudget = Math.floor(availableInputBudget * normalizedScale);
-    const inputBudget = availableInputBudget <= 0
-        ? 0
-        : Math.max(1, Math.min(availableInputBudget, Math.max(MIN_INPUT_BUDGET_TOKENS, scaledInputBudget)));
-
-    if (messages.length === 0) {
-        return {
-            messages,
-            trimmedCount: 0,
-            estimatedTokens: 0,
-            inputBudget,
-            contextWindow: limits.contextWindowTokens,
-            outputReserve,
-        };
-    }
-
-    let usedTokens = 0;
-    let startIndex = messages.length;
-    for (let i = messages.length - 1; i >= 0; i--) {
-        const estimated = estimateMessageTokens(messages[i]);
-        if (usedTokens + estimated > inputBudget && startIndex < messages.length) {
-            break;
-        }
-        usedTokens += estimated;
-        startIndex = i;
-    }
-
-    let trimmedMessages = messages.slice(startIndex);
-    let estimatedTokens = usedTokens;
-
-    // Always retain at least one user turn for coherent continuation.
-    if (!trimmedMessages.some((message) => message.role === 'user')) {
-        const lastUserIndex = findLastUserIndex(messages);
-        if (lastUserIndex !== -1) {
-            trimmedMessages = messages.slice(lastUserIndex);
-            estimatedTokens = estimateConversationTokens(trimmedMessages);
-        } else {
-            trimmedMessages = [messages[messages.length - 1]];
-            estimatedTokens = estimateConversationTokens(trimmedMessages);
-        }
-    }
-
-    return {
-        messages: trimmedMessages,
-        trimmedCount: messages.length - trimmedMessages.length,
-        estimatedTokens,
-        inputBudget,
-        contextWindow: limits.contextWindowTokens,
-        outputReserve,
-    };
-}
-
-function isContextOverflowError(error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    const normalized = message.toLowerCase();
-
-    const patterns = [
-        'context length',
-        'maximum context',
-        'max context',
-        'token limit',
-        'too many tokens',
-        'prompt is too long',
-        'input is too long',
-        'exceeds the maximum',
-        'context window',
-    ];
-
-    return patterns.some((pattern) => normalized.includes(pattern));
-}
-
-function supportsImageInputs(modelConfig: ModelConfig) {
-    return modelConfig.provider !== 'openrouter' && modelConfig.capabilities.includes('vision');
-}
-
-function supportsPdfInputs(modelConfig: ModelConfig) {
-    return modelConfig.provider !== 'openrouter'
-        && (modelConfig.capabilities.includes('pdf') || modelConfig.provider === 'google');
-}
-
-function supportsTextInputs(modelConfig: ModelConfig) {
-    return modelConfig.provider !== 'openrouter' && modelConfig.provider === 'google';
-}
-
-function toBase64(bytes: Uint8Array) {
-    return Buffer.from(bytes).toString('base64');
-}
-
-async function prepareMessageAttachments(
-    messages: ChatMessage[],
-    supabase: ReturnType<typeof createClient>,
-    userId: string,
-    modelConfig: ModelConfig,
-    signal?: AbortSignal
-): Promise<PreparedChatMessage[]> {
-    const allowImages = supportsImageInputs(modelConfig);
-    const allowPdfs = supportsPdfInputs(modelConfig);
-    const allowTexts = supportsTextInputs(modelConfig);
-    let totalAttachmentBytes = 0;
-
-    const prepared: PreparedChatMessage[] = [];
-    for (const message of messages) {
-        const attachments = message.attachments ?? [];
-        if (attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
-            throw new Error(`Too many attachments in a single message. Maximum is ${MAX_ATTACHMENTS_PER_MESSAGE}.`);
-        }
-
-        const preparedAttachments: PreparedAttachment[] = [];
-        let skippedForCapabilities = 0;
-        for (const attachment of attachments) {
-            if (signal?.aborted) throw new Error('Request aborted');
-
-            if (!attachment.path.startsWith(`${userId}/`)) {
-                throw new Error('Invalid attachment path');
-            }
-
-            const imageAttachment = isImageAttachment(attachment.mimeType);
-            const pdfAttachment = isPdfAttachment(attachment.mimeType);
-            const textAttachment = isTextAttachment(attachment.mimeType);
-
-            if (!imageAttachment && !pdfAttachment && !textAttachment) {
-                throw new Error(`Unsupported attachment type: ${attachment.mimeType}`);
-            }
-            if (imageAttachment && !allowImages) {
-                skippedForCapabilities += 1;
-                continue;
-            }
-            if (pdfAttachment && !allowPdfs) {
-                skippedForCapabilities += 1;
-                continue;
-            }
-            if (textAttachment && !allowTexts) {
-                skippedForCapabilities += 1;
-                continue;
-            }
-
-            if (attachment.size > MAX_ATTACHMENT_BYTES_FOR_MODEL) {
-                const maxMb = Math.floor(MAX_ATTACHMENT_BYTES_FOR_MODEL / (1024 * 1024));
-                throw new Error(`Attachment "${attachment.name}" exceeds model limit (${maxMb}MB).`);
-            }
-            if (totalAttachmentBytes + attachment.size > MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL) {
-                const maxMb = Math.floor(MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL / (1024 * 1024));
-                throw new Error(`Total attachment payload is too large for one request (${maxMb}MB max).`);
-            }
-
-            const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).download(attachment.path);
-            if (error || !data) {
-                throw new Error(`Failed to load attachment: ${attachment.name}`);
-            }
-
-            const buffer = new Uint8Array(await data.arrayBuffer());
-            if (buffer.byteLength > MAX_ATTACHMENT_BYTES_FOR_MODEL) {
-                const maxMb = Math.floor(MAX_ATTACHMENT_BYTES_FOR_MODEL / (1024 * 1024));
-                throw new Error(`Attachment "${attachment.name}" exceeds model limit (${maxMb}MB).`);
-            }
-            totalAttachmentBytes += buffer.byteLength;
-            if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL) {
-                const maxMb = Math.floor(MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL / (1024 * 1024));
-                throw new Error(`Total attachment payload is too large for one request (${maxMb}MB max).`);
-            }
-
-            const base64Data = toBase64(buffer);
-            preparedAttachments.push({
-                name: attachment.name,
-                mimeType: attachment.mimeType,
-                base64Data,
-            });
-        }
-
-        prepared.push({
-            role: message.role,
-            content: skippedForCapabilities > 0 && !message.content
-                ? '[Attachment omitted: unsupported by selected model]'
-                : message.content,
-            attachments: preparedAttachments,
-        });
-
-        if (skippedForCapabilities > 0) {
-            console.warn(
-                `[chat] skipped ${skippedForCapabilities} attachment(s) for provider=${modelConfig.provider} model without required capability`
-            );
-        }
-    }
-
-    return prepared;
-}
-
-function buildGoogleContents(messages: PreparedChatMessage[]) {
-    return messages.map((message) => {
-        const parts: Array<Record<string, unknown>> = [];
-
-        if (message.content) {
-            parts.push({ text: message.content });
-        }
-
-        for (const attachment of message.attachments) {
-            parts.push({
-                inlineData: {
-                    mimeType: attachment.mimeType,
-                    data: attachment.base64Data,
-                },
-            });
-        }
-
-        if (parts.length === 0) {
-            parts.push({ text: ' ' });
-        }
-
-        return {
-            role: message.role === 'assistant' ? 'model' : 'user',
-            parts,
-        };
-    });
-}
-
-function buildOpenAICompatibleMessages(messages: PreparedChatMessage[], systemPrompt?: string) {
-    const prepared = messages.map((message) => {
-        if (message.attachments.length === 0) {
-            return {
-                role: message.role,
-                content: message.content,
-            };
-        }
-
-        const contentParts: Array<Record<string, unknown>> = [];
-        if (message.content) {
-            contentParts.push({
-                type: 'text',
-                text: message.content,
-            });
-        }
-
-        for (const attachment of message.attachments) {
-            const dataUrl = `data:${attachment.mimeType};base64,${attachment.base64Data}`;
-            if (isImageAttachment(attachment.mimeType)) {
-                contentParts.push({
-                    type: 'image_url',
-                    image_url: {
-                        url: dataUrl,
-                    },
-                });
-                continue;
-            }
-
-            contentParts.push({
-                type: 'file',
-                file: {
-                    filename: attachment.name,
-                    file_data: dataUrl,
-                },
-            });
-        }
-
-        if (contentParts.length === 0) {
-            contentParts.push({ type: 'text', text: ' ' });
-        }
-
-        return {
-            role: message.role,
-            content: contentParts,
-        };
-    });
-
-    if (systemPrompt && systemPrompt.trim().length > 0) {
-        return [
-            { role: 'system', content: systemPrompt.trim() },
-            ...prepared,
-        ];
-    }
-    return prepared;
-}
 
 export async function POST(req: Request) {
-    let supabase: ReturnType<typeof createClient>;
+    let supabase: Awaited<ReturnType<typeof requireUser>>['supabase'];
     let user: Awaited<ReturnType<typeof requireUser>>['user'];
     try {
         assertValidPostOrigin(req);
@@ -682,7 +42,6 @@ export async function POST(req: Request) {
     const encoder = new TextEncoder();
     const signal = req.signal;
 
-    // Helper to safely enqueue data without crashing if the stream is closed
     const safeEnqueue = (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
         try {
             if (signal.aborted) return;
@@ -693,7 +52,6 @@ export async function POST(req: Request) {
         }
     };
 
-    // Create the stream first so we can return the Response immediately
     const stream = new ReadableStream({
         async start(controller) {
             let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
@@ -702,8 +60,6 @@ export async function POST(req: Request) {
 
             try {
                 const body = await req.json();
-
-                // Validate request body with Zod
                 const parseResult = ChatRequestSchema.safeParse(body);
                 if (!parseResult.success) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid request' })}\n\n`);
@@ -718,13 +74,16 @@ export async function POST(req: Request) {
                     controller.close();
                     return;
                 }
+
                 const useSearch = search === true;
                 const normalizedSystemPrompt = systemPrompt?.trim() ?? '';
+
                 if (modelConfig.capabilities.includes('imageGen')) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Selected model is image-generation only. Use image generation flow.' })}\n\n`);
                     controller.close();
                     return;
                 }
+
                 if (useSearch && (modelConfig.provider !== 'google' || !SEARCH_ENABLED_MODEL_SET.has(model))) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Search is supported only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite.' })}\n\n`);
                     controller.close();
@@ -751,7 +110,6 @@ export async function POST(req: Request) {
                     );
                 }
 
-                // Start heartbeat to keep connection alive while waiting for AI
                 heartbeatInterval = setInterval(() => {
                     safeEnqueue(controller, ': keep-alive\n\n');
                 }, 15000);
@@ -775,6 +133,11 @@ export async function POST(req: Request) {
                     );
                     const estimatedInputTokens = estimatePreparedConversationTokens(preparedMessages);
                     const estimatedInputTokensWithSystemPrompt = estimatedInputTokens + systemPromptTokenEstimate;
+                    const tokenEstimates = {
+                        estimatedInputTokens,
+                        estimatedInputTokensWithSystemPrompt,
+                    };
+
                     if (modelConfig.provider === 'google') {
                         return getGoogleStream(
                             model,
@@ -783,8 +146,7 @@ export async function POST(req: Request) {
                             outputPlan.requestMaxTokens,
                             normalizedSystemPrompt,
                             useSearch,
-                            estimatedInputTokens,
-                            estimatedInputTokensWithSystemPrompt,
+                            tokenEstimates,
                             signal
                         );
                     }
@@ -795,8 +157,7 @@ export async function POST(req: Request) {
                             reasoningEffort ?? 'low',
                             outputPlan.requestMaxTokens,
                             normalizedSystemPrompt,
-                            estimatedInputTokens,
-                            estimatedInputTokensWithSystemPrompt,
+                            tokenEstimates,
                             signal
                         );
                     }
@@ -807,8 +168,7 @@ export async function POST(req: Request) {
                         modelConfig,
                         outputPlan.requestMaxTokens,
                         normalizedSystemPrompt,
-                        estimatedInputTokens,
-                        estimatedInputTokensWithSystemPrompt,
+                        tokenEstimates,
                         signal
                     );
                 };
@@ -837,10 +197,7 @@ export async function POST(req: Request) {
                     sourceStream = await getSourceStream(trimmedContext);
                 }
 
-                // Clear heartbeat once we have the source stream
                 if (heartbeatInterval) clearInterval(heartbeatInterval);
-
-                // Process the stream with robust buffering and thinking-tag transformation
                 await processAndTransformStream(sourceStream, controller, signal);
 
                 if (!signal.aborted) {
@@ -849,7 +206,6 @@ export async function POST(req: Request) {
             } catch (error) {
                 if (heartbeatInterval) clearInterval(heartbeatInterval);
 
-                // Only log and send errors if the client hasn't already disconnected
                 if (!signal.aborted) {
                     console.error('Chat API error:', error);
                     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -868,318 +224,3 @@ export async function POST(req: Request) {
         },
     });
 }
-
-async function getChutesStream(
-    model: string,
-    messages: PreparedChatMessage[],
-    reasoningEffort: ReasoningEffort = 'low',
-    modelConfig: ModelConfig,
-    maxOutputTokens?: number | null,
-    systemPrompt?: string,
-    estimatedInputTokens?: number,
-    estimatedInputTokensWithSystemPrompt?: number,
-    signal?: AbortSignal
-) {
-    const apiKey = getChutesApiKey();
-    if (!apiKey) throw new Error(CHUTES_MISSING_API_KEY_MESSAGE);
-
-    const requestBody: Record<string, unknown> = {
-        model,
-        messages: buildOpenAICompatibleMessages(messages, systemPrompt),
-        stream: true,
-        temperature: 1.0,
-        top_p: 0.95,
-        max_tokens: resolveOutputTokenCap(maxOutputTokens),
-    };
-
-    logModelLimits('chutes-request', {
-        model,
-        resolvedMaxOutputTokens: maxOutputTokens,
-        requestMaxTokens: requestBody.max_tokens,
-        messageCount: messages.length,
-        estimatedInputTokens,
-        estimatedInputTokensWithSystemPrompt,
-    });
-
-    if (reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
-    if (modelConfig?.usesThinkingParam) {
-        requestBody.chat_template_kwargs = { thinking: reasoningEffort !== 'low' };
-    }
-
-    const response = await fetch('https://llm.chutes.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-        signal,
-    });
-
-    if (!response.ok) {
-        const responseText = await response.text().catch(() => '');
-        throw new Error(`Chutes API error ${response.status}: ${responseText || response.statusText}`);
-    }
-    return response.body as ReadableStream;
-}
-
-async function getGoogleStream(
-    model: string,
-    messages: PreparedChatMessage[],
-    reasoningEffort: ReasoningEffort = 'low',
-    maxOutputTokens?: number | null,
-    systemPrompt?: string,
-    useSearch: boolean = false,
-    estimatedInputTokens?: number,
-    estimatedInputTokensWithSystemPrompt?: number,
-    signal?: AbortSignal
-) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('Gemini API key missing');
-
-    const ai = new GoogleGenAI({ apiKey });
-    const contents = buildGoogleContents(messages);
-
-    const config: {
-        maxOutputTokens: number;
-        thinkingConfig?: {
-            includeThoughts: boolean;
-            thinkingLevel?: ThinkingLevel;
-            thinkingBudget?: number;
-        };
-        tools?: Array<{ googleSearch: Record<string, never> }>;
-        systemInstruction?: string;
-    } = { maxOutputTokens: resolveOutputTokenCap(maxOutputTokens) };
-    logModelLimits('google-request', {
-        model,
-        resolvedMaxOutputTokens: maxOutputTokens,
-        requestMaxOutputTokens: config.maxOutputTokens,
-        messageCount: messages.length,
-        useSearch,
-        estimatedInputTokens,
-        estimatedInputTokensWithSystemPrompt,
-    });
-    const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
-
-    if (modelConfig?.supportsReasoning && reasoningEffort) {
-        config.thinkingConfig = { includeThoughts: true };
-        const isGemini3 = model.includes('gemini-3');
-        if (isGemini3) {
-            const levelMap: Record<string, ThinkingLevel> = {
-                low: ThinkingLevel.LOW,
-                medium: ThinkingLevel.MEDIUM,
-                high: ThinkingLevel.HIGH
-            };
-            config.thinkingConfig.thinkingLevel = levelMap[reasoningEffort] || ThinkingLevel.MEDIUM;
-        } else {
-            const isFlash = model.includes('flash');
-            const maxBudget = isFlash ? 24576 : 32768;
-            const budgetMap: Record<string, number> = { low: 0, medium: -1, high: maxBudget };
-            config.thinkingConfig.thinkingBudget = budgetMap[reasoningEffort] ?? -1;
-        }
-    }
-
-    if (useSearch) {
-        config.tools = [{ googleSearch: {} }];
-    }
-    if (systemPrompt && systemPrompt.trim().length > 0) {
-        config.systemInstruction = systemPrompt.trim();
-    }
-
-    const response = await ai.models.generateContentStream({ model, config, contents });
-
-    const encoder = new TextEncoder();
-    return new ReadableStream({
-        async start(controller) {
-            try {
-                for await (const chunk of response) {
-                    if (signal?.aborted) break;
-
-                    const candidate = chunk.candidates?.[0];
-                    if (!candidate?.content?.parts) continue;
-                    for (const part of candidate.content.parts) {
-                        if (!part.text) continue;
-                        const data = JSON.stringify({
-                            choices: [{
-                                delta: {
-                                    content: part.thought ? undefined : part.text,
-                                    reasoning_content: part.thought ? part.text : undefined
-                                },
-                                index: 0,
-                                finish_reason: null
-                            }]
-                        });
-                        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-                    }
-                }
-                if (!signal?.aborted) {
-                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-                    controller.close();
-                }
-            } catch (e) {
-                if (!signal?.aborted) {
-                    controller.error(e);
-                }
-            }
-        }
-    });
-}
-
-async function getOpenRouterStream(
-    model: string,
-    messages: PreparedChatMessage[],
-    reasoningEffort: ReasoningEffort = 'low',
-    maxOutputTokens?: number | null,
-    systemPrompt?: string,
-    estimatedInputTokens?: number,
-    estimatedInputTokensWithSystemPrompt?: number,
-    signal?: AbortSignal
-) {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) throw new Error('OpenRouter API key missing');
-    const requestMaxTokens = resolveOutputTokenCap(maxOutputTokens);
-    logModelLimits('openrouter-request', {
-        model,
-        resolvedMaxOutputTokens: maxOutputTokens,
-        requestMaxTokens,
-        messageCount: messages.length,
-        estimatedInputTokens,
-        estimatedInputTokensWithSystemPrompt,
-    });
-
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-            'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
-            'X-Title': 'Pluto Chat',
-        },
-        body: JSON.stringify({
-            model,
-            messages: buildOpenAICompatibleMessages(messages, systemPrompt),
-            stream: true,
-            max_tokens: requestMaxTokens,
-            reasoning: { effort: reasoningEffort },
-        }),
-        signal,
-    });
-
-    if (!response.ok) {
-        const responseText = await response.text().catch(() => '');
-        throw new Error(`OpenRouter API error ${response.status}: ${responseText || response.statusText}`);
-    }
-
-    return response.body as ReadableStream;
-}
-
-/**
- * Processes a source SSE stream, handles chunk buffering to ensure lines aren't broken,
- * and transforms <think> tags into reasoning_content.
- */
-async function processAndTransformStream(sourceStream: ReadableStream, controller: ReadableStreamDefaultController, signal?: AbortSignal) {
-    const reader = sourceStream.getReader();
-    const decoder = new TextDecoder();
-    const encoder = new TextEncoder();
-    let isThinking = false;
-    let buffer = '';
-
-    const safeEnqueue = (chunk: string | Uint8Array) => {
-        try {
-            if (signal?.aborted) return;
-            const encoded = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
-            controller.enqueue(encoded);
-        } catch { }
-    };
-
-    try {
-        while (true) {
-            if (signal?.aborted) break;
-
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            // Keep the last partial line in the buffer
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-                if (signal?.aborted) break;
-
-                const trimmedLine = line.trim();
-                if (!trimmedLine) continue;
-
-                if (!trimmedLine.startsWith('data: ')) {
-                    safeEnqueue(line + '\n');
-                    continue;
-                }
-
-                const dataStr = trimmedLine.slice(6);
-                if (dataStr === '[DONE]') {
-                    safeEnqueue('data: [DONE]\n\n');
-                    continue;
-                }
-
-                try {
-                    const parsed = JSON.parse(dataStr);
-                    const choice = parsed.choices?.[0];
-                    const delta = choice?.delta;
-                    const content = delta?.content || '';
-                    const reasoning = delta?.reasoning_content || delta?.reasoning || delta?.thinking || '';
-
-                    if (content || reasoning) {
-                        let newContent = '';
-                        let newReasoning = reasoning;
-                        let remaining = content;
-
-                        while (remaining.length > 0) {
-                            if (!isThinking) {
-                                const thinkStartIdx = remaining.indexOf('<think>');
-                                if (thinkStartIdx !== -1) {
-                                    newContent += remaining.slice(0, thinkStartIdx);
-                                    isThinking = true;
-                                    remaining = remaining.slice(thinkStartIdx + 7);
-                                } else {
-                                    newContent += remaining;
-                                    remaining = '';
-                                }
-                            } else {
-                                const thinkEndIdx = remaining.indexOf('</think>');
-                                if (thinkEndIdx !== -1) {
-                                    newReasoning += remaining.slice(0, thinkEndIdx);
-                                    isThinking = false;
-                                    remaining = remaining.slice(thinkEndIdx + 8);
-                                } else {
-                                    newReasoning += remaining;
-                                    remaining = '';
-                                }
-                            }
-                        }
-
-                        const transformedData = JSON.stringify({
-                            ...parsed,
-                            choices: [{
-                                ...choice,
-                                delta: {
-                                    ...delta,
-                                    content: newContent || undefined,
-                                    reasoning_content: newReasoning || undefined
-                                }
-                            }]
-                        });
-                        safeEnqueue(`data: ${transformedData}\n\n`);
-                    } else {
-                        // Pass through non-content chunks (reasoning, metadata)
-                        safeEnqueue(`data: ${dataStr}\n\n`);
-                    }
-                } catch {
-                    safeEnqueue(line + '\n');
-                }
-            }
-        }
-    } finally {
-        reader.releaseLock();
-    }
-}
-

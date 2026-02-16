@@ -144,14 +144,7 @@ export default function HomePage() {
     }
   };
 
-  const handlePromptClick = (prompt: string) => {
-    if (chatInputRef.current) {
-      chatInputRef.current.setValue(prompt);
-      chatInputRef.current.focus();
-    }
-  };
-
-  const handleCategoryClick = (prompt: string) => {
+  const handleSuggestionClick = (prompt: string) => {
     if (chatInputRef.current) {
       chatInputRef.current.setValue(prompt);
       chatInputRef.current.focus();
@@ -176,7 +169,7 @@ export default function HomePage() {
                 <Button
                   key={cat.label}
                   variant="ghost"
-                  onClick={() => handleCategoryClick(cat.prompt)}
+                  onClick={() => handleSuggestionClick(cat.prompt)}
                   className="h-10 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-[15px] font-medium transition-all hover:text-zinc-100"
                 >
                   <IconComponent className="h-4 w-4" />
@@ -191,7 +184,7 @@ export default function HomePage() {
             {SUGGESTED_PROMPTS.map((prompt, i) => (
               <button
                 key={i}
-                onClick={() => handlePromptClick(prompt)}
+                onClick={() => handleSuggestionClick(prompt)}
                 className="w-full text-left px-0 py-2.5 text-base text-zinc-400/90 hover:text-zinc-200 transition-colors"
               >
                 {prompt}

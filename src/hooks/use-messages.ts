@@ -18,6 +18,10 @@ export interface Message {
 
 const MESSAGE_SELECT_COLUMNS = 'id,thread_id,role,content,attachments,reasoning,model_id,created_at';
 
+export type RefreshMessagesResult =
+    | { ok: true }
+    | { ok: false; error: string };
+
 function sortMessagesByCreatedAt(messages: Message[]) {
     return [...messages].sort((a, b) => {
         const byCreatedAt = a.created_at.localeCompare(b.created_at);
@@ -83,8 +87,8 @@ export async function getThreadMessages(threadId: string): Promise<Message[]> {
 export function useMessages(threadId: string | null) {
     const [messages, setMessages] = useState<Message[] | null>(() => (threadId ? null : []));
     const [supabase] = useState(() => createClient());
-    const refreshMessages = useCallback(async () => {
-        if (!threadId) return;
+    const refreshMessages = useCallback(async (): Promise<RefreshMessagesResult> => {
+        if (!threadId) return { ok: true };
 
         const { data, error } = await supabase
             .from('messages')
@@ -94,11 +98,13 @@ export function useMessages(threadId: string | null) {
             .order('id', { ascending: true });
 
         if (error) {
-            return;
+            console.error('[useMessages] Error refreshing messages:', error);
+            return { ok: false, error: error.message || 'Failed to refresh messages' };
         }
         if (data) {
             setMessages(data as Message[]);
         }
+        return { ok: true };
     }, [threadId, supabase]);
 
     useEffect(() => {
@@ -117,7 +123,11 @@ export function useMessages(threadId: string | null) {
                 .order('created_at', { ascending: true })
                 .order('id', { ascending: true });
 
-            if (!isActive || error) {
+            if (!isActive) {
+                return;
+            }
+            if (error) {
+                console.error('[useMessages] Error fetching messages:', error);
                 return;
             }
             if (data) {

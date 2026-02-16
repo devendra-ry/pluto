@@ -1,7 +1,8 @@
-import { DEFAULT_ATTACHMENTS_BUCKET } from '@/lib/attachments';
+import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/lib/attachment-route-utils';
 import { IMAGE_GENERATION_MODEL } from '@/lib/constants';
 import { type Attachment } from '@/lib/types';
 import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
+import { assertThreadOwnership } from '@/lib/thread-ownership';
 import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { createClient } from '@/utils/supabase/server';
 
@@ -17,12 +18,6 @@ const DEFAULT_Z_IMAGE_GENERATE_URL = 'https://chutes-z-image-turbo.chutes.ai/gen
 const IMAGE_RETRYABLE_STATUSES = new Set([502, 503]);
 const IMAGE_RETRY_ATTEMPTS = 2;
 const IMAGE_RETRY_BACKOFF_MS = 350;
-
-function getBucketName() {
-    return process.env.SUPABASE_ATTACHMENTS_BUCKET
-        || process.env.NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET
-        || DEFAULT_ATTACHMENTS_BUCKET;
-}
 
 function uniqueUrls(urls: Array<string | undefined>) {
     const set = new Set<string>();
@@ -44,35 +39,6 @@ function getImageApiUrlCandidates() {
 
 function wait(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function jsonResponse(payload: Record<string, unknown>, status: number = 200) {
-    return new Response(JSON.stringify(payload), {
-        status,
-        headers: { 'Content-Type': 'application/json' },
-    });
-}
-
-async function assertThreadOwnership(
-    supabase: ReturnType<typeof createClient>,
-    threadId: string,
-    userId: string
-) {
-    const { data, error } = await supabase
-        .from('threads')
-        .select('id')
-        .eq('id', threadId)
-        .eq('user_id', userId)
-        .single();
-
-    if (error || !data) {
-        throw new Error('Thread not found or access denied');
-    }
-}
-
-function buildAttachmentUrl(threadId: string, path: string) {
-    const query = new URLSearchParams({ threadId, path });
-    return `/api/uploads?${query.toString()}`;
 }
 
 function getText(value: unknown) {
@@ -353,7 +319,7 @@ export async function POST(req: Request) {
             }, mappedStatus);
         }
 
-        const bucket = getBucketName();
+        const bucket = getAttachmentsBucketName();
         const attachmentId = crypto.randomUUID();
         const mimeType = generated.mimeType;
         const extension = extensionForMimeType(mimeType);
