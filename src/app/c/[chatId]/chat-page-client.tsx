@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type VirtuosoHandle } from 'react-virtuoso';
 
 import { ChatEmptyState } from '@/components/chat-empty-state';
@@ -168,12 +168,13 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const [systemPrompt, setSystemPrompt] = useState('');
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [messagesReady, setMessagesReady] = useState(false);
+    const [messagesChatId, setMessagesChatId] = useState<string | null>(null);
     const hasInitialized = useRef(false);
-    const currentMessagesChatId = useRef<string | null>(null);
     const justAddedMessageIdRef = useRef<string | null>(null);
     const locallyDeletedMessageIdsRef = useRef<Set<string>>(new Set());
     const persistRetryModeHintRef = useRef<((userMessageId: string, mode: RetryMode) => void) | null>(null);
     const prevChatIdRef = useRef<string | null>(null);
+    const threadSwitchAtRef = useRef<number>(0);
     const { showToast } = useToast();
 
     const {
@@ -256,7 +257,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
         if (!hasInitialized.current && storedMessages) {
             hasInitialized.current = true;
-            currentMessagesChatId.current = chatId;
+            setMessagesChatId(chatId);
             applyStoredMessages(storedMessages);
             setMessagesReady(true);
         } else {
@@ -280,7 +281,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     justAddedMessageIdRef.current = null;
                 }
 
-                currentMessagesChatId.current = chatId;
+                setMessagesChatId(chatId);
                 applyStoredMessages(storedMessages);
             }
         }
@@ -293,7 +294,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
     const resetLocalChatState = useCallback(() => {
         hasInitialized.current = false;
-        currentMessagesChatId.current = null;
+        setMessagesChatId(null);
         setMessages([]);
         setMessagesReady(false);
 
@@ -307,45 +308,53 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         setIsAtBottom(true);
     }, [resetStreamState]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         // Only reset when actually switching between different chats, not on initial mount.
         if (prevChatIdRef.current !== null && prevChatIdRef.current !== chatId) {
             // eslint-disable-next-line react-hooks/set-state-in-effect
             resetLocalChatState();
+            threadSwitchAtRef.current = Date.now();
         }
         prevChatIdRef.current = chatId;
     }, [chatId, resetLocalChatState]);
 
+    const isThreadSynchronized = messagesChatId === chatId;
+    const visibleMessages = useMemo(
+        () => (isThreadSynchronized ? messages : []),
+        [isThreadSynchronized, messages]
+    );
+
     const scrollToBottom = useCallback(() => {
         if (virtuosoRef.current) {
-            virtuosoRef.current.scrollToIndex({ index: messages.length - 1, align: 'end', behavior: 'smooth' });
+            virtuosoRef.current.scrollToIndex({ index: visibleMessages.length - 1, align: 'end', behavior: 'smooth' });
             setIsAtBottom(true);
         }
-    }, [messages.length]);
+    }, [visibleMessages.length]);
 
     // Keep viewport pinned to the bottom while streaming / when new messages arrive.
     // Do NOT include isAtBottom in the dependency array — we only want this to fire
     // when the data actually changes, not when the user manually scrolls.
     useEffect(() => {
-        if (virtuosoRef.current && isAtBottom) {
-            virtuosoRef.current.scrollToIndex({ index: messages.length - 1, align: 'end' });
+        if (!isThreadSynchronized || visibleMessages.length === 0) {
+            return;
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [messages.length, isThinking]);
+        const isWithinThreadSwitchWindow = Date.now() - threadSwitchAtRef.current < 2500;
+        if (virtuosoRef.current && (isAtBottom || isWithinThreadSwitchWindow)) {
+            virtuosoRef.current.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' });
+        }
+    }, [visibleMessages.length, isThinking, isAtBottom, isThreadSynchronized]);
 
     // Scroll to bottom after initial messages load for a thread.
     useEffect(() => {
-        if (messagesReady && messages.length > 0 && virtuosoRef.current) {
+        if (messagesReady && isThreadSynchronized && visibleMessages.length > 0 && virtuosoRef.current) {
             // Give Virtuoso two frames to measure the new items before scrolling.
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
-                    virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, align: 'end' });
+                    virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' });
                 });
             });
         }
-        // Only fire when messagesReady transitions (not on every messages.length change).
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [messagesReady]);
+    }, [messagesReady, isThreadSynchronized, visibleMessages.length]);
 
     const handleModelChange = async (newModel: string) => {
         if (!isSelectableChatModel(newModel)) {
@@ -389,7 +398,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     // Check for pending user message on load (e.g. new chat from home).
     useEffect(() => {
         // Don't auto-retry if the last request failed or if messages don't belong to current chat.
-        if (lastRequestFailed || currentMessagesChatId.current !== chatId) {
+        if (lastRequestFailed || messagesChatId !== chatId) {
             return;
         }
         if (hasInitialized.current && messages.length > 0 && !isLoading && !isThinking) {
@@ -413,7 +422,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 generateResponse(messages, undefined, pendingSystemPrompt || undefined, pendingGenerationSearch === '1');
             }
         }
-    }, [messages, isLoading, isThinking, generateResponse, chatId, lastRequestFailed]);
+    }, [messages, isLoading, isThinking, generateResponse, chatId, lastRequestFailed, messagesChatId]);
 
     const sendMessage = useCallback(async (
         userMessage: string,
@@ -458,8 +467,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const handleSend = useCallback(async (value: string, attachments: Attachment[], options: ChatSubmitOptions) => {
         if ((!value.trim() && attachments.length === 0) || isLoading) return false;
         setIsAtBottom(true);
-        return sendMessage(value, attachments, messages, options);
-    }, [isLoading, messages, sendMessage]);
+        return sendMessage(value, attachments, visibleMessages, options);
+    }, [isLoading, visibleMessages, sendMessage]);
 
     const handlePromptClick = (prompt: string) => {
         if (chatInputRef.current) {
@@ -539,11 +548,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
     }, [messages, chatId, showToast, generateResponse, refreshStoredMessages, setIsLoading, model]);
 
-    const shouldShowEmptyState = messagesReady && messages.length === 0 && !isThinking;
+    const shouldShowEmptyState = messagesReady && isThreadSynchronized && visibleMessages.length === 0 && !isThinking;
     // Keep Virtuoso permanently mounted so it never loses scroll position or
     // measured item sizes across thread switches.  Hide it with CSS when we
     // need to show the empty state or while messages are still loading.
-    const hideMessageList = !messagesReady || shouldShowEmptyState;
+    const hideMessageList = !messagesReady || !isThreadSynchronized || shouldShowEmptyState;
 
     return (
         <div className="flex flex-col h-full bg-[#1a1520]">
@@ -577,7 +586,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                         style={hideMessageList ? { opacity: 0, pointerEvents: 'none' } : undefined}
                     >
                         <ChatMessageList
-                            messages={messages}
+                            messages={visibleMessages}
                             model={model}
                             isLoading={isLoading}
                             isThinking={isThinking}
@@ -592,7 +601,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
             <ChatHeader
                 showScrollButton={!isAtBottom}
-                hasMessages={messages.length > 0}
+                hasMessages={visibleMessages.length > 0}
                 onScrollToBottom={scrollToBottom}
             />
 

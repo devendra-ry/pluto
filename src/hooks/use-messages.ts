@@ -33,6 +33,50 @@ function sortMessagesByCreatedAt(messages: Message[]) {
     });
 }
 
+function areAttachmentsEqual(left: Attachment[] | undefined, right: Attachment[] | undefined) {
+    const a = left ?? [];
+    const b = right ?? [];
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (
+            a[i].id !== b[i].id
+            || a[i].name !== b[i].name
+            || a[i].mimeType !== b[i].mimeType
+            || a[i].size !== b[i].size
+            || a[i].path !== b[i].path
+            || a[i].url !== b[i].url
+        ) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function areMessagesEqual(a: Message | undefined, b: Message | undefined) {
+    if (!a || !b) return a === b;
+    return (
+        a.id === b.id
+        && a.thread_id === b.thread_id
+        && a.role === b.role
+        && a.content === b.content
+        && (a.reasoning ?? undefined) === (b.reasoning ?? undefined)
+        && (a.model_id ?? undefined) === (b.model_id ?? undefined)
+        && a.created_at === b.created_at
+        && areAttachmentsEqual(a.attachments, b.attachments)
+    );
+}
+
+function areMessageArraysEqual(prev: Message[] | null, next: Message[]) {
+    if (!prev) return next.length === 0;
+    if (prev.length !== next.length) return false;
+    for (let i = 0; i < prev.length; i++) {
+        if (!areMessagesEqual(prev[i], next[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 function mergeMessagesSorted(existing: Message[], incoming: Message[]) {
     if (incoming.length === 0) return existing;
 
@@ -166,6 +210,7 @@ export function useMessages(threadId: string | null) {
 
         void (async () => {
             let offset = initialOffset;
+            const bufferedMessages: Message[] = [];
             while (shouldRun()) {
                 const { data, error } = await fetchMessagesPage(targetThreadId, offset);
                 if (!shouldRun()) return;
@@ -181,13 +226,22 @@ export function useMessages(threadId: string | null) {
                 }
 
                 const ascending = [...descending].reverse();
-                setMessages((prevMessages) => mergeMessagesSorted(prevMessages ?? [], ascending));
+                bufferedMessages.push(...ascending);
 
                 if (descending.length < MESSAGES_PAGE_SIZE) {
-                    return;
+                    break;
                 }
                 offset += MESSAGES_PAGE_SIZE;
             }
+
+            if (!shouldRun() || bufferedMessages.length === 0) {
+                return;
+            }
+
+            setMessages((prevMessages) => {
+                const merged = mergeMessagesSorted(prevMessages ?? [], bufferedMessages);
+                return areMessageArraysEqual(prevMessages, merged) ? prevMessages : merged;
+            });
         })();
     }, [fetchMessagesPage]);
 
@@ -204,7 +258,7 @@ export function useMessages(threadId: string | null) {
 
         const descending = (data ?? []).map(mapMessageRowToMessage);
         const ascending = [...descending].reverse();
-        setMessages(ascending);
+        setMessages((prev) => (areMessageArraysEqual(prev, ascending) ? prev : ascending));
 
         if (descending.length === MESSAGES_PAGE_SIZE) {
             startBackfillMessages(threadId, MESSAGES_PAGE_SIZE, () => true);
@@ -234,7 +288,7 @@ export function useMessages(threadId: string | null) {
             }
             const descending = (data ?? []).map(mapMessageRowToMessage);
             const ascending = [...descending].reverse();
-            setMessages(ascending);
+            setMessages((prev) => (areMessageArraysEqual(prev, ascending) ? prev : ascending));
 
             if (descending.length === MESSAGES_PAGE_SIZE) {
                 startBackfillMessages(threadId, MESSAGES_PAGE_SIZE, () => isActive);
@@ -285,7 +339,12 @@ export function useMessages(threadId: string | null) {
 
                         const existingIndex = prev.findIndex((message) => message.id === nextMessage.id);
                         if (existingIndex === -1) {
-                            return sortMessagesByCreatedAt([...prev, nextMessage]);
+                            const merged = sortMessagesByCreatedAt([...prev, nextMessage]);
+                            return areMessageArraysEqual(prev, merged) ? prev : merged;
+                        }
+
+                        if (areMessagesEqual(prev[existingIndex], nextMessage)) {
+                            return prev;
                         }
 
                         const updated = [...prev];
