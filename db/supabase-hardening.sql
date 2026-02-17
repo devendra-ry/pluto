@@ -143,7 +143,7 @@ values (
   'chat-attachments',
   'chat-attachments',
   false,
-  20971520,
+  104857600,
   array['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf', 'text/plain']
 )
 on conflict (id) do update
