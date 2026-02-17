@@ -30,6 +30,7 @@ import {
     PENDING_GENERATION_THREAD_KEY,
     PENDING_SYSTEM_PROMPT_KEY,
     SEARCH_ENABLED_MODELS,
+    VIDEO_GENERATION_MODEL,
 } from '@/lib/constants';
 import { type ChatViewMessage, type RetryMode } from '@/lib/chat-view';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
@@ -116,6 +117,10 @@ function hasImageAttachment(message: ChatViewMessage): boolean {
     return (message.attachments ?? []).some((attachment) => isImageAttachment(attachment.mimeType));
 }
 
+function hasVideoAttachment(message: ChatViewMessage): boolean {
+    return (message.attachments ?? []).some((attachment) => attachment.mimeType.startsWith('video/'));
+}
+
 function looksLikeSearchResponse(content: string): boolean {
     return /\[\d+\]\(https?:\/\/[^\s)]+\)/.test(content);
 }
@@ -134,6 +139,9 @@ function inferEditGenerationMode(
     if (hint === 'image') {
         return { forcedModelId: IMAGE_GENERATION_MODEL, forceSearchMode: false };
     }
+    if (hint === 'video') {
+        return { forcedModelId: VIDEO_GENERATION_MODEL, forceSearchMode: false };
+    }
     if (hint === 'search') {
         return { forcedModelId: undefined as string | undefined, forceSearchMode: true };
     }
@@ -143,6 +151,13 @@ function inferEditGenerationMode(
         .find((message) => message.role === 'assistant');
     if (!nextAssistantMessage) {
         return { forcedModelId: undefined as string | undefined, forceSearchMode: false };
+    }
+
+    if (
+        nextAssistantMessage.model_id === VIDEO_GENERATION_MODEL
+        || hasVideoAttachment(nextAssistantMessage)
+    ) {
+        return { forcedModelId: VIDEO_GENERATION_MODEL, forceSearchMode: false };
     }
 
     if (
@@ -472,8 +487,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
                 window.sessionStorage.removeItem(PENDING_GENERATION_SEARCH_KEY);
                 window.sessionStorage.removeItem(PENDING_SYSTEM_PROMPT_KEY);
-                if (pendingGenerationModelId === IMAGE_GENERATION_MODEL) {
-                    generateResponse(messages, IMAGE_GENERATION_MODEL, undefined, false);
+                if (
+                    pendingGenerationModelId === IMAGE_GENERATION_MODEL
+                    || pendingGenerationModelId === VIDEO_GENERATION_MODEL
+                ) {
+                    generateResponse(messages, pendingGenerationModelId, undefined, false);
                     return;
                 }
                 generateResponse(messages, undefined, pendingSystemPrompt || undefined, pendingGenerationSearch === '1');
@@ -490,7 +508,9 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         setIsLoading(true);
         // Reset the failure flag when user manually sends a message.
         clearLastRequestFailure();
-        const targetModel = options.mode === 'image' ? IMAGE_GENERATION_MODEL : model;
+        const isImageMode = options.mode === 'image' || options.mode === 'image-edit';
+        const isVideoMode = options.mode === 'video';
+        const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : (isVideoMode ? VIDEO_GENERATION_MODEL : model);
         const useSearch = options.mode === 'search';
 
         const userMsg: ChatViewMessage = {

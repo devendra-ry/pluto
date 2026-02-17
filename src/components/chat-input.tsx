@@ -8,7 +8,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle, ImagePlus, ScrollText } from 'lucide-react';
+import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle, ImagePlus, ScrollText, Film } from 'lucide-react';
 import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
@@ -35,7 +35,7 @@ interface LocalAttachmentItem {
     error?: string;
 }
 
-export type ChatSubmitMode = 'chat' | 'image' | 'search';
+export type ChatSubmitMode = 'chat' | 'image' | 'image-edit' | 'video' | 'search';
 
 export interface ChatSubmitOptions {
     mode: ChatSubmitMode;
@@ -89,8 +89,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const attachmentItemsRef = useRef<LocalAttachmentItem[]>([]);
     const [value, setValue] = useState(initialValue);
     const [isImageMode, setIsImageMode] = useState(false);
+    const [isImageEditMode, setIsImageEditMode] = useState(false);
+    const [isVideoMode, setIsVideoMode] = useState(false);
     const [isSearchMode, setIsSearchMode] = useState(false);
     const isImageModeRef = useRef(false);
+    const isImageEditModeRef = useRef(false);
+    const isVideoModeRef = useRef(false);
     const isSearchModeRef = useRef(false);
     const [isSystemMenuOpen, setIsSystemMenuOpen] = useState(false);
     const [systemPromptDraft, setSystemPromptDraft] = useState(systemPrompt);
@@ -104,16 +108,19 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const supportsImages = !isOpenRouterModel && selectedModel.capabilities.includes('vision');
     const supportsPdfs = !isOpenRouterModel && (selectedModel.capabilities.includes('pdf') || selectedModel.provider === 'google');
     const supportsTexts = !isOpenRouterModel && selectedModel.provider === 'google';
-    const supportsAttachments = !isImageMode && (supportsImages || supportsPdfs || supportsTexts);
+    const supportsImageUploads = isImageEditMode || isVideoMode || supportsImages;
+    const supportsAttachments = isImageEditMode || isVideoMode || (!isImageMode && (supportsImages || supportsPdfs || supportsTexts));
     const activeAttachmentItems = useMemo(
         () => (supportsAttachments ? attachmentItems : []),
         [supportsAttachments, attachmentItems]
     );
-    const acceptedMimeTypes = [
-        supportsImages ? 'image/png,image/jpeg,image/webp,image/gif' : '',
-        supportsPdfs ? 'application/pdf' : '',
-        supportsTexts ? 'text/plain' : '',
-    ].filter(Boolean).join(',');
+    const acceptedMimeTypes = (isImageEditMode || isVideoMode)
+        ? 'image/png,image/jpeg,image/webp,image/gif'
+        : [
+            supportsImages ? 'image/png,image/jpeg,image/webp,image/gif' : '',
+            supportsPdfs ? 'application/pdf' : '',
+            supportsTexts ? 'text/plain' : '',
+        ].filter(Boolean).join(',');
 
     const uploadedAttachments = useMemo(
         () => activeAttachmentItems.filter((item) => item.status === 'uploaded' && item.attachment).map((item) => item.attachment as Attachment),
@@ -133,6 +140,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
     const getSubmitMode = useCallback<() => ChatSubmitMode>(() => {
         if (isImageModeRef.current) return 'image';
+        if (isImageEditModeRef.current) return 'image-edit';
+        if (isVideoModeRef.current) return 'video';
         if (isSearchModeRef.current) return 'search';
         return 'chat';
     }, []);
@@ -260,6 +269,23 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     };
 
     const handleSubmit = async () => {
+        const submitMode = getSubmitMode();
+        if (submitMode === 'image-edit' && uploadedAttachments.length === 0) {
+            showToast('Attach at least one image for Image Edit mode', 'error');
+            return;
+        }
+        if (submitMode === 'image-edit' && !value.trim()) {
+            showToast('Enter an edit prompt for Image Edit mode', 'error');
+            return;
+        }
+        if (submitMode === 'video' && uploadedAttachments.length === 0) {
+            showToast('Attach an image for Image to Video mode', 'error');
+            return;
+        }
+        if (submitMode === 'video' && !value.trim()) {
+            showToast('Enter an animation prompt for Image to Video mode', 'error');
+            return;
+        }
         if ((!value.trim() && uploadedAttachments.length === 0) || hasUploadingAttachments || hasFailedAttachments || isLoading) {
             return;
         }
@@ -278,7 +304,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
         try {
             const submitted = await onSubmit(submittedValue, submittedAttachments, {
-                mode: getSubmitMode()
+                mode: submitMode
             });
             if (submitted === false) {
                 // Restore only if user has not started drafting a new message yet.
@@ -314,6 +340,56 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         isImageModeRef.current = next;
         setIsImageMode(next);
         if (next) {
+            isImageEditModeRef.current = false;
+            setIsImageEditMode(false);
+            isVideoModeRef.current = false;
+            setIsVideoMode(false);
+            isSearchModeRef.current = false;
+            setIsSearchMode(false);
+            const tasks = uploadTasksRef.current;
+            for (const cancel of tasks.values()) {
+                cancel();
+            }
+            tasks.clear();
+            setAttachmentItems([]);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
+    }, []);
+
+    const handleToggleImageEditMode = useCallback(() => {
+        const next = !isImageEditModeRef.current;
+        isImageEditModeRef.current = next;
+        setIsImageEditMode(next);
+        if (next) {
+            isImageModeRef.current = false;
+            setIsImageMode(false);
+            isVideoModeRef.current = false;
+            setIsVideoMode(false);
+            isSearchModeRef.current = false;
+            setIsSearchMode(false);
+            const tasks = uploadTasksRef.current;
+            for (const cancel of tasks.values()) {
+                cancel();
+            }
+            tasks.clear();
+            setAttachmentItems([]);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
+    }, []);
+
+    const handleToggleVideoMode = useCallback(() => {
+        const next = !isVideoModeRef.current;
+        isVideoModeRef.current = next;
+        setIsVideoMode(next);
+        if (next) {
+            isImageModeRef.current = false;
+            setIsImageMode(false);
+            isImageEditModeRef.current = false;
+            setIsImageEditMode(false);
             isSearchModeRef.current = false;
             setIsSearchMode(false);
             const tasks = uploadTasksRef.current;
@@ -340,6 +416,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         if (next) {
             isImageModeRef.current = false;
             setIsImageMode(false);
+            isImageEditModeRef.current = false;
+            setIsImageEditMode(false);
+            isVideoModeRef.current = false;
+            setIsVideoMode(false);
         }
     }, [isLoading, supportsSearchMode, showToast]);
 
@@ -390,10 +470,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             return;
         }
 
-        const availableSlots = Math.max(0, MAX_ATTACHMENTS_PER_MESSAGE - activeAttachmentItems.length);
+        const maxAttachmentsForMode = isVideoModeRef.current ? 1 : MAX_ATTACHMENTS_PER_MESSAGE;
+        const availableSlots = Math.max(0, maxAttachmentsForMode - activeAttachmentItems.length);
         const selectedFiles = files.slice(0, availableSlots);
         if (selectedFiles.length === 0) {
-            showToast(`Maximum ${MAX_ATTACHMENTS_PER_MESSAGE} attachments allowed per message`, 'error');
+            if (isVideoModeRef.current) {
+                showToast('Image to Video mode supports exactly one image attachment', 'error');
+            } else {
+                showToast(`Maximum ${MAX_ATTACHMENTS_PER_MESSAGE} attachments allowed per message`, 'error');
+            }
             return;
         }
 
@@ -402,9 +487,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             const mimeType = file.type || '';
             const isKnownType = isSupportedAttachmentMimeType(mimeType);
             const isAllowedType =
-                (isImageAttachment(mimeType) && supportsImages) ||
-                (isPdfAttachment(mimeType) && supportsPdfs) ||
-                (isTextAttachment(mimeType) && supportsTexts);
+                (isImageEditModeRef.current || isVideoModeRef.current)
+                    ? isImageAttachment(mimeType)
+                    : (
+                        (isImageAttachment(mimeType) && supportsImages) ||
+                        (isPdfAttachment(mimeType) && supportsPdfs) ||
+                        (isTextAttachment(mimeType) && supportsTexts)
+                    );
 
             if (!isKnownType || !isAllowedType) {
                 return {
@@ -433,9 +522,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         if (files.length > selectedFiles.length) {
             const addedCount = selectedFiles.length;
             showToast(
-                source === 'paste'
-                    ? `Only ${addedCount} pasted image(s) were added due to attachment limit`
-                    : `Only ${addedCount} file(s) were added due to attachment limit`,
+                isVideoModeRef.current
+                    ? 'Image to Video mode accepts only one image; extra files were ignored'
+                    : (
+                        source === 'paste'
+                            ? `Only ${addedCount} pasted image(s) were added due to attachment limit`
+                            : `Only ${addedCount} file(s) were added due to attachment limit`
+                    ),
                 'error'
             );
         }
@@ -474,7 +567,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             return;
         }
 
-        if (!supportsAttachments || !supportsImages) {
+        if (!supportsAttachments || !supportsImageUploads) {
             showToast('Pasted images are not supported for the current mode/model', 'error');
             return;
         }
@@ -525,7 +618,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         placeholder={
                             isImageMode
                                 ? 'Describe the image you want to generate...'
-                                : (isSearchMode ? 'Ask anything with web search...' : 'Type your message here...')
+                                : (
+                                    isImageEditMode
+                                        ? 'Describe how you want to edit the attached image(s)...'
+                                        : (
+                                            isVideoMode
+                                                ? 'Describe how the attached image should animate...'
+                                                : (isSearchMode ? 'Ask anything with web search...' : 'Type your message here...')
+                                        )
+                                )
                         }
                         className="w-full px-5 pt-4 pb-3 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
                     />
@@ -697,7 +798,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                             className="w-full min-h-[120px] max-h-[260px] resize-y rounded-xl bg-[#120f18] border border-[#3a3045]/70 p-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-[#7a58a3]/70"
                                         />
                                         <p className="text-[11px] text-zinc-500">
-                                            Applied to chat responses only. Ignored in Image mode.
+                                            Applied to chat responses only. Ignored in Image, Image Edit, and Image to Video modes.
                                         </p>
                                         <div className="flex items-center justify-end gap-2">
                                             <Button
@@ -737,12 +838,46 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 <span className="hidden md:inline">Image</span>
                             </Button>
 
+                            <Button
+                                variant="ghost"
+                                type="button"
+                                onClick={handleToggleImageEditMode}
+                                className={cn(
+                                    "h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
+                                    isImageEditMode
+                                        ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
+                                        : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
+                                )}
+                            >
+                                <ImagePlus className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                                <span className="hidden md:inline">Image Edit</span>
+                            </Button>
+
+                            <Button
+                                variant="ghost"
+                                type="button"
+                                onClick={handleToggleVideoMode}
+                                className={cn(
+                                    "h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
+                                    isVideoMode
+                                        ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
+                                        : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
+                                )}
+                            >
+                                <Film className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                                <span className="hidden md:inline">Image to Video</span>
+                            </Button>
+
                             <div className="group/attach relative flex flex-col items-center">
                                 <Button
                                     variant="ghost"
                                     type="button"
                                     onClick={handleAttachClick}
-                                    disabled={isLoading || !supportsAttachments || activeAttachmentItems.length >= MAX_ATTACHMENTS_PER_MESSAGE}
+                                    disabled={
+                                        isLoading
+                                        || !supportsAttachments
+                                        || activeAttachmentItems.length >= (isVideoMode ? 1 : MAX_ATTACHMENTS_PER_MESSAGE)
+                                    }
                                     className="h-8 w-8 md:w-11 p-0 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all flex items-center justify-center"
                                 >
                                     <Paperclip className="h-3.5 w-3.5 md:h-4 md:w-4" />
@@ -753,6 +888,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                         <span className="text-[#fce7ef]">
                                             {isImageMode
                                                 ? 'Attachments are disabled in Image mode'
+                                                : isImageEditMode
+                                                ? 'Attach one or more images to edit'
+                                                : isVideoMode
+                                                ? 'Attach one image to animate'
                                                 : supportsAttachments
                                                 ? 'Attach file'
                                                 : 'Use an attachment-capable model to attach files'}

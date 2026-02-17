@@ -13,7 +13,7 @@ import {
 import { addMessage } from '@/hooks/use-messages';
 import { touchThread, updateThreadTitleIfNewChat } from '@/hooks/use-threads';
 import { cancelScheduledFrame, scheduleFrame, type ScheduledFrame } from '@/lib/animation-frame';
-import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL } from '@/lib/constants';
+import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { type ChatViewMessage, type RetryMode } from '@/lib/chat-view';
 import { sanitizeThreadTitle } from '@/lib/sanitize';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
@@ -200,14 +200,16 @@ export function useChatStream({
         const activeModelId = forcedModelId || model;
         const selectedModel = AVAILABLE_MODELS.find(m => m.id === activeModelId);
         const isImageGenModel = activeModelId === IMAGE_GENERATION_MODEL;
-        const useSearch = !isImageGenModel && forceSearchMode;
-        const supportsReasoning = isImageGenModel ? false : (selectedModel?.supportsReasoning ?? true);
-        const retryMode: RetryMode = isImageGenModel ? 'image' : (useSearch ? 'search' : 'chat');
+        const isVideoGenModel = activeModelId === VIDEO_GENERATION_MODEL;
+        const isMediaGenModel = isImageGenModel || isVideoGenModel;
+        const useSearch = !isMediaGenModel && forceSearchMode;
+        const supportsReasoning = isMediaGenModel ? false : (selectedModel?.supportsReasoning ?? true);
+        const retryMode: RetryMode = isImageGenModel ? 'image' : (isVideoGenModel ? 'video' : (useSearch ? 'search' : 'chat'));
         persistRetryModeHintRef.current?.(lastMsg.id, retryMode);
 
         const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && reasoningEffort === 'low');
 
-        dispatch({ type: 'BEGIN', messageId: lastMsg.id, thinking: !isImageGenModel && willThink });
+        dispatch({ type: 'BEGIN', messageId: lastMsg.id, thinking: !isMediaGenModel && willThink });
         abortControllerRef.current = new AbortController();
 
         const assistantMsgId = crypto.randomUUID();
@@ -300,13 +302,18 @@ export function useChatStream({
         };
 
         try {
-            if (isImageGenModel) {
-                const response = await fetch('/api/images', {
+            if (isImageGenModel || isVideoGenModel) {
+                const userImageAttachments = (lastMsg.attachments ?? []).filter((attachment) =>
+                    attachment.mimeType.startsWith('image/')
+                );
+                const endpoint = isVideoGenModel ? '/api/videos' : '/api/images';
+                const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         threadId: chatId,
                         prompt: lastMsg.content,
+                        attachments: userImageAttachments,
                     }),
                     signal: abortControllerRef.current.signal,
                 });
@@ -316,21 +323,29 @@ export function useChatStream({
                     const errorMessage =
                         typeof payload.error === 'string'
                             ? payload.error
-                            : 'Failed to generate image';
+                            : (
+                                isVideoGenModel
+                                    ? 'Failed to generate video'
+                                    : (userImageAttachments.length > 0 ? 'Failed to edit image' : 'Failed to generate image')
+                            );
                     throw new Error(errorMessage);
                 }
 
                 const attachment = isAttachment(payload.attachment) ? payload.attachment : null;
                 if (!attachment) {
-                    throw new Error('Image generation did not return a valid attachment');
+                    throw new Error(isVideoGenModel
+                        ? 'Video generation did not return a valid attachment'
+                        : 'Image generation did not return a valid attachment');
                 }
 
                 const revisedPrompt = typeof payload.revisedPrompt === 'string'
                     ? payload.revisedPrompt.trim()
                     : '';
+                const operation = typeof payload.operation === 'string' ? payload.operation : '';
+                const isEditOperation = !isVideoGenModel && (operation === 'edit' || userImageAttachments.length > 0);
                 const assistantContent = revisedPrompt
-                    ? `Generated image.\nPrompt rewrite: ${revisedPrompt}`
-                    : 'Generated image.';
+                    ? `${isVideoGenModel ? 'Generated video.' : (isEditOperation ? 'Edited image.' : 'Generated image.')}\nPrompt rewrite: ${revisedPrompt}`
+                    : (isVideoGenModel ? 'Generated video.' : (isEditOperation ? 'Edited image.' : 'Generated image.'));
 
                 setMessages((prev) => {
                     const updated = [...prev];
@@ -348,7 +363,11 @@ export function useChatStream({
 
                 const persisted = await persistAssistantMessage(assistantContent, undefined, [attachment]);
                 if (!persisted) {
-                    throw new Error('Failed to persist generated image');
+                    throw new Error(
+                        isVideoGenModel
+                            ? 'Failed to persist generated video'
+                            : (isEditOperation ? 'Failed to persist edited image' : 'Failed to persist generated image')
+                    );
                 }
                 return;
             }
@@ -367,7 +386,7 @@ export function useChatStream({
                     })),
                     model: activeModelId,
                     reasoningEffort,
-                    systemPrompt: !isImageGenModel && effectiveSystemPrompt ? effectiveSystemPrompt : undefined,
+                    systemPrompt: !isMediaGenModel && effectiveSystemPrompt ? effectiveSystemPrompt : undefined,
                     search: useSearch,
                 }),
                 signal: abortControllerRef.current.signal,
@@ -461,7 +480,7 @@ export function useChatStream({
         } catch (error) {
             cancelScheduledAssistantFrame();
             if (error instanceof Error && error.name === 'AbortError') {
-                if (isImageGenModel) {
+                if (isMediaGenModel) {
                     hasPendingAssistantUpdate = false;
                     setMessages(currentMessages);
                     return;

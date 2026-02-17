@@ -150,6 +150,7 @@ export const ChatMessage = memo(function ChatMessage({
                                     <div className={cn("space-y-2", content ? "mt-3" : "")}>
                                         {attachments.map((attachment) => {
                                             const isImage = attachment.mimeType.startsWith('image/');
+                                            const isVideo = attachment.mimeType.startsWith('video/');
                                             return (
                                                 <a
                                                     key={attachment.id}
@@ -168,6 +169,18 @@ export const ChatMessage = memo(function ChatMessage({
                                                                 className="h-auto w-full object-cover"
                                                                 unoptimized
                                                             />
+                                                        </div>
+                                                    )}
+                                                    {isVideo && (
+                                                        <div className="mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+                                                            <video
+                                                                controls
+                                                                preload="metadata"
+                                                                playsInline
+                                                                className="h-auto w-full"
+                                                            >
+                                                                <source src={attachment.url} type={attachment.mimeType} />
+                                                            </video>
                                                         </div>
                                                     )}
                                                     <p className="text-sm text-zinc-200 truncate">{attachment.name}</p>
@@ -350,6 +363,7 @@ export const ChatMessage = memo(function ChatMessage({
                         <div className={cn("space-y-2", content ? "mt-3" : "")}>
                             {attachments.map((attachment) => {
                                 const isImage = attachment.mimeType.startsWith('image/');
+                                const isVideo = attachment.mimeType.startsWith('video/');
                                 return (
                                     <a
                                         key={attachment.id}
@@ -368,6 +382,18 @@ export const ChatMessage = memo(function ChatMessage({
                                                     className="h-auto w-full object-cover"
                                                     unoptimized
                                                 />
+                                            </div>
+                                        )}
+                                        {isVideo && (
+                                            <div className="mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+                                                <video
+                                                    controls
+                                                    preload="metadata"
+                                                    playsInline
+                                                    className="h-auto w-full"
+                                                >
+                                                    <source src={attachment.url} type={attachment.mimeType} />
+                                                </video>
                                             </div>
                                         )}
                                         <p className="text-sm text-zinc-200 truncate">{attachment.name}</p>

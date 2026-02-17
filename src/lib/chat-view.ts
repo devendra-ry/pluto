@@ -9,4 +9,4 @@ export interface ChatViewMessage {
     model_id?: string;
 }
 
-export type RetryMode = 'chat' | 'search' | 'image';
+export type RetryMode = 'chat' | 'search' | 'image' | 'video';

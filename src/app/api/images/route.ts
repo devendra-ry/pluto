@@ -15,6 +15,12 @@ const DEFAULT_GUIDANCE_SCALE = 0;
 const DEFAULT_SHIFT = 3;
 const DEFAULT_MAX_SEQUENCE_LENGTH = 512;
 const DEFAULT_Z_IMAGE_GENERATE_URL = 'https://chutes-z-image-turbo.chutes.ai/generate';
+const DEFAULT_QWEN_IMAGE_EDIT_URL = 'https://chutes-qwen-image-edit-2511.chutes.ai/generate';
+const DEFAULT_EDIT_IMAGE_WIDTH = 1328;
+const DEFAULT_EDIT_IMAGE_HEIGHT = 1328;
+const DEFAULT_EDIT_TRUE_CFG_SCALE = 4;
+const DEFAULT_EDIT_NUM_INFERENCE_STEPS = 40;
+const DEFAULT_EDIT_NEGATIVE_PROMPT = '';
 const IMAGE_RETRYABLE_STATUSES = new Set([502, 503]);
 const IMAGE_RETRY_ATTEMPTS = 2;
 const IMAGE_RETRY_BACKOFF_MS = 350;
@@ -35,6 +41,14 @@ function getImageApiUrlCandidates() {
         process.env.CHUTES_Z_IMAGE_API_URL,
         process.env.CHUTES_Z_IMAGE_URL,
         DEFAULT_Z_IMAGE_GENERATE_URL,
+    ]);
+}
+
+function getImageEditApiUrlCandidates() {
+    return uniqueUrls([
+        process.env.CHUTES_QWEN_IMAGE_EDIT_API_URL,
+        process.env.CHUTES_QWEN_IMAGE_EDIT_URL,
+        DEFAULT_QWEN_IMAGE_EDIT_URL,
     ]);
 }
 
@@ -93,6 +107,87 @@ function extensionForMimeType(mimeType: string) {
     }
 }
 
+function isAttachment(value: unknown): value is Attachment {
+    if (!value || typeof value !== 'object') return false;
+    const record = value as Record<string, unknown>;
+    return (
+        typeof record.id === 'string'
+        && typeof record.name === 'string'
+        && typeof record.mimeType === 'string'
+        && typeof record.size === 'number'
+        && typeof record.path === 'string'
+        && typeof record.url === 'string'
+    );
+}
+
+function normalizePotentialBase64(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    const dataUrlMatch = trimmed.match(/^data:[^;]+;base64,(.+)$/i);
+    return dataUrlMatch?.[1]?.trim() || trimmed;
+}
+
+function readStringOrFirst(value: unknown) {
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
+    return '';
+}
+
+function tryExtractImageField(payload: Record<string, unknown>) {
+    const directData = Array.isArray(payload.data) ? payload.data[0] : null;
+    const sources: Array<Record<string, unknown>> = [payload];
+    if (directData && typeof directData === 'object') {
+        sources.push(directData as Record<string, unknown>);
+    }
+
+    for (const source of sources) {
+        const b64Keys = ['image', 'image_b64', 'output', 'result', 'b64_json', 'base64'];
+        for (const key of b64Keys) {
+            const raw = source[key];
+            const value = readStringOrFirst(raw);
+            if (!value) continue;
+            if (/^https?:\/\//i.test(value)) {
+                return { url: value, declaredMimeType: getText(source.mime_type) || getText(source.content_type) };
+            }
+            return { b64: normalizePotentialBase64(value), declaredMimeType: getText(source.mime_type) || getText(source.content_type) };
+        }
+
+        const nested = source.output;
+        if (nested && typeof nested === 'object') {
+            const nestedRecord = nested as Record<string, unknown>;
+            const nestedB64 =
+                readStringOrFirst(nestedRecord.image)
+                || readStringOrFirst(nestedRecord.image_b64)
+                || readStringOrFirst(nestedRecord.b64_json)
+                || readStringOrFirst(nestedRecord.base64);
+            if (nestedB64) {
+                return {
+                    b64: normalizePotentialBase64(nestedB64),
+                    declaredMimeType: getText(nestedRecord.mime_type) || getText(nestedRecord.content_type),
+                };
+            }
+            const nestedUrl = readStringOrFirst(nestedRecord.url) || readStringOrFirst(nestedRecord.image_url);
+            if (nestedUrl) {
+                return {
+                    url: nestedUrl,
+                    declaredMimeType: getText(nestedRecord.mime_type) || getText(nestedRecord.content_type),
+                };
+            }
+        }
+
+        const url =
+            readStringOrFirst(source.url)
+            || readStringOrFirst(source.image_url)
+            || readStringOrFirst(source.output_url)
+            || readStringOrFirst(source.result_url);
+        if (url) {
+            return { url, declaredMimeType: getText(source.mime_type) || getText(source.content_type) };
+        }
+    }
+
+    return null;
+}
+
 async function resolveImageData(
     payload: Record<string, unknown>,
     signal?: AbortSignal
@@ -146,6 +241,42 @@ async function resolveImageData(
     throw new Error('Image API response missing both b64_json and url');
 }
 
+async function resolveImageEditData(
+    payload: Record<string, unknown>,
+    signal?: AbortSignal
+): Promise<{ bytes: Uint8Array; mimeType: string; revisedPrompt?: string }> {
+    const extracted = tryExtractImageField(payload);
+    if (extracted?.b64) {
+        const bytes = Uint8Array.from(Buffer.from(extracted.b64, 'base64'));
+        if (bytes.length === 0) {
+            throw new Error('Image edit API returned empty base64 payload');
+        }
+        return {
+            bytes,
+            mimeType: inferImageMimeType(bytes, extracted.declaredMimeType || 'image/png'),
+        };
+    }
+
+    if (extracted?.url) {
+        const response = await fetch(extracted.url, { method: 'GET', signal });
+        if (!response.ok) {
+            throw new Error(`Image edit download failed (${response.status})`);
+        }
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.length === 0) {
+            throw new Error('Image edit API returned empty image');
+        }
+        const headerMimeType = getText(response.headers.get('content-type') || '').split(';')[0] || extracted.declaredMimeType || 'image/png';
+        return {
+            bytes,
+            mimeType: inferImageMimeType(bytes, headerMimeType),
+        };
+    }
+
+    // Fallback for providers that return OpenAI-like { data: [{ b64_json|url }] }.
+    return resolveImageData(payload, signal);
+}
+
 interface GeneratedImage {
     bytes: Uint8Array;
     mimeType: string;
@@ -177,6 +308,9 @@ export async function POST(req: Request) {
     const threadId = getText(record.threadId);
     const requestedModel = getText(record.model);
     const prompt = getText(record.prompt);
+    const inputAttachments = Array.isArray(record.attachments)
+        ? record.attachments.filter((value) => isAttachment(value))
+        : [];
     const width = DEFAULT_IMAGE_WIDTH;
     const height = DEFAULT_IMAGE_HEIGHT;
     const numInferenceSteps = DEFAULT_NUM_INFERENCE_STEPS;
@@ -200,34 +334,19 @@ export async function POST(req: Request) {
 
     try {
         await assertThreadOwnership(supabase, threadId, user.id);
+        const attachmentPrefix = `${user.id}/${threadId}/`;
+        for (const attachment of inputAttachments) {
+            if (!attachment.path.startsWith(attachmentPrefix)) {
+                return jsonResponse({ error: 'Invalid attachment path' }, 400);
+            }
+        }
 
-        const targetApiUrls = getImageApiUrlCandidates();
-        const requestAttempts: Array<{ label: string; body: Record<string, unknown> }> = [];
-
-        requestAttempts.push({
-            label: 'z-image-generate',
-            body: {
-                prompt,
-                width,
-                height,
-                num_inference_steps: numInferenceSteps,
-                guidance_scale: guidanceScale,
-                shift,
-                max_sequence_length: DEFAULT_MAX_SEQUENCE_LENGTH,
-            },
-        });
-        requestAttempts.push({
-            label: 'prompt-only-fallback',
-            body: { prompt },
-        });
-        requestAttempts.push({
-            label: 'input-args-fallback',
-            body: {
-                input_args: {
-                    prompt,
-                },
-            },
-        });
+        const imageEditAttachments = inputAttachments.filter((attachment) => attachment.mimeType.startsWith('image/'));
+        if (inputAttachments.length > 0 && imageEditAttachments.length === 0) {
+            return jsonResponse({ error: 'Image edit requires at least one image attachment' }, 400);
+        }
+        const isImageEditRequest = imageEditAttachments.length > 0;
+        const bucket = getAttachmentsBucketName();
 
         let generated: GeneratedImage | null = null;
         let lastStatus = 0;
@@ -235,9 +354,23 @@ export async function POST(req: Request) {
         let lastAttemptLabel = '';
         let lastAttemptUrl = '';
 
-        for (const apiUrl of targetApiUrls) {
-            for (const attempt of requestAttempts) {
-                lastAttemptLabel = attempt.label;
+        if (isImageEditRequest) {
+            const imageB64s: string[] = [];
+            for (const attachment of imageEditAttachments) {
+                const { data, error } = await supabase.storage.from(bucket).download(attachment.path);
+                if (error || !data) {
+                    return jsonResponse({ error: error?.message || `Failed to read attachment ${attachment.name}` }, 400);
+                }
+                const bytes = new Uint8Array(await data.arrayBuffer());
+                if (bytes.length === 0) {
+                    return jsonResponse({ error: `Attachment ${attachment.name} is empty` }, 400);
+                }
+                imageB64s.push(Buffer.from(bytes).toString('base64'));
+            }
+
+            const targetApiUrls = getImageEditApiUrlCandidates();
+            for (const apiUrl of targetApiUrls) {
+                lastAttemptLabel = 'qwen-image-edit';
                 lastAttemptUrl = apiUrl;
                 for (let retry = 0; retry <= IMAGE_RETRY_ATTEMPTS; retry++) {
                     const chutesResponse = await fetch(apiUrl, {
@@ -246,7 +379,16 @@ export async function POST(req: Request) {
                             'Content-Type': 'application/json',
                             'Authorization': `Bearer ${apiKey}`,
                         },
-                        body: JSON.stringify(attempt.body),
+                        body: JSON.stringify({
+                            prompt,
+                            image_b64s: imageB64s,
+                            width: DEFAULT_EDIT_IMAGE_WIDTH,
+                            height: DEFAULT_EDIT_IMAGE_HEIGHT,
+                            true_cfg_scale: DEFAULT_EDIT_TRUE_CFG_SCALE,
+                            num_inference_steps: DEFAULT_EDIT_NUM_INFERENCE_STEPS,
+                            negative_prompt: DEFAULT_EDIT_NEGATIVE_PROMPT,
+                            seed: null,
+                        }),
                         signal: req.signal,
                     });
 
@@ -281,24 +423,20 @@ export async function POST(req: Request) {
                             }
                         } catch (error) {
                             if (IS_DEV) {
-                                console.warn('[images] Failed to parse upstream JSON response', {
-                                    attempt: attempt.label,
-                                    apiUrl,
-                                    error,
-                                });
+                                console.warn('[images] Failed to parse edit API JSON response', { apiUrl, error });
                             }
                             parsedPayload = null;
                         }
 
                         if (!parsedPayload) {
-                            throw new Error(rawText || 'Unsupported image API response format');
+                            throw new Error(rawText || 'Unsupported image edit API response format');
                         }
 
-                        generated = await resolveImageData(parsedPayload, req.signal);
+                        generated = await resolveImageEditData(parsedPayload, req.signal);
                         break;
                     } catch (error) {
                         lastStatus = chutesResponse.status || 500;
-                        lastErrorText = error instanceof Error ? error.message : 'Failed to parse image API response';
+                        lastErrorText = error instanceof Error ? error.message : 'Failed to parse image edit API response';
                     }
 
                     break;
@@ -306,32 +444,134 @@ export async function POST(req: Request) {
 
                 if (generated) break;
             }
+        } else {
+            const targetApiUrls = getImageApiUrlCandidates();
+            const requestAttempts: Array<{ label: string; body: Record<string, unknown> }> = [];
 
-            if (generated) {
-                break;
+            requestAttempts.push({
+                label: 'z-image-generate',
+                body: {
+                    prompt,
+                    width,
+                    height,
+                    num_inference_steps: numInferenceSteps,
+                    guidance_scale: guidanceScale,
+                    shift,
+                    max_sequence_length: DEFAULT_MAX_SEQUENCE_LENGTH,
+                },
+            });
+            requestAttempts.push({
+                label: 'prompt-only-fallback',
+                body: { prompt },
+            });
+            requestAttempts.push({
+                label: 'input-args-fallback',
+                body: {
+                    input_args: {
+                        prompt,
+                    },
+                },
+            });
+
+            for (const apiUrl of targetApiUrls) {
+                for (const attempt of requestAttempts) {
+                    lastAttemptLabel = attempt.label;
+                    lastAttemptUrl = apiUrl;
+                    for (let retry = 0; retry <= IMAGE_RETRY_ATTEMPTS; retry++) {
+                        const chutesResponse = await fetch(apiUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${apiKey}`,
+                            },
+                            body: JSON.stringify(attempt.body),
+                            signal: req.signal,
+                        });
+
+                        const contentType = getText(chutesResponse.headers.get('content-type') || '').toLowerCase();
+                        if (!chutesResponse.ok) {
+                            lastStatus = chutesResponse.status;
+                            lastErrorText = await chutesResponse.text().catch(() => '') || chutesResponse.statusText || 'Unknown upstream error';
+                            const shouldRetry = IMAGE_RETRYABLE_STATUSES.has(chutesResponse.status)
+                                && retry < IMAGE_RETRY_ATTEMPTS;
+                            if (shouldRetry) {
+                                await wait(IMAGE_RETRY_BACKOFF_MS * (retry + 1));
+                                continue;
+                            }
+                            break;
+                        }
+
+                        try {
+                            if (contentType.startsWith('image/')) {
+                                generated = {
+                                    bytes: new Uint8Array(await chutesResponse.arrayBuffer()),
+                                    mimeType: contentType.split(';')[0] || 'image/png',
+                                };
+                                break;
+                            }
+
+                            const rawText = await chutesResponse.text();
+                            let parsedPayload: Record<string, unknown> | null = null;
+                            try {
+                                const parsed = JSON.parse(rawText) as unknown;
+                                if (parsed && typeof parsed === 'object') {
+                                    parsedPayload = parsed as Record<string, unknown>;
+                                }
+                            } catch (error) {
+                                if (IS_DEV) {
+                                    console.warn('[images] Failed to parse upstream JSON response', {
+                                        attempt: attempt.label,
+                                        apiUrl,
+                                        error,
+                                    });
+                                }
+                                parsedPayload = null;
+                            }
+
+                            if (!parsedPayload) {
+                                throw new Error(rawText || 'Unsupported image API response format');
+                            }
+
+                            generated = await resolveImageData(parsedPayload, req.signal);
+                            break;
+                        } catch (error) {
+                            lastStatus = chutesResponse.status || 500;
+                            lastErrorText = error instanceof Error ? error.message : 'Failed to parse image API response';
+                        }
+
+                        break;
+                    }
+
+                    if (generated) break;
+                }
+
+                if (generated) {
+                    break;
+                }
             }
         }
 
         if (!generated) {
-            const missingModelSpecificUrl =
-                !getText(process.env.CHUTES_Z_IMAGE_API_URL || '')
-                && !getText(process.env.CHUTES_Z_IMAGE_URL || '');
-            if (lastStatus === 404 && missingModelSpecificUrl) {
-                return jsonResponse({
-                    error: 'Image endpoint returned 404. Set CHUTES_Z_IMAGE_API_URL for z-image-turbo.',
-                }, 502);
+            if (!isImageEditRequest) {
+                const missingModelSpecificUrl =
+                    !getText(process.env.CHUTES_Z_IMAGE_API_URL || '')
+                    && !getText(process.env.CHUTES_Z_IMAGE_URL || '');
+                if (lastStatus === 404 && missingModelSpecificUrl) {
+                    return jsonResponse({
+                        error: 'Image endpoint returned 404. Set CHUTES_Z_IMAGE_API_URL for z-image-turbo.',
+                    }, 502);
+                }
             }
             const mappedStatus = lastStatus >= 400 && lastStatus < 500 ? lastStatus : 502;
             return jsonResponse({
-                error: `Chutes image API error (${lastAttemptLabel || 'unknown attempt'} @ ${lastAttemptUrl || 'unknown url'}): ${lastErrorText || 'No error details provided'}`,
+                error: `Chutes ${isImageEditRequest ? 'image edit' : 'image'} API error (${lastAttemptLabel || 'unknown attempt'} @ ${lastAttemptUrl || 'unknown url'}): ${lastErrorText || 'No error details provided'}`,
             }, mappedStatus);
         }
 
-        const bucket = getAttachmentsBucketName();
         const attachmentId = crypto.randomUUID();
         const mimeType = generated.mimeType;
         const extension = extensionForMimeType(mimeType);
-        const fileName = `generated-${Date.now()}-${attachmentId.slice(0, 8)}${extension}`;
+        const fileName = `${isImageEditRequest ? 'edited' : 'generated'}-${Date.now()}-${attachmentId.slice(0, 8)}${extension}`;
         const objectPath = `${user.id}/${threadId}/${fileName}`;
 
         const { error: uploadError } = await supabase.storage
@@ -343,7 +583,7 @@ export async function POST(req: Request) {
             });
 
         if (uploadError) {
-            return jsonResponse({ error: uploadError.message || 'Failed to store generated image' }, 500);
+            return jsonResponse({ error: uploadError.message || 'Failed to store processed image' }, 500);
         }
 
         const attachment: Attachment = {
@@ -358,9 +598,10 @@ export async function POST(req: Request) {
         return jsonResponse({
             attachment,
             revisedPrompt: generated.revisedPrompt ?? null,
+            operation: isImageEditRequest ? 'edit' : 'generate',
         });
     } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to generate image';
+        const message = error instanceof Error ? error.message : 'Failed to process image request';
         return jsonResponse({ error: message }, 500);
     }
 }

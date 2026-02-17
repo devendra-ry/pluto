@@ -144,7 +144,7 @@ values (
   'chat-attachments',
   false,
   104857600,
-  array['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf', 'text/plain']
+  array['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'video/mp4', 'application/pdf', 'text/plain']
 )
 on conflict (id) do update
 set

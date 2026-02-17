@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY } from '@/lib/constants';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY, VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -117,10 +117,11 @@ export default function HomePage() {
     options: ChatSubmitOptions
   ) => {
     if (!value.trim() && attachments.length === 0) return false;
-    const isImageMode = options.mode === 'image';
+    const isImageMode = options.mode === 'image' || options.mode === 'image-edit';
+    const isVideoMode = options.mode === 'video';
     const isSearchMode = options.mode === 'search';
-    const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : null;
-    const messageModel = isImageMode ? IMAGE_GENERATION_MODEL : model;
+    const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : (isVideoMode ? VIDEO_GENERATION_MODEL : null);
+    const messageModel = isImageMode ? IMAGE_GENERATION_MODEL : (isVideoMode ? VIDEO_GENERATION_MODEL : model);
 
     setIsLoading(true);
     try {
@@ -143,7 +144,7 @@ export default function HomePage() {
       } else {
         window.sessionStorage.removeItem(PENDING_GENERATION_SEARCH_KEY);
       }
-      if (systemPrompt.trim().length > 0 && !isImageMode) {
+      if (systemPrompt.trim().length > 0 && !isImageMode && !isVideoMode) {
         window.sessionStorage.setItem(PENDING_SYSTEM_PROMPT_KEY, systemPrompt.trim());
       } else {
         window.sessionStorage.removeItem(PENDING_SYSTEM_PROMPT_KEY);
