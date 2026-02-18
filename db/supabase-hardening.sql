@@ -135,7 +135,7 @@ alter table public.threads
   drop constraint if exists threads_system_prompt_length_check;
 alter table public.threads
   add constraint threads_system_prompt_length_check
-  check (system_prompt is null or length(system_prompt) <= 12000);
+  check (system_prompt is null or length(system_prompt) <= 50000);
 
 -- 3) Storage bucket + RLS for user-scoped attachments.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
