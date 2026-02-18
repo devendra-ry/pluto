@@ -257,14 +257,6 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         capabilities: ['reasoning', 'effortControl', 'toolCalling'],
     },
     {
-        id: 'moonshotai/Kimi-K2-Instruct-0905',
-        name: 'Kimi K2 Instruct',
-        description: 'Kimi instruct model (Non-Thinking)',
-        provider: 'moonshotai',
-        supportsReasoning: false,
-        capabilities: [],
-    },
-    {
         id: 'gemini-3-flash-preview',
         name: 'Gemini 3 Flash',
         description: 'Google\'s latest reasoning model',
