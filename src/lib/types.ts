@@ -32,7 +32,7 @@ export const ChatRequestSchema = z.object({
     messages: z.array(ChatMessageSchema).min(1, 'At least one message is required'),
     model: z.string().min(1, 'Model is required'),
     reasoningEffort: ReasoningEffortSchema.optional(),
-    systemPrompt: z.string().max(12000, 'System prompt must be 12000 characters or less').optional(),
+    systemPrompt: z.string().max(50000, 'System prompt must be 50000 characters or less').optional(),
     search: z.boolean().optional(),
 });
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
