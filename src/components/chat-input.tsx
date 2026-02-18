@@ -8,7 +8,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle, ImagePlus, ScrollText, Film } from 'lucide-react';
+import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle, ImagePlus, ScrollText, Film, MessageSquare } from 'lucide-react';
 import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
@@ -65,6 +65,18 @@ const REASONING_OPTIONS: { value: ReasoningEffort; label: string; pro?: boolean 
     { value: 'low', label: 'Low' },
     { value: 'medium', label: 'Medium' },
     { value: 'high', label: 'High' },
+];
+
+const MODE_OPTIONS: Array<{
+    value: ChatSubmitMode;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+}> = [
+    { value: 'chat', label: 'Chat', icon: MessageSquare },
+    { value: 'search', label: 'Search', icon: Globe },
+    { value: 'image', label: 'Image', icon: ImagePlus },
+    { value: 'image-edit', label: 'Image Edit', icon: ImagePlus },
+    { value: 'video', label: 'Image to Video', icon: Film },
 ];
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
@@ -129,6 +141,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const hasUploadingAttachments = activeAttachmentItems.some((item) => item.status === 'uploading');
     const hasFailedAttachments = activeAttachmentItems.some((item) => item.status === 'failed');
     const hasSystemPrompt = systemPrompt.trim().length > 0;
+    const activeMode: ChatSubmitMode = isImageMode
+        ? 'image'
+        : isImageEditMode
+        ? 'image-edit'
+        : isVideoMode
+        ? 'video'
+        : isSearchMode
+        ? 'search'
+        : 'chat';
+    const activeModeOption = MODE_OPTIONS.find((option) => option.value === activeMode) ?? MODE_OPTIONS[0];
 
     useEffect(() => {
         if (!supportsSearchMode && isSearchMode) {
@@ -335,93 +357,40 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         }
     };
 
-    const handleToggleImageMode = useCallback(() => {
-        const next = !isImageModeRef.current;
-        isImageModeRef.current = next;
-        setIsImageMode(next);
-        if (next) {
-            isImageEditModeRef.current = false;
-            setIsImageEditMode(false);
-            isVideoModeRef.current = false;
-            setIsVideoMode(false);
-            isSearchModeRef.current = false;
-            setIsSearchMode(false);
-            const tasks = uploadTasksRef.current;
-            for (const cancel of tasks.values()) {
-                cancel();
-            }
-            tasks.clear();
-            setAttachmentItems([]);
-            if (fileInputRef.current) {
-                fileInputRef.current.value = '';
-            }
-        }
-    }, []);
-
-    const handleToggleImageEditMode = useCallback(() => {
-        const next = !isImageEditModeRef.current;
-        isImageEditModeRef.current = next;
-        setIsImageEditMode(next);
-        if (next) {
-            isImageModeRef.current = false;
-            setIsImageMode(false);
-            isVideoModeRef.current = false;
-            setIsVideoMode(false);
-            isSearchModeRef.current = false;
-            setIsSearchMode(false);
-            const tasks = uploadTasksRef.current;
-            for (const cancel of tasks.values()) {
-                cancel();
-            }
-            tasks.clear();
-            setAttachmentItems([]);
-            if (fileInputRef.current) {
-                fileInputRef.current.value = '';
-            }
-        }
-    }, []);
-
-    const handleToggleVideoMode = useCallback(() => {
-        const next = !isVideoModeRef.current;
-        isVideoModeRef.current = next;
-        setIsVideoMode(next);
-        if (next) {
-            isImageModeRef.current = false;
-            setIsImageMode(false);
-            isImageEditModeRef.current = false;
-            setIsImageEditMode(false);
-            isSearchModeRef.current = false;
-            setIsSearchMode(false);
-            const tasks = uploadTasksRef.current;
-            for (const cancel of tasks.values()) {
-                cancel();
-            }
-            tasks.clear();
-            setAttachmentItems([]);
-            if (fileInputRef.current) {
-                fileInputRef.current.value = '';
-            }
-        }
-    }, []);
-
-    const handleToggleSearchMode = useCallback(() => {
-        if (isLoading) return;
-        if (!supportsSearchMode) {
+    const setMode = useCallback((mode: ChatSubmitMode) => {
+        if (mode === activeMode) return;
+        if (mode === 'search' && !supportsSearchMode) {
             showToast('Search is available only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite', 'error');
             return;
         }
-        const next = !isSearchModeRef.current;
-        isSearchModeRef.current = next;
-        setIsSearchMode(next);
-        if (next) {
-            isImageModeRef.current = false;
-            setIsImageMode(false);
-            isImageEditModeRef.current = false;
-            setIsImageEditMode(false);
-            isVideoModeRef.current = false;
-            setIsVideoMode(false);
+        if (mode === 'search' && isLoading) return;
+
+        const nextImage = mode === 'image';
+        const nextImageEdit = mode === 'image-edit';
+        const nextVideo = mode === 'video';
+        const nextSearch = mode === 'search';
+
+        isImageModeRef.current = nextImage;
+        setIsImageMode(nextImage);
+        isImageEditModeRef.current = nextImageEdit;
+        setIsImageEditMode(nextImageEdit);
+        isVideoModeRef.current = nextVideo;
+        setIsVideoMode(nextVideo);
+        isSearchModeRef.current = nextSearch;
+        setIsSearchMode(nextSearch);
+
+        if (nextImage || nextImageEdit || nextVideo) {
+            const tasks = uploadTasksRef.current;
+            for (const cancel of tasks.values()) {
+                cancel();
+            }
+            tasks.clear();
+            setAttachmentItems([]);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
         }
-    }, [isLoading, supportsSearchMode, showToast]);
+    }, [activeMode, supportsSearchMode, showToast, isLoading]);
 
     const handleAttachClick = () => {
         if (isLoading || !supportsAttachments) return;
@@ -699,15 +668,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         </div>
                     )}
 
-                    <div className="flex items-center justify-between px-3 md:px-4 pb-3 pt-1">
-                        <div className="flex items-center gap-1.5 md:gap-3">
-                            <ModelSelector
-                                currentModel={currentModel}
-                                onModelChange={onModelChange}
-                            />
+                    <div className="flex items-center justify-between gap-2 px-3 md:px-4 pb-3 pt-1">
+                        <div className="flex min-w-0 items-center gap-1.5 md:gap-3">
+                            <div className="shrink-0">
+                                <ModelSelector
+                                    currentModel={currentModel}
+                                    onModelChange={onModelChange}
+                                />
+                            </div>
 
                             {selectedModel.supportsReasoning && (
-                                <div className="group/reasoning relative flex flex-col items-center">
+                                <div className="group/reasoning relative flex shrink-0 flex-col items-center">
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
                                             <Button
@@ -750,20 +721,46 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 </div>
                             )}
 
-                            <Button
-                                variant="ghost"
-                                type="button"
-                                onClick={handleToggleSearchMode}
-                                className={cn(
-                                    "h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
-                                    isSearchMode
-                                        ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
-                                        : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
-                                )}
-                            >
-                                <Globe className="h-3.5 w-3.5 md:h-4 md:w-4" />
-                                <span className="hidden md:inline">Search</span>
-                            </Button>
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        type="button"
+                                        className={cn(
+                                            "shrink-0 h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
+                                            activeMode !== 'chat'
+                                                ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
+                                                : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
+                                        )}
+                                    >
+                                        <activeModeOption.icon className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                                        <span className="hidden md:inline">{activeModeOption.label}</span>
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent
+                                    align="start"
+                                    side="top"
+                                    className="w-44 bg-[#1a1520] border-[#3a3045] shadow-2xl mb-2"
+                                >
+                                    {MODE_OPTIONS.map((option) => (
+                                        <DropdownMenuItem
+                                            key={option.value}
+                                            disabled={option.value === 'search' && !supportsSearchMode}
+                                            onClick={() => setMode(option.value)}
+                                            className={cn(
+                                                "flex items-center gap-2 py-2 px-3 cursor-pointer focus:bg-[#2a2535]",
+                                                option.value === activeMode && "bg-[#2a2535]"
+                                            )}
+                                        >
+                                            <option.icon className="h-4 w-4 text-zinc-400 shrink-0" />
+                                            <span className="text-zinc-100 flex-1">{option.label}</span>
+                                            {option.value === activeMode && (
+                                                <Check className="h-4 w-4 text-emerald-400 shrink-0" />
+                                            )}
+                                        </DropdownMenuItem>
+                                    ))}
+                                </DropdownMenuContent>
+                            </DropdownMenu>
 
                             <DropdownMenu open={isSystemMenuOpen} onOpenChange={setIsSystemMenuOpen}>
                                 <DropdownMenuTrigger asChild>
@@ -771,7 +768,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                         variant="ghost"
                                         type="button"
                                         className={cn(
-                                            "h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
+                                            "shrink-0 h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
                                             hasSystemPrompt
                                                 ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
                                                 : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
@@ -823,52 +820,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 </DropdownMenuContent>
                             </DropdownMenu>
 
-                            <Button
-                                variant="ghost"
-                                type="button"
-                                onClick={handleToggleImageMode}
-                                className={cn(
-                                    "h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
-                                    isImageMode
-                                        ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
-                                        : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
-                                )}
-                            >
-                                <ImagePlus className="h-3.5 w-3.5 md:h-4 md:w-4" />
-                                <span className="hidden md:inline">Image</span>
-                            </Button>
-
-                            <Button
-                                variant="ghost"
-                                type="button"
-                                onClick={handleToggleImageEditMode}
-                                className={cn(
-                                    "h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
-                                    isImageEditMode
-                                        ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
-                                        : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
-                                )}
-                            >
-                                <ImagePlus className="h-3.5 w-3.5 md:h-4 md:w-4" />
-                                <span className="hidden md:inline">Image Edit</span>
-                            </Button>
-
-                            <Button
-                                variant="ghost"
-                                type="button"
-                                onClick={handleToggleVideoMode}
-                                className={cn(
-                                    "h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
-                                    isVideoMode
-                                        ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
-                                        : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
-                                )}
-                            >
-                                <Film className="h-3.5 w-3.5 md:h-4 md:w-4" />
-                                <span className="hidden md:inline">Image to Video</span>
-                            </Button>
-
-                            <div className="group/attach relative flex flex-col items-center">
+                            <div className="group/attach relative flex shrink-0 flex-col items-center">
                                 <Button
                                     variant="ghost"
                                     type="button"
@@ -906,7 +858,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 type="button"
                                 size="icon"
                                 onClick={onStop}
-                                className="h-8 w-8 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-all border border-red-500/20"
+                                className="shrink-0 h-8 w-8 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-all border border-red-500/20"
                             >
                                 <Square className="h-3.5 w-3.5 fill-current" />
                             </Button>
@@ -921,7 +873,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                     hasFailedAttachments ||
                                     (!value.trim() && uploadedAttachments.length === 0)
                                 }
-                                className="h-8 w-8 rounded-lg bg-[#3a283e] hover:bg-[#4a354e] text-pink-300/80 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="shrink-0 h-8 w-8 rounded-lg bg-[#3a283e] hover:bg-[#4a354e] text-pink-300/80 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <ArrowUp className="h-4 w-4" />
                             </Button>
