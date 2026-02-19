@@ -190,6 +190,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const chatInputRef = useRef<ChatInputHandle>(null);
     const [model, setModel] = useState<string>(DEFAULT_MODEL);
+    const modelRef = useRef<string>(DEFAULT_MODEL);
     const [messages, setMessages] = useState<ChatViewMessage[]>([]);
     const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
     const [systemPrompt, setSystemPrompt] = useState('');
@@ -267,8 +268,13 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         persistRetryModeHintRef.current = persistRetryModeHint;
     }, [persistRetryModeHint]);
 
+    useEffect(() => {
+        modelRef.current = model;
+    }, [model]);
+
     const applyThreadState = useCallback(() => {
         if (thread?.model && isSelectableChatModel(thread.model)) {
+            modelRef.current = thread.model;
             setModel(thread.model);
         }
         if (thread?.reasoning_effort) {
@@ -432,11 +438,13 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         if (!isSelectableChatModel(newModel)) {
             return;
         }
-        const previousModel = model;
+        const previousModel = modelRef.current;
+        modelRef.current = newModel;
         setModel(newModel);
         try {
             await updateThreadModel(chatId, newModel);
         } catch (error) {
+            modelRef.current = previousModel;
             setModel(previousModel);
             const message = error instanceof Error ? error.message : 'Failed to update model';
             showToast(message, 'error');
@@ -494,7 +502,12 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     generateResponse(messages, pendingGenerationModelId, undefined, false);
                     return;
                 }
-                generateResponse(messages, undefined, pendingSystemPrompt || undefined, pendingGenerationSearch === '1');
+                generateResponse(
+                    messages,
+                    pendingGenerationModelId || lastMessage.model_id || undefined,
+                    pendingSystemPrompt || undefined,
+                    pendingGenerationSearch === '1'
+                );
             }
         }
     }, [messages, isLoading, isThinking, generateResponse, chatId, lastRequestFailed, messagesChatId]);
@@ -510,7 +523,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         clearLastRequestFailure();
         const isImageMode = options.mode === 'image' || options.mode === 'image-edit';
         const isVideoMode = options.mode === 'video';
-        const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : (isVideoMode ? VIDEO_GENERATION_MODEL : model);
+        const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : (isVideoMode ? VIDEO_GENERATION_MODEL : modelRef.current);
         const useSearch = options.mode === 'search';
 
         const userMsg: ChatViewMessage = {
@@ -539,7 +552,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             showToast('Failed to send message. Please try again.', 'error');
             return false;
         }
-    }, [chatId, generateResponse, showToast, model, setIsLoading, clearLastRequestFailure]);
+    }, [chatId, generateResponse, showToast, setIsLoading, clearLastRequestFailure]);
 
     const handleSend = useCallback(async (value: string, attachments: Attachment[], options: ChatSubmitOptions) => {
         if ((!value.trim() && attachments.length === 0) || isLoading) return false;
@@ -564,7 +577,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
         const editedMessageAttachments = localMessages[msgIndex].attachments ?? [];
         const { forcedModelId, forceSearchMode } = inferEditGenerationMode(localMessages, msgIndex, chatId);
-        const editModelId = forcedModelId ?? model;
+        const editModelId = forcedModelId ?? modelRef.current;
 
         const anchorBeforeEditId = msgIndex > 0 ? localMessages[msgIndex - 1].id : null;
         try {
@@ -643,7 +656,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         generateResponse,
         refreshStoredMessages,
         setIsLoading,
-        model,
         confirmDestructiveDelete,
     ]);
 

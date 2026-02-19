@@ -27,6 +27,7 @@ export default function HomePage() {
   const router = useRouter();
   const chatInputRef = useRef<ChatInputHandle>(null);
   const [model, setModel] = useState(DEFAULT_MODEL);
+  const modelRef = useRef(DEFAULT_MODEL);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -39,6 +40,10 @@ export default function HomePage() {
     draftThreadIdRef.current = draftThreadId;
   }, [draftThreadId]);
 
+  useEffect(() => {
+    modelRef.current = model;
+  }, [model]);
+
   const ensureThread = useCallback(async () => {
     if (draftThreadIdRef.current) {
       return draftThreadIdRef.current;
@@ -49,7 +54,7 @@ export default function HomePage() {
     }
 
     const createPromise = (async () => {
-      const thread = await createThread(model, reasoningEffort, systemPrompt);
+      const thread = await createThread(modelRef.current, reasoningEffort, systemPrompt);
       draftThreadIdRef.current = thread.id;
       setDraftThreadId(thread.id);
       return thread.id;
@@ -63,7 +68,7 @@ export default function HomePage() {
         ensureThreadPromiseRef.current = null;
       }
     }
-  }, [model, reasoningEffort, systemPrompt]);
+  }, [reasoningEffort, systemPrompt]);
 
   const handleSystemPromptChange = async (nextPrompt: string) => {
     const previousPrompt = systemPrompt;
@@ -80,7 +85,8 @@ export default function HomePage() {
   };
 
   const handleModelChange = (nextModel: string) => {
-    const previousModel = model;
+    const previousModel = modelRef.current;
+    modelRef.current = nextModel;
     setModel(nextModel);
     if (!draftThreadId) return;
 
@@ -88,7 +94,11 @@ export default function HomePage() {
       try {
         await updateThreadModel(draftThreadId, nextModel);
       } catch (error) {
-        setModel((current) => current === nextModel ? previousModel : current);
+        setModel((current) => {
+          const resolved = current === nextModel ? previousModel : current;
+          modelRef.current = resolved;
+          return resolved;
+        });
         const message = error instanceof Error ? error.message : 'Failed to update model';
         showToast(message, 'error');
       }
@@ -117,11 +127,12 @@ export default function HomePage() {
     options: ChatSubmitOptions
   ) => {
     if (!value.trim() && attachments.length === 0) return false;
+    const effectiveModel = modelRef.current;
     const isImageMode = options.mode === 'image' || options.mode === 'image-edit';
     const isVideoMode = options.mode === 'video';
     const isSearchMode = options.mode === 'search';
-    const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : (isVideoMode ? VIDEO_GENERATION_MODEL : null);
-    const messageModel = isImageMode ? IMAGE_GENERATION_MODEL : (isVideoMode ? VIDEO_GENERATION_MODEL : model);
+    const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : (isVideoMode ? VIDEO_GENERATION_MODEL : effectiveModel);
+    const messageModel = isImageMode ? IMAGE_GENERATION_MODEL : (isVideoMode ? VIDEO_GENERATION_MODEL : effectiveModel);
 
     setIsLoading(true);
     try {
@@ -134,11 +145,7 @@ export default function HomePage() {
       // 3. Navigate to the new chat
       // The ChatPageClient will pick up the user message and start generating
       window.sessionStorage.setItem(PENDING_GENERATION_THREAD_KEY, threadId);
-      if (targetModel) {
-        window.sessionStorage.setItem(PENDING_GENERATION_MODEL_KEY, targetModel);
-      } else {
-        window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
-      }
+      window.sessionStorage.setItem(PENDING_GENERATION_MODEL_KEY, targetModel);
       if (isSearchMode && !isImageMode) {
         window.sessionStorage.setItem(PENDING_GENERATION_SEARCH_KEY, '1');
       } else {
