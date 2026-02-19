@@ -156,12 +156,13 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         capabilities: ['reasoning', 'effortControl'],
     },
     {
-        id: 'Qwen/Qwen3-Coder-Next',
-        name: 'Qwen 3 Coder Next',
-        description: 'Advanced coding model (Thinking)',
+        id: 'Qwen/Qwen3-Coder-Next-TEE',
+        name: 'Qwen 3 Coder Next TEE',
+        description: 'Advanced coding model with TEE security (Thinking)',
         provider: 'Qwen',
         supportsReasoning: true,
-        capabilities: ['reasoning', 'toolCalling'],
+        usesThinkingParam: true,
+        capabilities: ['reasoning', 'effortControl', 'toolCalling'],
     },
     {
         id: 'Qwen/Qwen3-VL-235B-A22B-Instruct',
