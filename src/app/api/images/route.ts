@@ -18,23 +18,9 @@ const DEFAULT_Z_IMAGE_GENERATE_URL = 'https://chutes-z-image-turbo.chutes.ai/gen
 const DEFAULT_HUNYUAN_IMAGE_GENERATE_URL = 'https://chutes-hunyuan-image-3.chutes.ai/generate';
 const DEFAULT_QWEN_IMAGE_GENERATE_URL = 'https://chutes-qwen-image-2512.chutes.ai/generate';
 const DEFAULT_HIDREAM_IMAGE_GENERATE_URL = 'https://chutes-hidream.chutes.ai/generate';
-const DEFAULT_FLUX_IMAGE_GENERATE_URL = 'https://image.chutes.ai/generate';
-const DEFAULT_NETA_IMAGE_GENERATE_URL = 'https://image.chutes.ai/generate';
-const DEFAULT_NOVA_FURRY_IMAGE_GENERATE_URL = 'https://image.chutes.ai/generate';
-const DEFAULT_ILUST_MIX_IMAGE_GENERATE_URL = 'https://image.chutes.ai/generate';
-const DEFAULT_ANIMIJ_IMAGE_GENERATE_URL = 'https://image.chutes.ai/generate';
-const DEFAULT_ILLUSTRIJ_IMAGE_GENERATE_URL = 'https://image.chutes.ai/generate';
-const DEFAULT_HASSAKU_XL_IMAGE_GENERATE_URL = 'https://image.chutes.ai/generate';
 const HUNYUAN_IMAGE_MODEL = 'tencent/hunyuan-image-3';
 const QWEN_IMAGE_MODEL = 'Qwen/Qwen-Image-2512';
 const HIDREAM_IMAGE_MODEL = 'hidream/hidream';
-const FLUX_IMAGE_MODEL = 'FLUX.1-schnell';
-const NETA_IMAGE_MODEL = 'neta-lumina';
-const NOVA_FURRY_IMAGE_MODEL = 'NovaFurryXL';
-const ILUST_MIX_IMAGE_MODEL = 'iLustMix';
-const ANIMIJ_IMAGE_MODEL = 'Animij';
-const ILLUSTRIJ_IMAGE_MODEL = 'Illustrij';
-const HASSAKU_XL_IMAGE_MODEL = 'HassakuXL';
 const DEFAULT_HUNYUAN_STEPS = 50;
 const DEFAULT_HUNYUAN_CFG = 7.5;
 const DEFAULT_QWEN_GENERATE_WIDTH = 1328;
@@ -44,27 +30,6 @@ const DEFAULT_QWEN_GENERATE_TRUE_CFG_SCALE = 4;
 const DEFAULT_QWEN_GENERATE_NEGATIVE_PROMPT = '';
 const DEFAULT_HIDREAM_GUIDANCE_SCALE = 5;
 const DEFAULT_HIDREAM_STEPS = 50;
-const DEFAULT_FLUX_GUIDANCE_SCALE = 7.5;
-const DEFAULT_FLUX_STEPS = 50;
-const DEFAULT_FLUX_NEGATIVE_PROMPT = 'blur, distortion, low quality';
-const DEFAULT_NETA_GUIDANCE_SCALE = 7.5;
-const DEFAULT_NETA_STEPS = 50;
-const DEFAULT_NETA_NEGATIVE_PROMPT = 'blur, distortion, low quality';
-const DEFAULT_NOVA_FURRY_GUIDANCE_SCALE = 7.5;
-const DEFAULT_NOVA_FURRY_STEPS = 50;
-const DEFAULT_NOVA_FURRY_NEGATIVE_PROMPT = 'blur, distortion, low quality';
-const DEFAULT_ILUST_MIX_GUIDANCE_SCALE = 7.5;
-const DEFAULT_ILUST_MIX_STEPS = 50;
-const DEFAULT_ILUST_MIX_NEGATIVE_PROMPT = 'blur, distortion, low quality';
-const DEFAULT_ANIMIJ_GUIDANCE_SCALE = 7.5;
-const DEFAULT_ANIMIJ_STEPS = 50;
-const DEFAULT_ANIMIJ_NEGATIVE_PROMPT = 'blur, distortion, low quality';
-const DEFAULT_ILLUSTRIJ_GUIDANCE_SCALE = 7.5;
-const DEFAULT_ILLUSTRIJ_STEPS = 50;
-const DEFAULT_ILLUSTRIJ_NEGATIVE_PROMPT = 'blur, distortion, low quality';
-const DEFAULT_HASSAKU_XL_GUIDANCE_SCALE = 7.5;
-const DEFAULT_HASSAKU_XL_STEPS = 50;
-const DEFAULT_HASSAKU_XL_NEGATIVE_PROMPT = 'blur, distortion, low quality';
 const DEFAULT_QWEN_IMAGE_EDIT_URL = 'https://chutes-qwen-image-edit-2511.chutes.ai/generate';
 const DEFAULT_EDIT_IMAGE_WIDTH = 1328;
 const DEFAULT_EDIT_IMAGE_HEIGHT = 1328;
@@ -117,58 +82,6 @@ function getImageApiUrlCandidates(modelId: string) {
             process.env.CHUTES_HIDREAM_API_URL,
             process.env.CHUTES_HIDREAM_URL,
             DEFAULT_HIDREAM_IMAGE_GENERATE_URL,
-        ]
-        : modelId === FLUX_IMAGE_MODEL
-        ? [
-            process.env.CHUTES_FLUX_SCHNELL_API_URL,
-            process.env.CHUTES_FLUX_SCHNELL_URL,
-            process.env.CHUTES_FLUX_IMAGE_API_URL,
-            process.env.CHUTES_FLUX_IMAGE_URL,
-            DEFAULT_FLUX_IMAGE_GENERATE_URL,
-        ]
-        : modelId === NETA_IMAGE_MODEL
-        ? [
-            process.env.CHUTES_NETA_LUMINA_API_URL,
-            process.env.CHUTES_NETA_LUMINA_URL,
-            process.env.CHUTES_NETA_IMAGE_API_URL,
-            process.env.CHUTES_NETA_IMAGE_URL,
-            DEFAULT_NETA_IMAGE_GENERATE_URL,
-        ]
-        : modelId === NOVA_FURRY_IMAGE_MODEL
-        ? [
-            process.env.CHUTES_NOVA_FURRY_XL_API_URL,
-            process.env.CHUTES_NOVA_FURRY_XL_URL,
-            process.env.CHUTES_NOVA_FURRY_API_URL,
-            process.env.CHUTES_NOVA_FURRY_URL,
-            DEFAULT_NOVA_FURRY_IMAGE_GENERATE_URL,
-        ]
-        : modelId === ILUST_MIX_IMAGE_MODEL
-        ? [
-            process.env.CHUTES_ILUST_MIX_API_URL,
-            process.env.CHUTES_ILUST_MIX_URL,
-            process.env.CHUTES_ILUST_API_URL,
-            process.env.CHUTES_ILUST_URL,
-            DEFAULT_ILUST_MIX_IMAGE_GENERATE_URL,
-        ]
-        : modelId === ANIMIJ_IMAGE_MODEL
-        ? [
-            process.env.CHUTES_ANIMIJ_API_URL,
-            process.env.CHUTES_ANIMIJ_URL,
-            DEFAULT_ANIMIJ_IMAGE_GENERATE_URL,
-        ]
-        : modelId === ILLUSTRIJ_IMAGE_MODEL
-        ? [
-            process.env.CHUTES_ILLUSTRIJ_API_URL,
-            process.env.CHUTES_ILLUSTRIJ_URL,
-            DEFAULT_ILLUSTRIJ_IMAGE_GENERATE_URL,
-        ]
-        : modelId === HASSAKU_XL_IMAGE_MODEL
-        ? [
-            process.env.CHUTES_HASSAKU_XL_API_URL,
-            process.env.CHUTES_HASSAKU_XL_URL,
-            process.env.CHUTES_HASSAKU_API_URL,
-            process.env.CHUTES_HASSAKU_URL,
-            DEFAULT_HASSAKU_XL_IMAGE_GENERATE_URL,
         ]
         : [];
 
@@ -245,174 +158,6 @@ function getImageRequestAttempts(modelId: string, prompt: string, width: number,
             {
                 label: 'hidream-prompt-only-fallback',
                 body: { prompt },
-            },
-        ] as const;
-    }
-
-    if (modelId === FLUX_IMAGE_MODEL) {
-        return [
-            {
-                label: 'flux-schnell-generate',
-                body: {
-                    model: FLUX_IMAGE_MODEL,
-                    prompt,
-                    negative_prompt: DEFAULT_FLUX_NEGATIVE_PROMPT,
-                    guidance_scale: DEFAULT_FLUX_GUIDANCE_SCALE,
-                    width,
-                    height,
-                    num_inference_steps: DEFAULT_FLUX_STEPS,
-                },
-            },
-            {
-                label: 'flux-schnell-prompt-only-fallback',
-                body: {
-                    model: FLUX_IMAGE_MODEL,
-                    prompt,
-                },
-            },
-        ] as const;
-    }
-
-    if (modelId === NETA_IMAGE_MODEL) {
-        return [
-            {
-                label: 'neta-lumina-generate',
-                body: {
-                    model: NETA_IMAGE_MODEL,
-                    prompt,
-                    negative_prompt: DEFAULT_NETA_NEGATIVE_PROMPT,
-                    guidance_scale: DEFAULT_NETA_GUIDANCE_SCALE,
-                    width,
-                    height,
-                    num_inference_steps: DEFAULT_NETA_STEPS,
-                },
-            },
-            {
-                label: 'neta-lumina-prompt-only-fallback',
-                body: {
-                    model: NETA_IMAGE_MODEL,
-                    prompt,
-                },
-            },
-        ] as const;
-    }
-
-    if (modelId === NOVA_FURRY_IMAGE_MODEL) {
-        return [
-            {
-                label: 'nova-furry-generate',
-                body: {
-                    model: NOVA_FURRY_IMAGE_MODEL,
-                    prompt,
-                    negative_prompt: DEFAULT_NOVA_FURRY_NEGATIVE_PROMPT,
-                    guidance_scale: DEFAULT_NOVA_FURRY_GUIDANCE_SCALE,
-                    width,
-                    height,
-                    num_inference_steps: DEFAULT_NOVA_FURRY_STEPS,
-                },
-            },
-            {
-                label: 'nova-furry-prompt-only-fallback',
-                body: {
-                    model: NOVA_FURRY_IMAGE_MODEL,
-                    prompt,
-                },
-            },
-        ] as const;
-    }
-
-    if (modelId === ILUST_MIX_IMAGE_MODEL) {
-        return [
-            {
-                label: 'ilust-mix-generate',
-                body: {
-                    model: ILUST_MIX_IMAGE_MODEL,
-                    prompt,
-                    negative_prompt: DEFAULT_ILUST_MIX_NEGATIVE_PROMPT,
-                    guidance_scale: DEFAULT_ILUST_MIX_GUIDANCE_SCALE,
-                    width,
-                    height,
-                    num_inference_steps: DEFAULT_ILUST_MIX_STEPS,
-                },
-            },
-            {
-                label: 'ilust-mix-prompt-only-fallback',
-                body: {
-                    model: ILUST_MIX_IMAGE_MODEL,
-                    prompt,
-                },
-            },
-        ] as const;
-    }
-
-    if (modelId === ANIMIJ_IMAGE_MODEL) {
-        return [
-            {
-                label: 'animij-generate',
-                body: {
-                    model: ANIMIJ_IMAGE_MODEL,
-                    prompt,
-                    negative_prompt: DEFAULT_ANIMIJ_NEGATIVE_PROMPT,
-                    guidance_scale: DEFAULT_ANIMIJ_GUIDANCE_SCALE,
-                    width,
-                    height,
-                    num_inference_steps: DEFAULT_ANIMIJ_STEPS,
-                },
-            },
-            {
-                label: 'animij-prompt-only-fallback',
-                body: {
-                    model: ANIMIJ_IMAGE_MODEL,
-                    prompt,
-                },
-            },
-        ] as const;
-    }
-
-    if (modelId === ILLUSTRIJ_IMAGE_MODEL) {
-        return [
-            {
-                label: 'illustrij-generate',
-                body: {
-                    model: ILLUSTRIJ_IMAGE_MODEL,
-                    prompt,
-                    negative_prompt: DEFAULT_ILLUSTRIJ_NEGATIVE_PROMPT,
-                    guidance_scale: DEFAULT_ILLUSTRIJ_GUIDANCE_SCALE,
-                    width,
-                    height,
-                    num_inference_steps: DEFAULT_ILLUSTRIJ_STEPS,
-                },
-            },
-            {
-                label: 'illustrij-prompt-only-fallback',
-                body: {
-                    model: ILLUSTRIJ_IMAGE_MODEL,
-                    prompt,
-                },
-            },
-        ] as const;
-    }
-
-    if (modelId === HASSAKU_XL_IMAGE_MODEL) {
-        return [
-            {
-                label: 'hassaku-xl-generate',
-                body: {
-                    model: HASSAKU_XL_IMAGE_MODEL,
-                    prompt,
-                    negative_prompt: DEFAULT_HASSAKU_XL_NEGATIVE_PROMPT,
-                    guidance_scale: DEFAULT_HASSAKU_XL_GUIDANCE_SCALE,
-                    width,
-                    height,
-                    num_inference_steps: DEFAULT_HASSAKU_XL_STEPS,
-                },
-            },
-            {
-                label: 'hassaku-xl-prompt-only-fallback',
-                body: {
-                    model: HASSAKU_XL_IMAGE_MODEL,
-                    prompt,
-                },
             },
         ] as const;
     }

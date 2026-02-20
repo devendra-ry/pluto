@@ -276,13 +276,6 @@ export const IMAGE_GENERATION_MODELS: readonly ImageGenerationModel[] = [
     { id: 'tencent/hunyuan-image-3', name: 'Hunyuan Image 3.0' },
     { id: 'Qwen/Qwen-Image-2512', name: 'Qwen Image 2512' },
     { id: 'hidream/hidream', name: 'HiDream' },
-    { id: 'FLUX.1-schnell', name: 'FLUX.1 Schnell' },
-    { id: 'neta-lumina', name: 'Neta Lumina' },
-    { id: 'NovaFurryXL', name: 'NovaFurryXL' },
-    { id: 'iLustMix', name: 'iLustMix' },
-    { id: 'Animij', name: 'Animij' },
-    { id: 'Illustrij', name: 'Illustrij' },
-    { id: 'HassakuXL', name: 'HassakuXL' },
 ] as const;
 
 const IMAGE_GENERATION_MODEL_SET = new Set<string>(IMAGE_GENERATION_MODELS.map((model) => model.id));
