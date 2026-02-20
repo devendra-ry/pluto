@@ -255,9 +255,6 @@ export function useMessages(threadId: string | null) {
             if (!isActive || channel) {
                 return;
             }
-            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-                return;
-            }
 
             channel = supabase
                 .channel(`messages_${threadId}`)
@@ -284,12 +281,9 @@ export function useMessages(threadId: string | null) {
 
         const handleVisibilityChange = () => {
             if (!isActive) return;
-            if (document.visibilityState === 'hidden') {
-                unsubscribeRealtime();
-                return;
+            if (document.visibilityState === 'visible') {
+                void queryClient.invalidateQueries({ queryKey });
             }
-            void queryClient.invalidateQueries({ queryKey });
-            subscribeRealtime();
         };
 
         if (typeof document !== 'undefined') {

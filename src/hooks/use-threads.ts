@@ -198,9 +198,6 @@ export function useThreads() {
             if (!isActive || !localUserId || channelRef.current) {
                 return;
             }
-            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-                return;
-            }
 
             const channel = supabase
                 .channel(`threads_changes_${localUserId}`)
@@ -287,15 +284,8 @@ export function useThreads() {
 
         const handleVisibilityChange = () => {
             if (!isActive || !localUserId) return;
-            if (document.visibilityState === 'hidden') {
-                unsubscribeRealtime();
-                return;
-            }
-            void (async () => {
-                await fetchThreads();
-                if (!isActive) return;
-                subscribeRealtime();
-            })();
+            if (document.visibilityState !== 'visible') return;
+            void fetchThreads();
         };
         if (typeof document !== 'undefined') {
             document.addEventListener('visibilitychange', handleVisibilityChange);
