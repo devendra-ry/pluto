@@ -3,6 +3,7 @@ import { VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { type Attachment } from '@/lib/types';
 import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
 import { assertThreadOwnership } from '@/lib/thread-ownership';
+import { fetchWithSsrfGuard } from '@/lib/ssrf-guard';
 import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { createClient } from '@/utils/supabase/server';
 
@@ -133,7 +134,7 @@ async function extractVideoData(
             const value = readStringOrFirst(source[key]);
             if (!value) continue;
             if (/^https?:\/\//i.test(value)) {
-                const urlResponse = await fetch(value, { method: 'GET', signal });
+                const urlResponse = await fetchWithSsrfGuard(value, { signal });
                 if (!urlResponse.ok) {
                     throw new Error(`Video download failed (${urlResponse.status})`);
                 }
@@ -160,7 +161,7 @@ async function extractVideoData(
             || readStringOrFirst(source.result_url)
             || readStringOrFirst(source.url);
         if (url) {
-            const urlResponse = await fetch(url, { method: 'GET', signal });
+            const urlResponse = await fetchWithSsrfGuard(url, { signal });
             if (!urlResponse.ok) {
                 throw new Error(`Video download failed (${urlResponse.status})`);
             }

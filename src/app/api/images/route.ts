@@ -3,6 +3,7 @@ import { IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, isImageGenerationModel
 import { type Attachment } from '@/lib/types';
 import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
 import { assertThreadOwnership } from '@/lib/thread-ownership';
+import { fetchWithSsrfGuard } from '@/lib/ssrf-guard';
 import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { createClient } from '@/utils/supabase/server';
 
@@ -360,7 +361,7 @@ async function resolveImageData(
 
     const url = getText(entry.url);
     if (url) {
-        const response = await fetch(url, { method: 'GET', signal });
+        const response = await fetchWithSsrfGuard(url, { signal });
         if (!response.ok) {
             throw new Error(`Image download failed (${response.status})`);
         }
@@ -396,7 +397,7 @@ async function resolveImageEditData(
     }
 
     if (extracted?.url) {
-        const response = await fetch(extracted.url, { method: 'GET', signal });
+        const response = await fetchWithSsrfGuard(extracted.url, { signal });
         if (!response.ok) {
             throw new Error(`Image edit download failed (${response.status})`);
         }
