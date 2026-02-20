@@ -25,6 +25,7 @@ import {
     DEFAULT_MODEL,
     DEFAULT_REASONING_EFFORT,
     IMAGE_GENERATION_MODEL,
+    isImageGenerationModel,
     PENDING_GENERATION_MODEL_KEY,
     PENDING_GENERATION_SEARCH_KEY,
     PENDING_GENERATION_THREAD_KEY,
@@ -137,7 +138,10 @@ function inferEditGenerationMode(
 
     const hint = getRetryModeHint(threadId, anchorUser.id);
     if (hint === 'image') {
-        return { forcedModelId: IMAGE_GENERATION_MODEL, forceSearchMode: false };
+        return {
+            forcedModelId: isImageGenerationModel(anchorUser.model_id) ? anchorUser.model_id : IMAGE_GENERATION_MODEL,
+            forceSearchMode: false,
+        };
     }
     if (hint === 'video') {
         return { forcedModelId: VIDEO_GENERATION_MODEL, forceSearchMode: false };
@@ -161,10 +165,10 @@ function inferEditGenerationMode(
     }
 
     if (
-        nextAssistantMessage.model_id === IMAGE_GENERATION_MODEL
+        isImageGenerationModel(nextAssistantMessage.model_id)
         || hasImageAttachment(nextAssistantMessage)
     ) {
-        return { forcedModelId: IMAGE_GENERATION_MODEL, forceSearchMode: false };
+        return { forcedModelId: nextAssistantMessage.model_id || IMAGE_GENERATION_MODEL, forceSearchMode: false };
     }
 
     if (
@@ -228,6 +232,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     });
 
     const getInputMode = useCallback(() => chatInputRef.current?.getMode(), []);
+    const getInputImageModelId = useCallback(() => chatInputRef.current?.getImageModelId(), []);
 
     const confirmDestructiveDelete = useCallback((context: {
         action: 'retry' | 'edit';
@@ -258,6 +263,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         setIsLoading,
         showToast,
         getInputMode,
+        getInputImageModelId,
         generateResponse,
         refreshStoredMessages,
         locallyDeletedMessageIdsRef,
@@ -491,20 +497,21 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 const pendingGenerationModelId = window.sessionStorage.getItem(PENDING_GENERATION_MODEL_KEY);
                 const pendingGenerationSearch = window.sessionStorage.getItem(PENDING_GENERATION_SEARCH_KEY);
                 const pendingSystemPrompt = window.sessionStorage.getItem(PENDING_SYSTEM_PROMPT_KEY);
+                const pendingModelId = pendingGenerationModelId ?? undefined;
                 window.sessionStorage.removeItem(PENDING_GENERATION_THREAD_KEY);
                 window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
                 window.sessionStorage.removeItem(PENDING_GENERATION_SEARCH_KEY);
                 window.sessionStorage.removeItem(PENDING_SYSTEM_PROMPT_KEY);
                 if (
-                    pendingGenerationModelId === IMAGE_GENERATION_MODEL
-                    || pendingGenerationModelId === VIDEO_GENERATION_MODEL
+                    pendingModelId
+                    && (isImageGenerationModel(pendingModelId) || pendingModelId === VIDEO_GENERATION_MODEL)
                 ) {
-                    generateResponse(messages, pendingGenerationModelId, undefined, false);
+                    generateResponse(messages, pendingModelId, undefined, false);
                     return;
                 }
                 generateResponse(
                     messages,
-                    pendingGenerationModelId || lastMessage.model_id || undefined,
+                    pendingModelId || lastMessage.model_id || undefined,
                     pendingSystemPrompt || undefined,
                     pendingGenerationSearch === '1'
                 );
@@ -523,7 +530,10 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         clearLastRequestFailure();
         const isImageMode = options.mode === 'image' || options.mode === 'image-edit';
         const isVideoMode = options.mode === 'video';
-        const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : (isVideoMode ? VIDEO_GENERATION_MODEL : modelRef.current);
+        const selectedImageModelId = options.imageModelId && isImageGenerationModel(options.imageModelId)
+            ? options.imageModelId
+            : IMAGE_GENERATION_MODEL;
+        const targetModel = isImageMode ? selectedImageModelId : (isVideoMode ? VIDEO_GENERATION_MODEL : modelRef.current);
         const useSearch = options.mode === 'search';
 
         const userMsg: ChatViewMessage = {

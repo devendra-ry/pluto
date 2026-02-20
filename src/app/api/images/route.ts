@@ -1,10 +1,11 @@
 import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/lib/attachment-route-utils';
-import { IMAGE_GENERATION_MODEL } from '@/lib/constants';
+import { IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, isImageGenerationModel } from '@/lib/constants';
 import { type Attachment } from '@/lib/types';
 import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
 import { assertThreadOwnership } from '@/lib/thread-ownership';
 import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { createClient } from '@/utils/supabase/server';
+import { GoogleGenAI } from '@google/genai';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +16,20 @@ const DEFAULT_GUIDANCE_SCALE = 0;
 const DEFAULT_SHIFT = 3;
 const DEFAULT_MAX_SEQUENCE_LENGTH = 512;
 const DEFAULT_Z_IMAGE_GENERATE_URL = 'https://chutes-z-image-turbo.chutes.ai/generate';
+const DEFAULT_HUNYUAN_IMAGE_GENERATE_URL = 'https://chutes-hunyuan-image-3.chutes.ai/generate';
+const DEFAULT_QWEN_IMAGE_GENERATE_URL = 'https://chutes-qwen-image-2512.chutes.ai/generate';
+const HUNYUAN_IMAGE_MODEL = 'tencent/hunyuan-image-3';
+const QWEN_IMAGE_MODEL = 'Qwen/Qwen-Image-2512';
+const GOOGLE_IMAGEN_IMAGE_MODEL = 'google/imagen-4.0-generate-001';
+const GOOGLE_IMAGEN_API_MODEL = 'imagen-4.0-generate-001';
+const GOOGLE_IMAGEN_OUTPUT_COUNT = 1;
+const DEFAULT_HUNYUAN_STEPS = 50;
+const DEFAULT_HUNYUAN_CFG = 7.5;
+const DEFAULT_QWEN_GENERATE_WIDTH = 1328;
+const DEFAULT_QWEN_GENERATE_HEIGHT = 1328;
+const DEFAULT_QWEN_GENERATE_STEPS = 50;
+const DEFAULT_QWEN_GENERATE_TRUE_CFG_SCALE = 4;
+const DEFAULT_QWEN_GENERATE_NEGATIVE_PROMPT = '';
 const DEFAULT_QWEN_IMAGE_EDIT_URL = 'https://chutes-qwen-image-edit-2511.chutes.ai/generate';
 const DEFAULT_EDIT_IMAGE_WIDTH = 1328;
 const DEFAULT_EDIT_IMAGE_HEIGHT = 1328;
@@ -36,11 +51,37 @@ function uniqueUrls(urls: Array<string | undefined>) {
     return Array.from(set);
 }
 
-function getImageApiUrlCandidates() {
+function modelIdToEnvSuffix(modelId: string) {
+    return modelId.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+}
+
+function getImageApiUrlCandidates(modelId: string) {
+    const modelScopedEnvKey = `CHUTES_IMAGE_API_URL_${modelIdToEnvSuffix(modelId)}`;
+    const defaultModelUrls = modelId === IMAGE_GENERATION_MODEL
+        ? [
+            process.env.CHUTES_Z_IMAGE_API_URL,
+            process.env.CHUTES_Z_IMAGE_URL,
+            DEFAULT_Z_IMAGE_GENERATE_URL,
+        ]
+        : modelId === HUNYUAN_IMAGE_MODEL
+        ? [
+            process.env.CHUTES_HUNYUAN_IMAGE_API_URL,
+            process.env.CHUTES_HUNYUAN_IMAGE_URL,
+            DEFAULT_HUNYUAN_IMAGE_GENERATE_URL,
+        ]
+        : modelId === QWEN_IMAGE_MODEL
+        ? [
+            process.env.CHUTES_QWEN_IMAGE_2512_API_URL,
+            process.env.CHUTES_QWEN_IMAGE_2512_URL,
+            process.env.CHUTES_QWEN_IMAGE_API_URL,
+            process.env.CHUTES_QWEN_IMAGE_URL,
+            DEFAULT_QWEN_IMAGE_GENERATE_URL,
+        ]
+        : [];
+
     return uniqueUrls([
-        process.env.CHUTES_Z_IMAGE_API_URL,
-        process.env.CHUTES_Z_IMAGE_URL,
-        DEFAULT_Z_IMAGE_GENERATE_URL,
+        process.env[modelScopedEnvKey],
+        ...defaultModelUrls,
     ]);
 }
 
@@ -50,6 +91,78 @@ function getImageEditApiUrlCandidates() {
         process.env.CHUTES_QWEN_IMAGE_EDIT_URL,
         DEFAULT_QWEN_IMAGE_EDIT_URL,
     ]);
+}
+
+function getImageModelName(modelId: string) {
+    return IMAGE_GENERATION_MODELS.find((model) => model.id === modelId)?.name ?? modelId;
+}
+
+function getImageRequestAttempts(modelId: string, prompt: string, width: number, height: number) {
+    if (modelId === HUNYUAN_IMAGE_MODEL) {
+        return [
+            {
+                label: 'hunyuan-generate',
+                body: {
+                    prompt,
+                    size: `${width}x${height}`,
+                    steps: DEFAULT_HUNYUAN_STEPS,
+                    guidance_scale: DEFAULT_HUNYUAN_CFG,
+                    seed: null,
+                },
+            },
+            {
+                label: 'hunyuan-prompt-only-fallback',
+                body: { prompt },
+            },
+        ] as const;
+    }
+
+    if (modelId === QWEN_IMAGE_MODEL) {
+        return [
+            {
+                label: 'qwen-image-generate',
+                body: {
+                    prompt,
+                    negative_prompt: DEFAULT_QWEN_GENERATE_NEGATIVE_PROMPT,
+                    height: DEFAULT_QWEN_GENERATE_HEIGHT,
+                    width: DEFAULT_QWEN_GENERATE_WIDTH,
+                    num_inference_steps: DEFAULT_QWEN_GENERATE_STEPS,
+                    true_cfg_scale: DEFAULT_QWEN_GENERATE_TRUE_CFG_SCALE,
+                },
+            },
+            {
+                label: 'qwen-prompt-only-fallback',
+                body: { prompt },
+            },
+        ] as const;
+    }
+
+    return [
+        {
+            label: 'image-generate',
+            body: {
+                prompt,
+                width,
+                height,
+                num_inference_steps: DEFAULT_NUM_INFERENCE_STEPS,
+                guidance_scale: DEFAULT_GUIDANCE_SCALE,
+                shift: DEFAULT_SHIFT,
+                max_sequence_length: DEFAULT_MAX_SEQUENCE_LENGTH,
+            },
+        },
+        {
+            label: 'prompt-only-fallback',
+            body: { prompt },
+        },
+        {
+            label: 'input-args-fallback',
+            body: {
+                input_args: {
+                    prompt,
+                },
+            },
+        },
+    ] as const;
 }
 
 function wait(ms: number) {
@@ -307,15 +420,13 @@ export async function POST(req: Request) {
     const record = body as Record<string, unknown>;
     const threadId = getText(record.threadId);
     const requestedModel = getText(record.model);
+    const selectedModel = requestedModel || IMAGE_GENERATION_MODEL;
     const prompt = getText(record.prompt);
     const inputAttachments = Array.isArray(record.attachments)
         ? record.attachments.filter((value) => isAttachment(value))
         : [];
     const width = DEFAULT_IMAGE_WIDTH;
     const height = DEFAULT_IMAGE_HEIGHT;
-    const numInferenceSteps = DEFAULT_NUM_INFERENCE_STEPS;
-    const guidanceScale = DEFAULT_GUIDANCE_SCALE;
-    const shift = DEFAULT_SHIFT;
 
     if (!threadId) {
         return jsonResponse({ error: 'threadId is required' }, 400);
@@ -323,13 +434,11 @@ export async function POST(req: Request) {
     if (!prompt) {
         return jsonResponse({ error: 'prompt is required' }, 400);
     }
-    if (requestedModel && requestedModel !== IMAGE_GENERATION_MODEL) {
-        return jsonResponse({ error: 'Image mode uses an internal model and does not accept model overrides' }, 400);
-    }
-
-    const apiKey = getChutesApiKey();
-    if (!apiKey) {
-        return jsonResponse({ error: CHUTES_MISSING_API_KEY_MESSAGE }, 500);
+    if (!isImageGenerationModel(selectedModel)) {
+        const supportedModelIds = IMAGE_GENERATION_MODELS.map((model) => model.id).join(', ');
+        return jsonResponse({
+            error: `Unsupported image model "${selectedModel}". Supported models: ${supportedModelIds}`,
+        }, 400);
     }
 
     try {
@@ -346,6 +455,11 @@ export async function POST(req: Request) {
             return jsonResponse({ error: 'Image edit requires at least one image attachment' }, 400);
         }
         const isImageEditRequest = imageEditAttachments.length > 0;
+        const requiresChutesApiKey = isImageEditRequest || selectedModel !== GOOGLE_IMAGEN_IMAGE_MODEL;
+        const chutesApiKey = requiresChutesApiKey ? getChutesApiKey() : '';
+        if (requiresChutesApiKey && !chutesApiKey) {
+            return jsonResponse({ error: CHUTES_MISSING_API_KEY_MESSAGE }, 500);
+        }
         const bucket = getAttachmentsBucketName();
 
         let generated: GeneratedImage | null = null;
@@ -377,7 +491,7 @@ export async function POST(req: Request) {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${apiKey}`,
+                            'Authorization': `Bearer ${chutesApiKey}`,
                         },
                         body: JSON.stringify({
                             prompt,
@@ -444,34 +558,53 @@ export async function POST(req: Request) {
 
                 if (generated) break;
             }
-        } else {
-            const targetApiUrls = getImageApiUrlCandidates();
-            const requestAttempts: Array<{ label: string; body: Record<string, unknown> }> = [];
+        } else if (selectedModel === GOOGLE_IMAGEN_IMAGE_MODEL) {
+            const geminiApiKey = getText(process.env.GEMINI_API_KEY || '');
+            if (!geminiApiKey) {
+                return jsonResponse({ error: 'GEMINI_API_KEY is required for Imagen generation.' }, 500);
+            }
 
-            requestAttempts.push({
-                label: 'z-image-generate',
-                body: {
+            try {
+                const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+                const response = await ai.models.generateImages({
+                    model: GOOGLE_IMAGEN_API_MODEL,
                     prompt,
-                    width,
-                    height,
-                    num_inference_steps: numInferenceSteps,
-                    guidance_scale: guidanceScale,
-                    shift,
-                    max_sequence_length: DEFAULT_MAX_SEQUENCE_LENGTH,
-                },
-            });
-            requestAttempts.push({
-                label: 'prompt-only-fallback',
-                body: { prompt },
-            });
-            requestAttempts.push({
-                label: 'input-args-fallback',
-                body: {
-                    input_args: {
-                        prompt,
+                    config: {
+                        numberOfImages: GOOGLE_IMAGEN_OUTPUT_COUNT,
                     },
-                },
-            });
+                });
+
+                const generatedImages = Array.isArray((response as { generatedImages?: unknown[] }).generatedImages)
+                    ? ((response as { generatedImages?: Array<{ image?: { imageBytes?: string } }> }).generatedImages ?? [])
+                    : [];
+                const first = generatedImages[0];
+                const imageBytesB64 = getText(first?.image?.imageBytes || '');
+                if (!imageBytesB64) {
+                    return jsonResponse({ error: 'Imagen API returned no image data.' }, 502);
+                }
+
+                const bytes = Uint8Array.from(Buffer.from(imageBytesB64, 'base64'));
+                if (bytes.length === 0) {
+                    return jsonResponse({ error: 'Imagen API returned empty image bytes.' }, 502);
+                }
+
+                generated = {
+                    bytes,
+                    mimeType: inferImageMimeType(bytes, 'image/png'),
+                };
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Imagen generation failed';
+                return jsonResponse({ error: message }, 502);
+            }
+        } else {
+            const targetApiUrls = getImageApiUrlCandidates(selectedModel);
+            if (targetApiUrls.length === 0) {
+                const envKey = `CHUTES_IMAGE_API_URL_${modelIdToEnvSuffix(selectedModel)}`;
+                return jsonResponse({
+                    error: `No API URL configured for image model "${getImageModelName(selectedModel)}". Set ${envKey}.`,
+                }, 500);
+            }
+            const requestAttempts = getImageRequestAttempts(selectedModel, prompt, width, height);
 
             for (const apiUrl of targetApiUrls) {
                 for (const attempt of requestAttempts) {
@@ -482,7 +615,7 @@ export async function POST(req: Request) {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${apiKey}`,
+                                'Authorization': `Bearer ${chutesApiKey}`,
                             },
                             body: JSON.stringify(attempt.body),
                             signal: req.signal,
@@ -552,19 +685,9 @@ export async function POST(req: Request) {
         }
 
         if (!generated) {
-            if (!isImageEditRequest) {
-                const missingModelSpecificUrl =
-                    !getText(process.env.CHUTES_Z_IMAGE_API_URL || '')
-                    && !getText(process.env.CHUTES_Z_IMAGE_URL || '');
-                if (lastStatus === 404 && missingModelSpecificUrl) {
-                    return jsonResponse({
-                        error: 'Image endpoint returned 404. Set CHUTES_Z_IMAGE_API_URL for z-image-turbo.',
-                    }, 502);
-                }
-            }
             const mappedStatus = lastStatus >= 400 && lastStatus < 500 ? lastStatus : 502;
             return jsonResponse({
-                error: `Chutes ${isImageEditRequest ? 'image edit' : 'image'} API error (${lastAttemptLabel || 'unknown attempt'} @ ${lastAttemptUrl || 'unknown url'}): ${lastErrorText || 'No error details provided'}`,
+                error: `Chutes ${isImageEditRequest ? 'image edit' : 'image'} API error for "${getImageModelName(selectedModel)}" (${lastAttemptLabel || 'unknown attempt'} @ ${lastAttemptUrl || 'unknown url'}): ${lastErrorText || 'No error details provided'}`,
             }, mappedStatus);
         }
 

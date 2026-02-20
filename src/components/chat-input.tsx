@@ -6,10 +6,14 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuSub,
+    DropdownMenuSubContent,
+    DropdownMenuSubTrigger,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle, ImagePlus, ScrollText, Film, MessageSquare } from 'lucide-react';
-import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/lib/constants';
+import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, SEARCH_ENABLED_MODELS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { ModelSelector } from '@/components/model-selector';
@@ -22,6 +26,7 @@ export interface ChatInputHandle {
     setValue: (value: string) => void;
     focus: () => void;
     getMode: () => ChatSubmitMode;
+    getImageModelId: () => string;
 }
 
 type LocalAttachmentStatus = 'uploading' | 'uploaded' | 'failed';
@@ -39,6 +44,7 @@ export type ChatSubmitMode = 'chat' | 'image' | 'image-edit' | 'video' | 'search
 
 export interface ChatSubmitOptions {
     mode: ChatSubmitMode;
+    imageModelId?: string;
 }
 
 interface ChatInputProps {
@@ -104,16 +110,19 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const [isImageEditMode, setIsImageEditMode] = useState(false);
     const [isVideoMode, setIsVideoMode] = useState(false);
     const [isSearchMode, setIsSearchMode] = useState(false);
+    const [selectedImageModelId, setSelectedImageModelId] = useState(IMAGE_GENERATION_MODEL);
     const isImageModeRef = useRef(false);
     const isImageEditModeRef = useRef(false);
     const isVideoModeRef = useRef(false);
     const isSearchModeRef = useRef(false);
+    const selectedImageModelIdRef = useRef(IMAGE_GENERATION_MODEL);
     const [isSystemMenuOpen, setIsSystemMenuOpen] = useState(false);
     const [systemPromptDraft, setSystemPromptDraft] = useState(systemPrompt);
     const [isSavingSystemPrompt, setIsSavingSystemPrompt] = useState(false);
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
     const { showToast } = useToast();
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
+    const selectedImageModel = IMAGE_GENERATION_MODELS.find((model) => model.id === selectedImageModelId) ?? IMAGE_GENERATION_MODELS[0];
     const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
     const supportsSearchMode = SEARCH_ENABLED_MODELS.includes(currentModel as typeof SEARCH_ENABLED_MODELS[number]);
     const isOpenRouterModel = selectedModel.provider === 'openrouter';
@@ -180,6 +189,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         },
         focus: () => textareaRef.current?.focus(),
         getMode: () => getSubmitMode(),
+        getImageModelId: () => selectedImageModelIdRef.current,
     }), [getSubmitMode]);
 
     useEffect(() => {
@@ -207,6 +217,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     useEffect(() => {
         attachmentItemsRef.current = attachmentItems;
     }, [attachmentItems]);
+
+    useEffect(() => {
+        selectedImageModelIdRef.current = selectedImageModelId;
+    }, [selectedImageModelId]);
 
     const updateItem = useCallback((localId: string, updater: (item: LocalAttachmentItem) => LocalAttachmentItem) => {
         setAttachmentItems((prev) => prev.map((item) => (item.localId === localId ? updater(item) : item)));
@@ -326,7 +340,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
         try {
             const submitted = await onSubmit(submittedValue, submittedAttachments, {
-                mode: submitMode
+                mode: submitMode,
+                imageModelId: submitMode === 'image' || submitMode === 'image-edit'
+                    ? selectedImageModelIdRef.current
+                    : undefined,
             });
             if (submitted === false) {
                 // Restore only if user has not started drafting a new message yet.
@@ -759,6 +776,33 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                             )}
                                         </DropdownMenuItem>
                                     ))}
+                                    <DropdownMenuSeparator className="bg-[#2a2535]/80" />
+                                    <DropdownMenuSub>
+                                        <DropdownMenuSubTrigger className="flex items-center gap-2 py-2 px-3 cursor-pointer focus:bg-[#2a2535] data-[state=open]:bg-[#2a2535]">
+                                            <ImagePlus className="h-4 w-4 text-zinc-400 shrink-0" />
+                                            <span className="text-zinc-100 flex-1">Image Model</span>
+                                            <span className="text-[11px] text-zinc-500 truncate max-w-[88px]">
+                                                {selectedImageModel?.name ?? 'Image'}
+                                            </span>
+                                        </DropdownMenuSubTrigger>
+                                        <DropdownMenuSubContent className="w-52 bg-[#1a1520] border-[#3a3045] shadow-2xl">
+                                            {IMAGE_GENERATION_MODELS.map((model) => (
+                                                <DropdownMenuItem
+                                                    key={model.id}
+                                                    onClick={() => setSelectedImageModelId(model.id)}
+                                                    className={cn(
+                                                        "flex items-center gap-2 py-2 px-3 cursor-pointer focus:bg-[#2a2535]",
+                                                        model.id === selectedImageModelId && "bg-[#2a2535]"
+                                                    )}
+                                                >
+                                                    <span className="text-zinc-100 flex-1">{model.name}</span>
+                                                    {model.id === selectedImageModelId && (
+                                                        <Check className="h-4 w-4 text-emerald-400 shrink-0" />
+                                                    )}
+                                                </DropdownMenuItem>
+                                            ))}
+                                        </DropdownMenuSubContent>
+                                    </DropdownMenuSub>
                                 </DropdownMenuContent>
                             </DropdownMenu>
 

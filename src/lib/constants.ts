@@ -20,6 +20,11 @@ export interface Provider {
     color: string;
 }
 
+export interface ImageGenerationModel {
+    id: string;
+    name: string;
+}
+
 export const PROVIDERS: Provider[] = [
     { id: 'deepseek-ai', name: 'DeepSeek', color: '#4A90D9' },
     { id: 'openai', name: 'OpenAI', color: '#10A37F' },
@@ -298,9 +303,23 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
     },
 ];
 
+export const IMAGE_GENERATION_MODELS: readonly ImageGenerationModel[] = [
+    { id: 'zai-org/z-image-turbo', name: 'Z-Image Turbo' },
+    { id: 'tencent/hunyuan-image-3', name: 'Hunyuan Image 3.0' },
+    { id: 'Qwen/Qwen-Image-2512', name: 'Qwen Image 2512' },
+    { id: 'google/imagen-4.0-generate-001', name: 'Imagen 4.0' },
+] as const;
+
+const IMAGE_GENERATION_MODEL_SET = new Set<string>(IMAGE_GENERATION_MODELS.map((model) => model.id));
+
+export function isImageGenerationModel(modelId: string | null | undefined): boolean {
+    if (!modelId) return false;
+    return IMAGE_GENERATION_MODEL_SET.has(modelId);
+}
+
 export const DEFAULT_MODEL = 'moonshotai/Kimi-K2.5-TEE';
 export const DEFAULT_REASONING_EFFORT = 'high';
-export const IMAGE_GENERATION_MODEL = 'zai-org/z-image-turbo';
+export const IMAGE_GENERATION_MODEL = IMAGE_GENERATION_MODELS[0]?.id ?? 'zai-org/z-image-turbo';
 export const VIDEO_GENERATION_MODEL = 'Qwen/WAN-2.2-I2V-14B-Fast';
 export const PENDING_GENERATION_THREAD_KEY = 'pending-generation-thread-id';
 export const PENDING_GENERATION_MODEL_KEY = 'pending-generation-model-id';

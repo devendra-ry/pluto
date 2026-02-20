@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY, VIDEO_GENERATION_MODEL } from '@/lib/constants';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, isImageGenerationModel, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY, VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -131,8 +131,11 @@ export default function HomePage() {
     const isImageMode = options.mode === 'image' || options.mode === 'image-edit';
     const isVideoMode = options.mode === 'video';
     const isSearchMode = options.mode === 'search';
-    const targetModel = isImageMode ? IMAGE_GENERATION_MODEL : (isVideoMode ? VIDEO_GENERATION_MODEL : effectiveModel);
-    const messageModel = isImageMode ? IMAGE_GENERATION_MODEL : (isVideoMode ? VIDEO_GENERATION_MODEL : effectiveModel);
+    const selectedImageModelId = options.imageModelId && isImageGenerationModel(options.imageModelId)
+      ? options.imageModelId
+      : IMAGE_GENERATION_MODEL;
+    const targetModel = isImageMode ? selectedImageModelId : (isVideoMode ? VIDEO_GENERATION_MODEL : effectiveModel);
+    const messageModel = isImageMode ? selectedImageModelId : (isVideoMode ? VIDEO_GENERATION_MODEL : effectiveModel);
 
     setIsLoading(true);
     try {

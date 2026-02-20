@@ -13,7 +13,7 @@ import {
 import { addMessage } from '@/hooks/use-messages';
 import { touchThread, updateThreadTitleIfNewChat } from '@/hooks/use-threads';
 import { cancelScheduledFrame, scheduleFrame, type ScheduledFrame } from '@/lib/animation-frame';
-import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, VIDEO_GENERATION_MODEL } from '@/lib/constants';
+import { AVAILABLE_MODELS, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { type ChatViewMessage, type RetryMode } from '@/lib/chat-view';
 import { sanitizeThreadTitle } from '@/lib/sanitize';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
@@ -199,7 +199,7 @@ export function useChatStream({
 
         const activeModelId = forcedModelId || model;
         const selectedModel = AVAILABLE_MODELS.find(m => m.id === activeModelId);
-        const isImageGenModel = activeModelId === IMAGE_GENERATION_MODEL;
+        const isImageGenModel = isImageGenerationModel(activeModelId);
         const isVideoGenModel = activeModelId === VIDEO_GENERATION_MODEL;
         const isMediaGenModel = isImageGenModel || isVideoGenModel;
         const useSearch = !isMediaGenModel && forceSearchMode;
@@ -312,6 +312,7 @@ export function useChatStream({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         threadId: chatId,
+                        model: activeModelId,
                         prompt: lastMsg.content,
                         attachments: userImageAttachments,
                     }),
