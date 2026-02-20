@@ -10,7 +10,7 @@
     "db:types": "npx supabase gen types typescript --linked --schema public > src/utils/supabase/database.types.ts"
   },
   "dependencies": {
-    "@google/genai": "^1.40.0",
+    "@google/genai": "^1.42.0",
     "@lobehub/icons": "^4.2.0",
     "@openrouter/sdk": "^0.8.0",
     "@radix-ui/react-tooltip": "^1.2.8",
@@ -60,6 +60,8 @@
   },
   "overrides": {
     "qs": "6.14.2",
+    "minimatch": "^10.2.1",
+    "ajv": "^8.18.0",
     "@chevrotain/cst-dts-gen": {
       "lodash-es": "4.17.23"
     },
