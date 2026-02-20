@@ -119,15 +119,6 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         capabilities: ['reasoning', 'effortControl'],
     },
     {
-        id: 'zai-org/GLM-4.7-Flash',
-        name: 'GLM 4.7 Flash',
-        description: 'Fast GLM model (toggle thinking)',
-        provider: 'zai-org',
-        supportsReasoning: true,
-        usesThinkingParam: true,
-        capabilities: ['fast', 'reasoning', 'effortControl'],
-    },
-    {
         id: 'zai-org/GLM-5-TEE',
         name: 'GLM 5 TEE',
         description: 'Latest GLM 5 with TEE security (toggle thinking)',
@@ -144,22 +135,6 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         supportsReasoning: true,
         usesThinkingParam: true,
         capabilities: ['reasoning', 'effortControl', 'toolCalling'],
-    },
-    {
-        id: 'Qwen/Qwen3-VL-235B-A22B-Instruct',
-        name: 'Qwen 3 VL 235B',
-        description: 'Large vision language model (Instruct)',
-        provider: 'Qwen',
-        supportsReasoning: false,
-        capabilities: ['vision', 'toolCalling'],
-    },
-    {
-        id: 'Qwen/Qwen3-Next-80B-A3B-Instruct',
-        name: 'Qwen 3 Next 80B',
-        description: 'Next-gen 80B instruct model',
-        provider: 'Qwen',
-        supportsReasoning: false,
-        capabilities: ['fast', 'toolCalling'],
     },
     {
         id: 'Qwen/Qwen3.5-397B-A17B-TEE',
@@ -260,14 +235,6 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         provider: 'deepseek-ai',
         supportsReasoning: true,
         capabilities: ['reasoning'],
-    },
-    {
-        id: 'zai-org/GLM-4.6V',
-        name: 'GLM 4.6V',
-        description: 'Multimodal vision and reasoning model',
-        provider: 'zai-org',
-        supportsReasoning: true,
-        capabilities: ['vision', 'reasoning', 'toolCalling'],
     },
 ];
 
