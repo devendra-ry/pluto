@@ -77,7 +77,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
     const [deletePending, setDeletePending] = useState(false);
     const [user, setUser] = useState<SupabaseUser | null>(initialUser);
     const debouncedSearch = useDebouncedValue(searchQuery, 300);
-    const { threads, refreshThreads } = useThreads();
+    const { threads } = useThreads();
     const { showToast } = useToast();
 
     const [supabase] = useState(() => createClient());
@@ -170,9 +170,6 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
             await deleteThread(threadId);
             setDeleteConfirm(null);
 
-            // Manually refresh threads as a fallback for realtime
-            await refreshThreads();
-
             if (pathname === `/c/${threadId}`) {
                 router.push('/');
             }
@@ -182,7 +179,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         } finally {
             setDeletePending(false);
         }
-    }, [deleteConfirm, pathname, router, refreshThreads, showToast]);
+    }, [deleteConfirm, pathname, router, showToast]);
 
     const handleDeleteCancel = useCallback(() => {
         try {
@@ -198,14 +195,11 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
             e.preventDefault();
             e.stopPropagation();
             await toggleThreadPin(threadId, !isPinned);
-
-            // Manually refresh threads as a fallback for realtime
-            await refreshThreads();
         } catch (err) {
             console.error('[Sidebar] Error in handleTogglePin:', err);
             showToast('Failed to update pin status', 'error');
         }
-    }, [refreshThreads, showToast]);
+    }, [showToast]);
 
 
     const renderThreadItem = useCallback((thread: Thread) => {
