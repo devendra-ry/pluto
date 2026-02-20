@@ -64,8 +64,6 @@ export function startUploadFileForThread(
 
     const promise = new Promise<Attachment>((resolve, reject) => {
         let settled = false;
-        let canceled = false;
-        const initAbortController = new AbortController();
         let uploadXhr: XMLHttpRequest | null = null;
 
         const resolveOnce = (attachment: Attachment) => {
@@ -84,102 +82,53 @@ export function startUploadFileForThread(
             rejectOnce(new Error(`Upload canceled for "${file.name}"`));
         };
 
-        void (async () => {
-            const initResponse = await fetch('/api/uploads', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    threadId,
-                    fileName: file.name,
-                    mimeType: file.type || 'application/octet-stream',
-                    size: file.size,
-                }),
-                signal: initAbortController.signal,
-            });
+        onProgress?.(1);
+        const uploadBody = new FormData();
+        uploadBody.append('threadId', threadId);
+        uploadBody.append('file', file);
 
-            let initPayload: unknown = null;
-            try {
-                initPayload = await initResponse.json();
-            } catch (error) {
-                if (process.env.NODE_ENV !== 'production') {
-                    console.warn('[uploads] Failed to parse signed upload init response payload', error);
-                }
-                initPayload = null;
-            }
+        uploadXhr = new XMLHttpRequest();
+        uploadXhr.open('POST', '/api/uploads');
+        uploadXhr.responseType = 'json';
 
-            if (!initResponse.ok) {
+        uploadXhr.upload.onprogress = (event) => {
+            if (!event.lengthComputable || !onProgress) return;
+            const progress = Math.max(1, Math.min(99, Math.round((event.loaded / event.total) * 100)));
+            onProgress(progress);
+        };
+
+        uploadXhr.onerror = () => {
+            rejectOnce(new Error(`Failed to upload "${file.name}"`));
+        };
+
+        uploadXhr.onabort = () => {
+            failCanceled();
+        };
+
+        uploadXhr.onload = () => {
+            const payload = uploadXhr?.response as {
+                attachment?: Attachment;
+                error?: string;
+                message?: string;
+            } | null;
+            if (!uploadXhr || uploadXhr.status < 200 || uploadXhr.status >= 300) {
                 const fallback = `Failed to upload "${file.name}"`;
-                rejectOnce(new Error(extractErrorMessage(initPayload, fallback)));
+                rejectOnce(new Error(extractErrorMessage(payload, fallback)));
                 return;
             }
-
-            const payload = initPayload as {
-                upload?: { signedUrl?: string };
-                attachment?: Attachment;
-            } | null;
-
-            if (!payload?.upload?.signedUrl || !payload.attachment) {
+            if (!payload?.attachment) {
                 rejectOnce(new Error(`Upload returned an invalid payload for "${file.name}"`));
                 return;
             }
-            const attachment = payload.attachment;
-            const signedUrl = payload.upload.signedUrl;
 
-            if (canceled || initAbortController.signal.aborted) {
-                failCanceled();
-                return;
-            }
+            onProgress?.(100);
+            resolveOnce(payload.attachment);
+        };
 
-            onProgress?.(1);
-
-            const uploadBody = new FormData();
-            uploadBody.append('cacheControl', '3600');
-            uploadBody.append('', file);
-
-            uploadXhr = new XMLHttpRequest();
-            uploadXhr.open('PUT', signedUrl);
-            uploadXhr.responseType = 'json';
-
-            uploadXhr.upload.onprogress = (event) => {
-                if (!event.lengthComputable || !onProgress) return;
-                const progress = Math.max(1, Math.min(99, Math.round((event.loaded / event.total) * 100)));
-                onProgress(progress);
-            };
-
-            uploadXhr.onerror = () => {
-                rejectOnce(new Error(`Failed to upload "${file.name}"`));
-            };
-
-            uploadXhr.onabort = () => {
-                failCanceled();
-            };
-
-            uploadXhr.onload = () => {
-                const uploadPayload = uploadXhr?.response as { error?: string; message?: string } | null;
-                if (!uploadXhr || uploadXhr.status < 200 || uploadXhr.status >= 300) {
-                    const fallback = `Failed to upload "${file.name}"`;
-                    rejectOnce(new Error(extractErrorMessage(uploadPayload, fallback)));
-                    return;
-                }
-
-                onProgress?.(100);
-                resolveOnce(attachment);
-            };
-
-            uploadXhr.send(uploadBody);
-        })().catch((error) => {
-            if (error instanceof DOMException && error.name === 'AbortError') {
-                failCanceled();
-                return;
-            }
-            const fallback = error instanceof Error ? error.message : `Failed to upload "${file.name}"`;
-            rejectOnce(new Error(fallback));
-        });
+        uploadXhr.send(uploadBody);
 
         cancelUpload = () => {
             if (settled) return;
-            canceled = true;
-            initAbortController.abort();
             if (uploadXhr && uploadXhr.readyState !== XMLHttpRequest.DONE) {
                 uploadXhr.abort();
             }

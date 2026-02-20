@@ -141,74 +141,7 @@ export async function POST(req: Request) {
     };
 
     if (contentType.includes('application/json')) {
-        const body = await req.json().catch(() => null);
-        if (!body || typeof body !== 'object') {
-            return jsonResponse({ error: 'Invalid JSON body' }, 400);
-        }
-
-        const record = body as Record<string, unknown>;
-        const threadId = typeof record.threadId === 'string' ? record.threadId.trim() : '';
-        const fileName = typeof record.fileName === 'string' ? record.fileName : '';
-        const mimeType = typeof record.mimeType === 'string' && record.mimeType
-            ? record.mimeType
-            : 'application/octet-stream';
-        const size = typeof record.size === 'number' ? record.size : Number.NaN;
-
-        if (!threadId) {
-            return jsonResponse({ error: 'threadId is required' }, 400);
-        }
-        if (!fileName.trim()) {
-            return jsonResponse({ error: 'fileName is required' }, 400);
-        }
-
-        const validationError = validateUpload(mimeType, size);
-        if (validationError) {
-            return validationError;
-        }
-
-        try {
-            await assertThreadOwnership(
-                supabase,
-                threadId,
-                user.id,
-                () => new ApiRequestError(403, 'Thread not found or access denied')
-            );
-
-            const attachmentId = crypto.randomUUID();
-            const sanitizedName = sanitizeFileName(fileName || 'upload');
-            const objectPath = `${user.id}/${threadId}/${Date.now()}-${attachmentId}-${sanitizedName}`;
-            const { data: signedUpload, error: signedUploadError } = await supabase.storage
-                .from(bucket)
-                .createSignedUploadUrl(objectPath, { upsert: false });
-
-            if (signedUploadError || !signedUpload?.signedUrl) {
-                return jsonResponse({ error: signedUploadError?.message || 'Failed to initialize upload' }, 500);
-            }
-
-            const attachment: Attachment = {
-                id: attachmentId,
-                name: fileName || sanitizedName,
-                mimeType,
-                size,
-                path: objectPath,
-                url: buildAttachmentUrl(threadId, objectPath),
-            };
-
-            return jsonResponse({
-                upload: {
-                    signedUrl: signedUpload.signedUrl,
-                    path: signedUpload.path,
-                },
-                attachment,
-            });
-        } catch (error) {
-            const response = toJsonErrorResponse(error);
-            if (response) {
-                return response;
-            }
-            const message = error instanceof Error ? error.message : 'Upload failed';
-            return jsonResponse({ error: message }, 500);
-        }
+        return jsonResponse({ error: 'Use multipart/form-data upload' }, 415);
     }
 
     const formData = await req.formData();
