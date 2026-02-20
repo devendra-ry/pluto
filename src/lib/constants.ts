@@ -307,7 +307,6 @@ export const IMAGE_GENERATION_MODELS: readonly ImageGenerationModel[] = [
     { id: 'zai-org/z-image-turbo', name: 'Z-Image Turbo' },
     { id: 'tencent/hunyuan-image-3', name: 'Hunyuan Image 3.0' },
     { id: 'Qwen/Qwen-Image-2512', name: 'Qwen Image 2512' },
-    { id: 'google/imagen-4.0-generate-001', name: 'Imagen 4.0' },
 ] as const;
 
 const IMAGE_GENERATION_MODEL_SET = new Set<string>(IMAGE_GENERATION_MODELS.map((model) => model.id));

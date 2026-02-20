@@ -5,7 +5,6 @@ import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
 import { assertThreadOwnership } from '@/lib/thread-ownership';
 import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { createClient } from '@/utils/supabase/server';
-import { GoogleGenAI } from '@google/genai';
 
 export const runtime = 'nodejs';
 
@@ -20,9 +19,6 @@ const DEFAULT_HUNYUAN_IMAGE_GENERATE_URL = 'https://chutes-hunyuan-image-3.chute
 const DEFAULT_QWEN_IMAGE_GENERATE_URL = 'https://chutes-qwen-image-2512.chutes.ai/generate';
 const HUNYUAN_IMAGE_MODEL = 'tencent/hunyuan-image-3';
 const QWEN_IMAGE_MODEL = 'Qwen/Qwen-Image-2512';
-const GOOGLE_IMAGEN_IMAGE_MODEL = 'google/imagen-4.0-generate-001';
-const GOOGLE_IMAGEN_API_MODEL = 'imagen-4.0-generate-001';
-const GOOGLE_IMAGEN_OUTPUT_COUNT = 1;
 const DEFAULT_HUNYUAN_STEPS = 50;
 const DEFAULT_HUNYUAN_CFG = 7.5;
 const DEFAULT_QWEN_GENERATE_WIDTH = 1328;
@@ -455,9 +451,8 @@ export async function POST(req: Request) {
             return jsonResponse({ error: 'Image edit requires at least one image attachment' }, 400);
         }
         const isImageEditRequest = imageEditAttachments.length > 0;
-        const requiresChutesApiKey = isImageEditRequest || selectedModel !== GOOGLE_IMAGEN_IMAGE_MODEL;
-        const chutesApiKey = requiresChutesApiKey ? getChutesApiKey() : '';
-        if (requiresChutesApiKey && !chutesApiKey) {
+        const chutesApiKey = getChutesApiKey();
+        if (!chutesApiKey) {
             return jsonResponse({ error: CHUTES_MISSING_API_KEY_MESSAGE }, 500);
         }
         const bucket = getAttachmentsBucketName();
@@ -557,44 +552,6 @@ export async function POST(req: Request) {
                 }
 
                 if (generated) break;
-            }
-        } else if (selectedModel === GOOGLE_IMAGEN_IMAGE_MODEL) {
-            const geminiApiKey = getText(process.env.GEMINI_API_KEY || '');
-            if (!geminiApiKey) {
-                return jsonResponse({ error: 'GEMINI_API_KEY is required for Imagen generation.' }, 500);
-            }
-
-            try {
-                const ai = new GoogleGenAI({ apiKey: geminiApiKey });
-                const response = await ai.models.generateImages({
-                    model: GOOGLE_IMAGEN_API_MODEL,
-                    prompt,
-                    config: {
-                        numberOfImages: GOOGLE_IMAGEN_OUTPUT_COUNT,
-                    },
-                });
-
-                const generatedImages = Array.isArray((response as { generatedImages?: unknown[] }).generatedImages)
-                    ? ((response as { generatedImages?: Array<{ image?: { imageBytes?: string } }> }).generatedImages ?? [])
-                    : [];
-                const first = generatedImages[0];
-                const imageBytesB64 = getText(first?.image?.imageBytes || '');
-                if (!imageBytesB64) {
-                    return jsonResponse({ error: 'Imagen API returned no image data.' }, 502);
-                }
-
-                const bytes = Uint8Array.from(Buffer.from(imageBytesB64, 'base64'));
-                if (bytes.length === 0) {
-                    return jsonResponse({ error: 'Imagen API returned empty image bytes.' }, 502);
-                }
-
-                generated = {
-                    bytes,
-                    mimeType: inferImageMimeType(bytes, 'image/png'),
-                };
-            } catch (error) {
-                const message = error instanceof Error ? error.message : 'Imagen generation failed';
-                return jsonResponse({ error: message }, 502);
             }
         } else {
             const targetApiUrls = getImageApiUrlCandidates(selectedModel);
