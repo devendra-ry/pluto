@@ -66,22 +66,6 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         capabilities: ['reasoning', 'effortControl'],
     },
     {
-        id: 'deepseek-ai/DeepSeek-R1-0528-TEE',
-        name: 'DeepSeek R1 0528 TEE',
-        description: 'DeepSeek R1 variant with TEE',
-        provider: 'deepseek-ai',
-        supportsReasoning: true,
-        capabilities: ['reasoning'],
-    },
-    {
-        id: 'deepseek-ai/DeepSeek-V3-0324-TEE',
-        name: 'DeepSeek V3 0324 TEE',
-        description: 'DeepSeek V3 variant with TEE',
-        provider: 'deepseek-ai',
-        supportsReasoning: false,
-        capabilities: [],
-    },
-    {
         id: 'openai/gpt-oss-120b-TEE',
         name: 'GPT-OSS 120B',
         description: 'Open source GPT 120B (toggle thinking)',
@@ -107,14 +91,6 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         supportsReasoning: true,
         usesThinkingParam: true,
         capabilities: ['reasoning', 'vision', 'effortControl'],
-    },
-    {
-        id: 'MiniMaxAI/MiniMax-M2.1-TEE',
-        name: 'MiniMax M2.1',
-        description: 'MiniMax flagship model',
-        provider: 'MiniMaxAI',
-        supportsReasoning: true,
-        capabilities: ['reasoning'],
     },
     {
         id: 'MiniMaxAI/MiniMax-M2.5-TEE',
@@ -293,20 +269,20 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
         supportsReasoning: true,
         capabilities: ['vision', 'reasoning', 'toolCalling'],
     },
-    {
-        id: 'gemma-3-27b-it',
-        name: 'Gemma 3 27B IT',
-        description: 'Google\'s latest open-source multimodal model',
-        provider: 'google',
-        supportsReasoning: false,
-        capabilities: [],
-    },
 ];
 
 export const IMAGE_GENERATION_MODELS: readonly ImageGenerationModel[] = [
     { id: 'zai-org/z-image-turbo', name: 'Z-Image Turbo' },
     { id: 'tencent/hunyuan-image-3', name: 'Hunyuan Image 3.0' },
     { id: 'Qwen/Qwen-Image-2512', name: 'Qwen Image 2512' },
+    { id: 'hidream/hidream', name: 'HiDream' },
+    { id: 'FLUX.1-schnell', name: 'FLUX.1 Schnell' },
+    { id: 'neta-lumina', name: 'Neta Lumina' },
+    { id: 'NovaFurryXL', name: 'NovaFurryXL' },
+    { id: 'iLustMix', name: 'iLustMix' },
+    { id: 'Animij', name: 'Animij' },
+    { id: 'Illustrij', name: 'Illustrij' },
+    { id: 'HassakuXL', name: 'HassakuXL' },
 ] as const;
 
 const IMAGE_GENERATION_MODEL_SET = new Set<string>(IMAGE_GENERATION_MODELS.map((model) => model.id));
