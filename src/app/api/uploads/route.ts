@@ -4,9 +4,17 @@ import {
     isSupportedAttachmentMimeType,
 } from '@/lib/attachments';
 import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/lib/attachment-route-utils';
+import { UploadCleanupRequestSchema } from '@/lib/request-validation';
 import { assertThreadOwnership } from '@/lib/thread-ownership';
 import { type Attachment } from '@/lib/types';
-import { ApiRequestError, assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
+import {
+    ApiRequestError,
+    assertJsonRequest,
+    assertValidPostOrigin,
+    parseJsonObjectRequest,
+    requireUser,
+    toJsonErrorResponse,
+} from '@/utils/api-security';
 
 export const runtime = 'nodejs';
 
@@ -211,6 +219,7 @@ export async function DELETE(req: Request) {
     let user: Awaited<ReturnType<typeof requireUser>>['user'];
     try {
         assertValidPostOrigin(req);
+        assertJsonRequest(req);
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
@@ -222,20 +231,22 @@ export async function DELETE(req: Request) {
         return jsonResponse({ error: 'Internal server error' }, 500);
     }
 
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
+    let record: Record<string, unknown>;
+    try {
+        record = await parseJsonObjectRequest(req);
+    } catch (error) {
+        const response = toJsonErrorResponse(error);
+        if (response) return response;
         return jsonResponse({ error: 'Invalid JSON body' }, 400);
     }
 
-    const record = body as Record<string, unknown>;
-    const threadId = typeof record.threadId === 'string' ? record.threadId.trim() : '';
-    if (!threadId) {
-        return jsonResponse({ error: 'threadId is required' }, 400);
+    const parsed = UploadCleanupRequestSchema.safeParse(record);
+    if (!parsed.success) {
+        return jsonResponse({ error: parsed.error.issues[0]?.message || 'Invalid request body' }, 400);
     }
 
-    const rawPaths = Array.isArray(record.paths)
-        ? record.paths.filter((path): path is string => typeof path === 'string' && path.length > 0)
-        : [];
+    const threadId = parsed.data.threadId;
+    const rawPaths = parsed.data.paths ?? [];
 
     try {
         await assertThreadOwnership(

@@ -1,10 +1,11 @@
 import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/lib/attachment-route-utils';
 import { IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, isImageGenerationModel } from '@/lib/constants';
+import { ImageGenerateRequestSchema } from '@/lib/request-validation';
 import { type Attachment } from '@/lib/types';
 import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
 import { assertThreadOwnership } from '@/lib/thread-ownership';
 import { fetchWithSsrfGuard } from '@/lib/ssrf-guard';
-import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
+import { assertJsonRequest, assertValidPostOrigin, parseJsonObjectRequest, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { createClient } from '@/utils/supabase/server';
 
 export const runtime = 'nodejs';
@@ -246,19 +247,6 @@ function extensionForMimeType(mimeType: string) {
     }
 }
 
-function isAttachment(value: unknown): value is Attachment {
-    if (!value || typeof value !== 'object') return false;
-    const record = value as Record<string, unknown>;
-    return (
-        typeof record.id === 'string'
-        && typeof record.name === 'string'
-        && typeof record.mimeType === 'string'
-        && typeof record.size === 'number'
-        && typeof record.path === 'string'
-        && typeof record.url === 'string'
-    );
-}
-
 function normalizePotentialBase64(value: string) {
     const trimmed = value.trim();
     if (!trimmed) return '';
@@ -427,6 +415,7 @@ export async function POST(req: Request) {
     let user: Awaited<ReturnType<typeof requireUser>>['user'];
     try {
         assertValidPostOrigin(req);
+        assertJsonRequest(req);
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
@@ -438,28 +427,25 @@ export async function POST(req: Request) {
         return jsonResponse({ error: 'Internal server error' }, 500);
     }
 
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
+    let record: Record<string, unknown>;
+    try {
+        record = await parseJsonObjectRequest(req);
+    } catch (error) {
+        const response = toJsonErrorResponse(error);
+        if (response) return response;
         return jsonResponse({ error: 'Invalid JSON body' }, 400);
     }
 
-    const record = body as Record<string, unknown>;
-    const threadId = getText(record.threadId);
-    const requestedModel = getText(record.model);
+    const parsed = ImageGenerateRequestSchema.safeParse(record);
+    if (!parsed.success) {
+        return jsonResponse({ error: parsed.error.issues[0]?.message || 'Invalid request body' }, 400);
+    }
+
+    const { threadId, prompt, attachments: inputAttachments } = parsed.data;
+    const requestedModel = parsed.data.model?.trim() ?? '';
     const selectedModel = requestedModel || IMAGE_GENERATION_MODEL;
-    const prompt = getText(record.prompt);
-    const inputAttachments = Array.isArray(record.attachments)
-        ? record.attachments.filter((value) => isAttachment(value))
-        : [];
     const width = DEFAULT_IMAGE_WIDTH;
     const height = DEFAULT_IMAGE_HEIGHT;
-
-    if (!threadId) {
-        return jsonResponse({ error: 'threadId is required' }, 400);
-    }
-    if (!prompt) {
-        return jsonResponse({ error: 'prompt is required' }, 400);
-    }
     if (!isImageGenerationModel(selectedModel)) {
         const supportedModelIds = IMAGE_GENERATION_MODELS.map((model) => model.id).join(', ');
         return jsonResponse({

@@ -1,10 +1,11 @@
 import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/lib/attachment-route-utils';
 import { VIDEO_GENERATION_MODEL } from '@/lib/constants';
+import { VideoGenerateRequestSchema } from '@/lib/request-validation';
 import { type Attachment } from '@/lib/types';
 import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
 import { assertThreadOwnership } from '@/lib/thread-ownership';
 import { fetchWithSsrfGuard } from '@/lib/ssrf-guard';
-import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
+import { assertJsonRequest, assertValidPostOrigin, parseJsonObjectRequest, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { createClient } from '@/utils/supabase/server';
 
 export const runtime = 'nodejs';
@@ -45,19 +46,6 @@ function getVideoApiUrlCandidates() {
         process.env.CHUTES_VIDEO_API_URL,
         DEFAULT_VIDEO_API_URL,
     ]);
-}
-
-function isAttachment(value: unknown): value is Attachment {
-    if (!value || typeof value !== 'object') return false;
-    const record = value as Record<string, unknown>;
-    return (
-        typeof record.id === 'string'
-        && typeof record.name === 'string'
-        && typeof record.mimeType === 'string'
-        && typeof record.size === 'number'
-        && typeof record.path === 'string'
-        && typeof record.url === 'string'
-    );
 }
 
 function toInteger(value: unknown, fallback: number, min: number, max: number) {
@@ -182,6 +170,7 @@ export async function POST(req: Request) {
     let user: Awaited<ReturnType<typeof requireUser>>['user'];
     try {
         assertValidPostOrigin(req);
+        assertJsonRequest(req);
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
@@ -193,25 +182,28 @@ export async function POST(req: Request) {
         return jsonResponse({ error: 'Internal server error' }, 500);
     }
 
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
+    let record: Record<string, unknown>;
+    try {
+        record = await parseJsonObjectRequest(req);
+    } catch (error) {
+        const response = toJsonErrorResponse(error);
+        if (response) return response;
         return jsonResponse({ error: 'Invalid JSON body' }, 400);
     }
 
-    const record = body as Record<string, unknown>;
-    const threadId = getText(record.threadId);
-    const requestedModel = getText(record.model);
-    const prompt = getText(record.prompt);
-    const inputAttachments = Array.isArray(record.attachments)
-        ? record.attachments.filter((value) => isAttachment(value))
-        : [];
+    const parsed = VideoGenerateRequestSchema.safeParse(record);
+    if (!parsed.success) {
+        return jsonResponse({ error: parsed.error.issues[0]?.message || 'Invalid request body' }, 400);
+    }
 
-    if (!threadId) {
-        return jsonResponse({ error: 'threadId is required' }, 400);
-    }
-    if (!prompt) {
-        return jsonResponse({ error: 'prompt is required' }, 400);
-    }
+    const {
+        threadId,
+        model: requestedModelRaw,
+        prompt,
+        attachments: inputAttachments,
+    } = parsed.data;
+    const requestedModel = requestedModelRaw?.trim() ?? '';
+
     if (requestedModel && requestedModel !== VIDEO_GENERATION_MODEL) {
         return jsonResponse({ error: 'Image to Video mode uses an internal model and does not accept model overrides' }, 400);
     }
@@ -254,13 +246,13 @@ export async function POST(req: Request) {
         const payload = {
             image: sourceImageBase64,
             prompt,
-            negative_prompt: getText(record.negative_prompt) || process.env.CHUTES_WAN_I2V_NEGATIVE_PROMPT || DEFAULT_NEGATIVE_PROMPT,
-            resolution: getText(record.resolution) || DEFAULT_RESOLUTION,
-            frames: toInteger(record.frames, DEFAULT_FRAMES, 21, 140),
-            fps: toInteger(record.fps, DEFAULT_FPS, 1, 60),
-            fast: typeof record.fast === 'boolean' ? record.fast : false,
-            guidance_scale: toNumber(record.guidance_scale, DEFAULT_GUIDANCE_SCALE, 0, 20),
-            seed: (typeof record.seed === 'number' && Number.isInteger(record.seed)) ? record.seed : null,
+            negative_prompt: getText(parsed.data.negative_prompt) || process.env.CHUTES_WAN_I2V_NEGATIVE_PROMPT || DEFAULT_NEGATIVE_PROMPT,
+            resolution: getText(parsed.data.resolution) || DEFAULT_RESOLUTION,
+            frames: toInteger(parsed.data.frames, DEFAULT_FRAMES, 21, 140),
+            fps: toInteger(parsed.data.fps, DEFAULT_FPS, 1, 60),
+            fast: typeof parsed.data.fast === 'boolean' ? parsed.data.fast : false,
+            guidance_scale: toNumber(parsed.data.guidance_scale, DEFAULT_GUIDANCE_SCALE, 0, 20),
+            seed: (typeof parsed.data.seed === 'number' && Number.isInteger(parsed.data.seed)) ? parsed.data.seed : null,
         };
 
         let bytes: Uint8Array | null = null;

@@ -14,7 +14,7 @@ import { resolveChatProvider } from '@/lib/providers/provider-registry';
 import { processAndTransformStream } from '@/lib/stream-transform';
 import { ChatRequestSchema } from '@/lib/types';
 
-import { assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
+import { assertJsonRequest, assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 
 export const runtime = 'nodejs';
 
@@ -27,6 +27,7 @@ export async function POST(req: Request) {
     let user: Awaited<ReturnType<typeof requireUser>>['user'];
     try {
         assertValidPostOrigin(req);
+        assertJsonRequest(req);
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;

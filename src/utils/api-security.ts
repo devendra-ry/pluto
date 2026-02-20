@@ -11,6 +11,12 @@ export class ApiRequestError extends Error {
     }
 }
 
+function isJsonContentType(contentType: string | null) {
+    if (!contentType) return false;
+    const lower = contentType.toLowerCase();
+    return lower.includes('application/json') || lower.includes('+json');
+}
+
 function toOrigin(rawUrl: string | null | undefined) {
     if (!rawUrl) return null;
     try {
@@ -77,6 +83,20 @@ export async function requireUser() {
         supabase,
         user: data.user,
     };
+}
+
+export function assertJsonRequest(req: Request) {
+    if (!isJsonContentType(req.headers.get('content-type'))) {
+        throw new ApiRequestError(415, 'Content-Type must be application/json');
+    }
+}
+
+export async function parseJsonObjectRequest(req: Request) {
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        throw new ApiRequestError(400, 'Invalid JSON body');
+    }
+    return body as Record<string, unknown>;
 }
 
 export function toJsonErrorResponse(error: unknown) {
