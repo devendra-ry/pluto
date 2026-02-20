@@ -2,7 +2,12 @@ import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/li
 import { VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { VideoGenerateRequestSchema } from '@/lib/request-validation';
 import { type Attachment } from '@/lib/types';
-import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
+import {
+    CHUTES_MISSING_API_KEY_MESSAGE,
+    getChutesApiKey,
+    getChutesVideoApiUrlCandidates,
+    getChutesWanI2vNegativePrompt,
+} from '@/lib/chutes';
 import { assertThreadOwnership } from '@/lib/thread-ownership';
 import { fetchWithSsrfGuard } from '@/lib/ssrf-guard';
 import { assertJsonRequest, assertValidPostOrigin, parseJsonObjectRequest, requireUser, toJsonErrorResponse } from '@/utils/api-security';
@@ -10,7 +15,6 @@ import { createClient } from '@/utils/supabase/server';
 
 export const runtime = 'nodejs';
 
-const DEFAULT_VIDEO_API_URL = 'https://chutes-wan-2-2-i2v-14b-fast.chutes.ai/generate';
 const DEFAULT_RESOLUTION = '720p';
 const DEFAULT_FRAMES = 81;
 const DEFAULT_FPS = 16;
@@ -27,25 +31,6 @@ function getText(value: unknown) {
 
 function wait(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function uniqueUrls(urls: Array<string | undefined>) {
-    const set = new Set<string>();
-    for (const url of urls) {
-        const normalized = getText(url ?? '');
-        if (!normalized) continue;
-        set.add(normalized);
-    }
-    return Array.from(set);
-}
-
-function getVideoApiUrlCandidates() {
-    return uniqueUrls([
-        process.env.CHUTES_WAN_I2V_API_URL,
-        process.env.CHUTES_WAN_2_2_I2V_URL,
-        process.env.CHUTES_VIDEO_API_URL,
-        DEFAULT_VIDEO_API_URL,
-    ]);
 }
 
 function toInteger(value: unknown, fallback: number, min: number, max: number) {
@@ -246,7 +231,7 @@ export async function POST(req: Request) {
         const payload = {
             image: sourceImageBase64,
             prompt,
-            negative_prompt: getText(parsed.data.negative_prompt) || process.env.CHUTES_WAN_I2V_NEGATIVE_PROMPT || DEFAULT_NEGATIVE_PROMPT,
+            negative_prompt: getText(parsed.data.negative_prompt) || getChutesWanI2vNegativePrompt() || DEFAULT_NEGATIVE_PROMPT,
             resolution: getText(parsed.data.resolution) || DEFAULT_RESOLUTION,
             frames: toInteger(parsed.data.frames, DEFAULT_FRAMES, 21, 140),
             fps: toInteger(parsed.data.fps, DEFAULT_FPS, 1, 60),
@@ -261,7 +246,7 @@ export async function POST(req: Request) {
         let lastErrorText = '';
         let lastAttemptUrl = '';
 
-        const targetApiUrls = getVideoApiUrlCandidates();
+        const targetApiUrls = getChutesVideoApiUrlCandidates();
         for (const apiUrl of targetApiUrls) {
             lastAttemptUrl = apiUrl;
             for (let retry = 0; retry <= VIDEO_RETRY_ATTEMPTS; retry++) {

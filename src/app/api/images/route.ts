@@ -2,7 +2,13 @@ import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/li
 import { IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, isImageGenerationModel } from '@/lib/constants';
 import { ImageGenerateRequestSchema } from '@/lib/request-validation';
 import { type Attachment } from '@/lib/types';
-import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
+import {
+    CHUTES_MISSING_API_KEY_MESSAGE,
+    getChutesApiKey,
+    getChutesImageApiUrlCandidates,
+    getChutesImageApiUrlEnvKey,
+    getChutesImageEditApiUrlCandidates,
+} from '@/lib/chutes';
 import { assertThreadOwnership } from '@/lib/thread-ownership';
 import { fetchWithSsrfGuard } from '@/lib/ssrf-guard';
 import { assertJsonRequest, assertValidPostOrigin, parseJsonObjectRequest, requireUser, toJsonErrorResponse } from '@/utils/api-security';
@@ -16,10 +22,6 @@ const DEFAULT_NUM_INFERENCE_STEPS = 9;
 const DEFAULT_GUIDANCE_SCALE = 0;
 const DEFAULT_SHIFT = 3;
 const DEFAULT_MAX_SEQUENCE_LENGTH = 512;
-const DEFAULT_Z_IMAGE_GENERATE_URL = 'https://chutes-z-image-turbo.chutes.ai/generate';
-const DEFAULT_HUNYUAN_IMAGE_GENERATE_URL = 'https://chutes-hunyuan-image-3.chutes.ai/generate';
-const DEFAULT_QWEN_IMAGE_GENERATE_URL = 'https://chutes-qwen-image-2512.chutes.ai/generate';
-const DEFAULT_HIDREAM_IMAGE_GENERATE_URL = 'https://chutes-hidream.chutes.ai/generate';
 const HUNYUAN_IMAGE_MODEL = 'tencent/hunyuan-image-3';
 const QWEN_IMAGE_MODEL = 'Qwen/Qwen-Image-2512';
 const HIDREAM_IMAGE_MODEL = 'hidream/hidream';
@@ -32,7 +34,6 @@ const DEFAULT_QWEN_GENERATE_TRUE_CFG_SCALE = 4;
 const DEFAULT_QWEN_GENERATE_NEGATIVE_PROMPT = '';
 const DEFAULT_HIDREAM_GUIDANCE_SCALE = 5;
 const DEFAULT_HIDREAM_STEPS = 50;
-const DEFAULT_QWEN_IMAGE_EDIT_URL = 'https://chutes-qwen-image-edit-2511.chutes.ai/generate';
 const DEFAULT_EDIT_IMAGE_WIDTH = 1328;
 const DEFAULT_EDIT_IMAGE_HEIGHT = 1328;
 const DEFAULT_EDIT_TRUE_CFG_SCALE = 4;
@@ -42,64 +43,6 @@ const IMAGE_RETRYABLE_STATUSES = new Set([502, 503]);
 const IMAGE_RETRY_ATTEMPTS = 2;
 const IMAGE_RETRY_BACKOFF_MS = 350;
 const IS_DEV = process.env.NODE_ENV !== 'production';
-
-function uniqueUrls(urls: Array<string | undefined>) {
-    const set = new Set<string>();
-    for (const url of urls) {
-        const normalized = getText(url ?? '');
-        if (!normalized) continue;
-        set.add(normalized);
-    }
-    return Array.from(set);
-}
-
-function modelIdToEnvSuffix(modelId: string) {
-    return modelId.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
-}
-
-function getImageApiUrlCandidates(modelId: string) {
-    const modelScopedEnvKey = `CHUTES_IMAGE_API_URL_${modelIdToEnvSuffix(modelId)}`;
-    const defaultModelUrls = modelId === IMAGE_GENERATION_MODEL
-        ? [
-            process.env.CHUTES_Z_IMAGE_API_URL,
-            process.env.CHUTES_Z_IMAGE_URL,
-            DEFAULT_Z_IMAGE_GENERATE_URL,
-        ]
-        : modelId === HUNYUAN_IMAGE_MODEL
-        ? [
-            process.env.CHUTES_HUNYUAN_IMAGE_API_URL,
-            process.env.CHUTES_HUNYUAN_IMAGE_URL,
-            DEFAULT_HUNYUAN_IMAGE_GENERATE_URL,
-        ]
-        : modelId === QWEN_IMAGE_MODEL
-        ? [
-            process.env.CHUTES_QWEN_IMAGE_2512_API_URL,
-            process.env.CHUTES_QWEN_IMAGE_2512_URL,
-            process.env.CHUTES_QWEN_IMAGE_API_URL,
-            process.env.CHUTES_QWEN_IMAGE_URL,
-            DEFAULT_QWEN_IMAGE_GENERATE_URL,
-        ]
-        : modelId === HIDREAM_IMAGE_MODEL
-        ? [
-            process.env.CHUTES_HIDREAM_API_URL,
-            process.env.CHUTES_HIDREAM_URL,
-            DEFAULT_HIDREAM_IMAGE_GENERATE_URL,
-        ]
-        : [];
-
-    return uniqueUrls([
-        process.env[modelScopedEnvKey],
-        ...defaultModelUrls,
-    ]);
-}
-
-function getImageEditApiUrlCandidates() {
-    return uniqueUrls([
-        process.env.CHUTES_QWEN_IMAGE_EDIT_API_URL,
-        process.env.CHUTES_QWEN_IMAGE_EDIT_URL,
-        DEFAULT_QWEN_IMAGE_EDIT_URL,
-    ]);
-}
 
 function getImageModelName(modelId: string) {
     return IMAGE_GENERATION_MODELS.find((model) => model.id === modelId)?.name ?? modelId;
@@ -493,7 +436,7 @@ export async function POST(req: Request) {
                 imageB64s.push(Buffer.from(bytes).toString('base64'));
             }
 
-            const targetApiUrls = getImageEditApiUrlCandidates();
+            const targetApiUrls = getChutesImageEditApiUrlCandidates();
             for (const apiUrl of targetApiUrls) {
                 lastAttemptLabel = 'qwen-image-edit';
                 lastAttemptUrl = apiUrl;
@@ -570,9 +513,9 @@ export async function POST(req: Request) {
                 if (generated) break;
             }
         } else {
-            const targetApiUrls = getImageApiUrlCandidates(selectedModel);
+            const targetApiUrls = getChutesImageApiUrlCandidates(selectedModel);
             if (targetApiUrls.length === 0) {
-                const envKey = `CHUTES_IMAGE_API_URL_${modelIdToEnvSuffix(selectedModel)}`;
+                const envKey = getChutesImageApiUrlEnvKey(selectedModel);
                 return jsonResponse({
                     error: `No API URL configured for image model "${getImageModelName(selectedModel)}". Set ${envKey}.`,
                 }, 500);

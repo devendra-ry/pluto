@@ -1,3 +1,4 @@
+import { serverEnv } from '@/lib/env/server'
 import { createClient } from '@/utils/supabase/server'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
@@ -20,8 +21,8 @@ function sanitizeNextPath(value: string | null): string {
 function getAllowedOrigins(origin: string): Set<string> {
     const allowed = new Set<string>([origin])
     const envOrigins = [
-        normalizeOrigin(process.env.APP_URL),
-        normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL),
+        normalizeOrigin(serverEnv.APP_URL),
+        normalizeOrigin(serverEnv.NEXT_PUBLIC_APP_URL),
     ]
     for (const envOrigin of envOrigins) {
         if (envOrigin) allowed.add(envOrigin)
@@ -41,7 +42,7 @@ function resolveRedirectOrigin(request: Request, origin: string): string {
         }
     }
 
-    const appOrigin = normalizeOrigin(process.env.APP_URL) || normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL)
+    const appOrigin = normalizeOrigin(serverEnv.APP_URL) || normalizeOrigin(serverEnv.NEXT_PUBLIC_APP_URL)
     if (appOrigin) {
         return appOrigin
     }

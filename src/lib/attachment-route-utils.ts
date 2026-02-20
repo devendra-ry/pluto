@@ -1,8 +1,13 @@
+import 'server-only';
+
 import { DEFAULT_ATTACHMENTS_BUCKET } from '@/lib/attachments';
+import { readFirstOptionalServerEnv } from '@/lib/env/server';
 
 export function getAttachmentsBucketName() {
-    return process.env.SUPABASE_ATTACHMENTS_BUCKET
-        || process.env.NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET
+    return readFirstOptionalServerEnv(
+        'SUPABASE_ATTACHMENTS_BUCKET',
+        'NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET'
+    )
         || DEFAULT_ATTACHMENTS_BUCKET;
 }
 

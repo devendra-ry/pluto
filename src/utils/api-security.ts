@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 
+import { serverEnv } from '@/lib/env/server';
 import { createClient } from '@/utils/supabase/server';
 
 export class ApiRequestError extends Error {
@@ -33,17 +34,17 @@ function getAllowedOrigins(req: Request) {
         allowedOrigins.add(requestOrigin);
     }
 
-    const appUrlOrigin = toOrigin(process.env.NEXT_PUBLIC_APP_URL);
+    const appUrlOrigin = toOrigin(serverEnv.NEXT_PUBLIC_APP_URL);
     if (appUrlOrigin) {
         allowedOrigins.add(appUrlOrigin);
     }
 
-    const internalAppUrlOrigin = toOrigin(process.env.APP_URL);
+    const internalAppUrlOrigin = toOrigin(serverEnv.APP_URL);
     if (internalAppUrlOrigin) {
         allowedOrigins.add(internalAppUrlOrigin);
     }
 
-    const vercelUrl = process.env.VERCEL_URL?.trim();
+    const vercelUrl = serverEnv.VERCEL_URL;
     if (vercelUrl) {
         const vercelOrigin = toOrigin(vercelUrl.startsWith('http') ? vercelUrl : `https://${vercelUrl}`);
         if (vercelOrigin) {

@@ -3,12 +3,14 @@ import 'server-only';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
+import { serverEnv } from '@/lib/env/server';
+
 const DEFAULT_ALLOWED_HOST_PATTERNS = ['chutes.ai', '*.chutes.ai'] as const;
 const LOCAL_HOSTNAMES = new Set(['localhost', 'localhost.localdomain']);
 const MAX_REDIRECTS = 3;
 
 function parseAllowedHostPatterns(extraPatterns: string[] = []) {
-    const envPatterns = (process.env.CHUTES_MEDIA_FETCH_ALLOWED_HOSTS || '')
+    const envPatterns = (serverEnv.CHUTES_MEDIA_FETCH_ALLOWED_HOSTS || '')
         .split(',')
         .map((pattern) => pattern.trim().toLowerCase())
         .filter(Boolean);
