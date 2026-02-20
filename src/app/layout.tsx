@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import "./globals.css";
 import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
+import { QueryProvider } from "@/components/query-provider";
 import { ToastProvider } from "@/components/ui/toast";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -38,13 +39,15 @@ export default async function RootLayout({
       <body
         className={`${inter.variable} font-sans antialiased`}
       >
-        <ToastProvider>
-          <ChatLayout initialUser={user}>
-            {children}
-          </ChatLayout>
-          <Analytics />
-          <SpeedInsights />
-        </ToastProvider>
+        <QueryProvider>
+          <ToastProvider>
+            <ChatLayout initialUser={user}>
+              {children}
+            </ChatLayout>
+            <Analytics />
+            <SpeedInsights />
+          </ToastProvider>
+        </QueryProvider>
       </body>
     </html>
   );

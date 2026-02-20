@@ -1,8 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { createClient } from '@/utils/supabase/client';
+import { useCallback, useEffect, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+
+import { getMessagesQueryKey, getQueryClient, MESSAGE_QUERY_KEY_PREFIX } from '@/lib/query-client';
 import { type Attachment } from '@/lib/types';
+import { createClient } from '@/utils/supabase/client';
 import type { Database, Json } from '@/utils/supabase/database.types';
 
 export interface Message {
@@ -18,7 +21,6 @@ export interface Message {
 }
 
 const MESSAGE_SELECT_COLUMNS = 'id,thread_id,role,content,attachments,reasoning,model_id,created_at,deleted_at';
-const MESSAGES_PAGE_SIZE = 80;
 type MessageRow = Pick<
     Database['public']['Tables']['messages']['Row'],
     'id' | 'thread_id' | 'role' | 'content' | 'attachments' | 'reasoning' | 'model_id' | 'created_at'
@@ -44,62 +46,18 @@ function sortMessagesByCreatedAt(messages: Message[]) {
     });
 }
 
-function areAttachmentsEqual(left: Attachment[] | undefined, right: Attachment[] | undefined) {
-    const a = left ?? [];
-    const b = right ?? [];
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-        if (
-            a[i].id !== b[i].id
-            || a[i].name !== b[i].name
-            || a[i].mimeType !== b[i].mimeType
-            || a[i].size !== b[i].size
-            || a[i].path !== b[i].path
-            || a[i].url !== b[i].url
-        ) {
-            return false;
-        }
-    }
-    return true;
-}
-
-function areMessagesEqual(a: Message | undefined, b: Message | undefined) {
-    if (!a || !b) return a === b;
-    return (
-        a.id === b.id
-        && a.thread_id === b.thread_id
-        && a.role === b.role
-        && a.content === b.content
-        && (a.reasoning ?? undefined) === (b.reasoning ?? undefined)
-        && (a.model_id ?? undefined) === (b.model_id ?? undefined)
-        && a.created_at === b.created_at
-        && areAttachmentsEqual(a.attachments, b.attachments)
-    );
-}
-
-function areMessageArraysEqual(prev: Message[] | null, next: Message[]) {
-    if (!prev) return next.length === 0;
-    if (prev.length !== next.length) return false;
-    for (let i = 0; i < prev.length; i++) {
-        if (!areMessagesEqual(prev[i], next[i])) {
-            return false;
-        }
-    }
-    return true;
-}
-
 function mergeMessagesSorted(existing: Message[], incoming: Message[]) {
     if (incoming.length === 0) return existing;
-
     const byId = new Map(existing.map((message) => [message.id, message]));
     for (const message of incoming) {
-        // Preserve locally updated/realtime message versions when already present.
-        if (!byId.has(message.id)) {
-            byId.set(message.id, message);
-        }
+        byId.set(message.id, message);
     }
-
     return sortMessagesByCreatedAt(Array.from(byId.values()));
+}
+
+function removeMessagesById(existing: Message[], ids: Set<string>) {
+    if (ids.size === 0) return existing;
+    return existing.filter((message) => !ids.has(message.id));
 }
 
 function toMessage(value: unknown): Message | null {
@@ -169,9 +127,10 @@ function mapMessageRowToMessage(row: MessageRow): Message {
     };
 }
 
-// Fetch canonical message history for a thread
-export async function getThreadMessages(threadId: string): Promise<Message[]> {
-    const supabase = createClient();
+async function fetchThreadMessagesWithClient(
+    supabase: ReturnType<typeof createClient>,
+    threadId: string
+): Promise<Message[]> {
     const result = await supabase
         .from('messages')
         .select(MESSAGE_SELECT_COLUMNS)
@@ -199,127 +158,90 @@ export async function getThreadMessages(threadId: string): Promise<Message[]> {
     return (data ?? []).map(mapMessageRowToMessage);
 }
 
+function updateCachedThreadMessages(
+    threadId: string,
+    updater: (previous: Message[]) => Message[]
+) {
+    const queryClient = getQueryClient();
+    queryClient.setQueryData<Message[]>(getMessagesQueryKey(threadId), (previous) => updater(previous ?? []));
+}
+
+export function invalidateThreadMessages(threadId: string) {
+    const queryClient = getQueryClient();
+    void queryClient.invalidateQueries({ queryKey: getMessagesQueryKey(threadId) });
+}
+
+function invalidateAllThreadMessages() {
+    const queryClient = getQueryClient();
+    void queryClient.invalidateQueries({ queryKey: [MESSAGE_QUERY_KEY_PREFIX] });
+}
+
+// Fetch canonical message history for a thread
+export async function getThreadMessages(threadId: string): Promise<Message[]> {
+    const supabase = createClient();
+    return fetchThreadMessagesWithClient(supabase, threadId);
+}
+
 // Get all messages for a thread
 export function useMessages(threadId: string | null) {
-    const [messages, setMessages] = useState<Message[] | null>(() => (threadId ? null : []));
-    const [supabase] = useState(() => createClient());
-    const backfillRunRef = useRef(0);
+    const queryClient = useQueryClient();
+    const supabase = useMemo(() => createClient(), []);
 
-    const fetchMessagesPage = useCallback(async (targetThreadId: string, offset: number) => {
-        const result = await supabase
-            .from('messages')
-            .select(MESSAGE_SELECT_COLUMNS)
-            .eq('thread_id', targetThreadId)
-            .is('deleted_at', null)
-            .order('created_at', { ascending: false })
-            .order('id', { ascending: false })
-            .range(offset, offset + MESSAGES_PAGE_SIZE - 1);
-        if (!result.error || !isMissingDeletedAtColumnError(result.error)) {
-            return result;
-        }
-
-        return await supabase
-            .from('messages')
-            .select('id,thread_id,role,content,attachments,reasoning,model_id,created_at')
-            .eq('thread_id', targetThreadId)
-            .order('created_at', { ascending: false })
-            .order('id', { ascending: false })
-            .range(offset, offset + MESSAGES_PAGE_SIZE - 1);
-    }, [supabase]);
-
-    const startBackfillMessages = useCallback((
-        targetThreadId: string,
-        initialOffset: number,
-        shouldContinue: () => boolean
-    ) => {
-        const runId = ++backfillRunRef.current;
-        const shouldRun = () => shouldContinue() && backfillRunRef.current === runId;
-
-        void (async () => {
-            let offset = initialOffset;
-            const bufferedMessages: Message[] = [];
-            while (shouldRun()) {
-                const { data, error } = await fetchMessagesPage(targetThreadId, offset);
-                if (!shouldRun()) return;
-
-                if (error) {
-                    console.error('[useMessages] Error fetching messages page:', error);
-                    return;
-                }
-
-                const descending = (data ?? []).map(mapMessageRowToMessage);
-                if (descending.length === 0) {
-                    return;
-                }
-
-                const ascending = [...descending].reverse();
-                bufferedMessages.push(...ascending);
-
-                if (descending.length < MESSAGES_PAGE_SIZE) {
-                    break;
-                }
-                offset += MESSAGES_PAGE_SIZE;
-            }
-
-            if (!shouldRun() || bufferedMessages.length === 0) {
-                return;
-            }
-
-            setMessages((prevMessages) => {
-                const merged = mergeMessagesSorted(prevMessages ?? [], bufferedMessages);
-                return areMessageArraysEqual(prevMessages, merged) ? prevMessages : merged;
-            });
-        })();
-    }, [fetchMessagesPage]);
+    const query = useQuery({
+        queryKey: threadId ? getMessagesQueryKey(threadId) : [MESSAGE_QUERY_KEY_PREFIX, '__idle__'],
+        enabled: Boolean(threadId),
+        queryFn: async () => {
+            if (!threadId) return [];
+            return fetchThreadMessagesWithClient(supabase, threadId);
+        },
+    });
 
     const refreshMessages = useCallback(async (): Promise<RefreshMessagesResult> => {
         if (!threadId) return { ok: true };
-        backfillRunRef.current += 1;
-
-        const { data, error } = await fetchMessagesPage(threadId, 0);
-
-        if (error) {
-            console.error('[useMessages] Error refreshing messages:', error);
-            return { ok: false, error: error.message || 'Failed to refresh messages' };
+        const result = await query.refetch();
+        if (result.error) {
+            return { ok: false, error: result.error.message || 'Failed to refresh messages' };
         }
-
-        const descending = (data ?? []).map(mapMessageRowToMessage);
-        const ascending = [...descending].reverse();
-        setMessages((prev) => (areMessageArraysEqual(prev, ascending) ? prev : ascending));
-
-        if (descending.length === MESSAGES_PAGE_SIZE) {
-            startBackfillMessages(threadId, MESSAGES_PAGE_SIZE, () => true);
-        }
-
         return { ok: true };
-    }, [threadId, fetchMessagesPage, startBackfillMessages]);
+    }, [query, threadId]);
 
     useEffect(() => {
         if (!threadId) {
             return;
         }
 
+        const queryKey = getMessagesQueryKey(threadId);
         let isActive = true;
         let channel: ReturnType<ReturnType<typeof createClient>['channel']> | null = null;
-        backfillRunRef.current += 1;
 
-        const fetchMessages = async () => {
-            const { data, error } = await fetchMessagesPage(threadId, 0);
+        const applyRealtimePayload = (payload: {
+            eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+            new: unknown;
+            old: unknown;
+        }) => {
+            queryClient.setQueryData<Message[]>(queryKey, (previous) => {
+                const existing = previous ?? [];
 
-            if (!isActive) {
-                return;
-            }
-            if (error) {
-                console.error('[useMessages] Error fetching messages:', error);
-                return;
-            }
-            const descending = (data ?? []).map(mapMessageRowToMessage);
-            const ascending = [...descending].reverse();
-            setMessages((prev) => (areMessageArraysEqual(prev, ascending) ? prev : ascending));
+                if (payload.eventType === 'DELETE') {
+                    const deletedId =
+                        payload.old && typeof payload.old === 'object' && typeof (payload.old as { id?: unknown }).id === 'string'
+                            ? (payload.old as { id: string }).id
+                            : null;
+                    if (!deletedId) return existing;
+                    return removeMessagesById(existing, new Set([deletedId]));
+                }
 
-            if (descending.length === MESSAGES_PAGE_SIZE) {
-                startBackfillMessages(threadId, MESSAGES_PAGE_SIZE, () => isActive);
-            }
+                const nextMessage = toMessage(payload.new);
+                if (!nextMessage || nextMessage.thread_id !== threadId) {
+                    return existing;
+                }
+
+                if (nextMessage.deleted_at) {
+                    return removeMessagesById(existing, new Set([nextMessage.id]));
+                }
+
+                return mergeMessagesSorted(existing, [nextMessage]);
+            });
         };
 
         const unsubscribeRealtime = () => {
@@ -346,60 +268,19 @@ export function useMessages(threadId: string | null) {
                     filter: `thread_id=eq.${threadId}`
                 }, (payload) => {
                     if (!isActive) return;
-
-                    if (payload.eventType === 'DELETE') {
-                        const deletedId = typeof payload.old?.id === 'string' ? payload.old.id : null;
-                        if (!deletedId) return;
-                        setMessages((prev) => prev ? prev.filter((message) => message.id !== deletedId) : prev);
+                    if (payload.eventType !== 'INSERT' && payload.eventType !== 'UPDATE' && payload.eventType !== 'DELETE') {
                         return;
                     }
-
-                    const nextMessage = toMessage(payload.new);
-                    if (!nextMessage || nextMessage.thread_id !== threadId) {
-                        return;
-                    }
-                    if (nextMessage.deleted_at) {
-                        setMessages((prev) => prev ? prev.filter((message) => message.id !== nextMessage.id) : prev);
-                        return;
-                    }
-
-                    setMessages((prev) => {
-                        if (!prev) {
-                            return [nextMessage];
-                        }
-
-                        const existingIndex = prev.findIndex((message) => message.id === nextMessage.id);
-                        if (existingIndex === -1) {
-                            const merged = sortMessagesByCreatedAt([...prev, nextMessage]);
-                            return areMessageArraysEqual(prev, merged) ? prev : merged;
-                        }
-
-                        if (areMessagesEqual(prev[existingIndex], nextMessage)) {
-                            return prev;
-                        }
-
-                        const updated = [...prev];
-                        updated[existingIndex] = nextMessage;
-                        return updated;
+                    applyRealtimePayload({
+                        eventType: payload.eventType,
+                        new: payload.new,
+                        old: payload.old,
                     });
                 })
                 .subscribe();
         };
 
-        void (async () => {
-            // Only null-out if switching to a DIFFERENT thread so we don't flash stale
-            // content from another thread. When re-opening the same thread, keep existing
-            // messages visible while the fresh fetch completes.
-            setMessages((prev) => {
-                if (prev && prev.length > 0 && prev[0].thread_id !== threadId) {
-                    return null;
-                }
-                return prev;
-            });
-            await fetchMessages();
-            if (!isActive) return;
-            subscribeRealtime();
-        })();
+        subscribeRealtime();
 
         const handleVisibilityChange = () => {
             if (!isActive) return;
@@ -407,28 +288,32 @@ export function useMessages(threadId: string | null) {
                 unsubscribeRealtime();
                 return;
             }
-            void (async () => {
-                await fetchMessages();
-                if (!isActive) return;
-                subscribeRealtime();
-            })();
+            void queryClient.invalidateQueries({ queryKey });
+            subscribeRealtime();
         };
+
         if (typeof document !== 'undefined') {
             document.addEventListener('visibilitychange', handleVisibilityChange);
         }
 
         return () => {
             isActive = false;
-            backfillRunRef.current += 1;
             if (typeof document !== 'undefined') {
                 document.removeEventListener('visibilitychange', handleVisibilityChange);
             }
             unsubscribeRealtime();
         };
-    }, [threadId, supabase, fetchMessagesPage, startBackfillMessages]);
+    }, [queryClient, supabase, threadId]);
+
+    const messages = useMemo(() => {
+        if (!threadId) return [] as Message[] | null;
+        if (query.data) return query.data;
+        if (query.isPending) return null;
+        return [];
+    }, [query.data, query.isPending, threadId]);
 
     return {
-        messages: threadId ? messages : [],
+        messages,
         refreshMessages,
     };
 }
@@ -457,22 +342,35 @@ export async function addMessage(
         .single();
 
     if (error) throw error;
-    return mapMessageRowToMessage(data);
+    const nextMessage = mapMessageRowToMessage(data);
+    updateCachedThreadMessages(threadId, (previous) => mergeMessagesSorted(previous, [nextMessage]));
+    return nextMessage;
 }
 
 // Update message content (for streaming updates)
-export async function updateMessage(id: string, content: string, reasoning?: string) {
+export async function updateMessage(id: string, content: string, reasoning?: string, threadId?: string) {
     const supabase = createClient();
     const { error } = await supabase
         .from('messages')
         .update({ content, reasoning })
         .eq('id', id);
     if (error) throw error;
+
+    if (threadId) {
+        updateCachedThreadMessages(threadId, (previous) => previous.map((message) => (
+            message.id === id
+                ? { ...message, content, reasoning }
+                : message
+        )));
+        return;
+    }
+    invalidateAllThreadMessages();
 }
 
 interface DeleteMessagesOptions {
     reason?: string;
     anchorMessageId?: string | null;
+    threadId?: string;
 }
 
 // Soft delete a message
@@ -492,6 +390,13 @@ export async function deleteMessagesByIds(ids: string[], options?: DeleteMessage
     if (error) {
         throw new Error(`Soft-delete failed (${error.message}). Run db/message-soft-delete-audit.sql and retry.`);
     }
+
+    if (options?.threadId) {
+        const idsToRemove = new Set(ids);
+        updateCachedThreadMessages(options.threadId, (previous) => removeMessagesById(previous, idsToRemove));
+        return;
+    }
+    invalidateAllThreadMessages();
 }
 
 export async function restoreMessagesByIds(ids: string[], restoreWindowMinutes: number = 1440) {
@@ -502,6 +407,7 @@ export async function restoreMessagesByIds(ids: string[], restoreWindowMinutes: 
         p_restore_window_minutes: restoreWindowMinutes,
     });
     if (error) throw error;
+    invalidateAllThreadMessages();
     return typeof data === 'number' ? data : 0;
 }
 
@@ -526,5 +432,5 @@ export async function clearThreadMessages(threadId: string) {
     const ids = (data ?? [])
         .map((row) => (typeof row.id === 'string' ? row.id : null))
         .filter((value): value is string => value !== null);
-    await deleteMessagesByIds(ids, { reason: 'clear_thread' });
+    await deleteMessagesByIds(ids, { reason: 'clear_thread', threadId });
 }

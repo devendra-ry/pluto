@@ -199,10 +199,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
     const [systemPrompt, setSystemPrompt] = useState('');
     const [isAtBottom, setIsAtBottom] = useState(true);
-    const [messagesReady, setMessagesReady] = useState(false);
-    const [messagesChatId, setMessagesChatId] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState<DestructiveDeleteConfirm | null>(null);
-    const hasInitialized = useRef(false);
     const justAddedMessageIdRef = useRef<string | null>(null);
     const locallyDeletedMessageIdsRef = useRef<Set<string>>(new Set());
     const persistRetryModeHintRef = useRef<((userMessageId: string, mode: RetryMode) => void) | null>(null);
@@ -309,58 +306,37 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         });
     }, []);
 
-    const syncLocalMessages = useCallback(() => {
+    useEffect(() => {
         if (storedMessages === null) return;
 
-        // Reset if we've switched chats.
-        if (hasInitialized.current && storedMessages && storedMessages.length === 0 && messages.length > 0) {
-            setMessages([]);
-            hasInitialized.current = false;
-            setMessagesReady(false);
-        }
-
-        if (!hasInitialized.current && storedMessages) {
-            hasInitialized.current = true;
-            setMessagesChatId(chatId);
-            applyStoredMessages(storedMessages);
-            setMessagesReady(true);
-        } else {
-            // Update messages from storage only when not generating.
-            if (!isLoading && !isThinking && storedMessages) {
-                // Protect local retry/edit state from stale realtime snapshots that still contain deleted messages.
-                if (locallyDeletedMessageIdsRef.current.size > 0) {
-                    const hasLocallyDeleted = storedMessages.some((m) => locallyDeletedMessageIdsRef.current.has(m.id));
-                    if (hasLocallyDeleted) {
-                        return;
-                    }
-                    locallyDeletedMessageIdsRef.current.clear();
-                }
-
-                // If we just added a message, wait for it to appear in storedMessages before syncing.
-                if (justAddedMessageIdRef.current) {
-                    const found = storedMessages.find(m => m.id === justAddedMessageIdRef.current);
-                    if (!found) {
-                        return;
-                    }
-                    justAddedMessageIdRef.current = null;
-                }
-
-                setMessagesChatId(chatId);
-                applyStoredMessages(storedMessages);
+        // Keep local retry/edit protection while waiting for canonical cache to settle.
+        if (locallyDeletedMessageIdsRef.current.size > 0) {
+            const hasLocallyDeleted = storedMessages.some((m) => locallyDeletedMessageIdsRef.current.has(m.id));
+            if (hasLocallyDeleted) {
+                return;
             }
+            locallyDeletedMessageIdsRef.current.clear();
         }
-    }, [storedMessages, messages.length, chatId, isLoading, isThinking, applyStoredMessages]);
 
-    useEffect(() => {
+        // Avoid overriding in-progress streaming content until message IDs are canonical.
+        if (justAddedMessageIdRef.current) {
+            const found = storedMessages.find((m) => m.id === justAddedMessageIdRef.current);
+            if (!found) {
+                return;
+            }
+            justAddedMessageIdRef.current = null;
+        }
+
+        if (isLoading || isThinking) {
+            return;
+        }
+
         // eslint-disable-next-line react-hooks/set-state-in-effect
-        syncLocalMessages();
-    }, [syncLocalMessages]);
+        applyStoredMessages(storedMessages);
+    }, [storedMessages, isLoading, isThinking, applyStoredMessages]);
 
     const resetLocalChatState = useCallback(() => {
-        hasInitialized.current = false;
-        setMessagesChatId(null);
         setMessages([]);
-        setMessagesReady(false);
 
         if (chatInputRef.current) {
             chatInputRef.current.setValue('');
@@ -384,11 +360,8 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         prevChatIdRef.current = chatId;
     }, [chatId, resetLocalChatState]);
 
-    const isThreadSynchronized = messagesChatId === chatId;
-    const visibleMessages = useMemo(
-        () => (isThreadSynchronized ? messages : []),
-        [isThreadSynchronized, messages]
-    );
+    const messagesReady = storedMessages !== null;
+    const visibleMessages = useMemo(() => messages, [messages]);
 
     const scrollToBottom = useCallback(() => {
         if (virtuosoRef.current) {
@@ -403,7 +376,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
     // Keep viewport pinned only while actively streaming and only if user stayed at bottom.
     useEffect(() => {
-        if (!isThreadSynchronized || visibleMessages.length === 0) {
+        if (visibleMessages.length === 0) {
             return;
         }
         if (!isAtBottomRef.current) {
@@ -417,11 +390,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' });
             });
         }
-    }, [visibleMessages.length, isLoading, isThinking, isThreadSynchronized]);
+    }, [visibleMessages.length, isLoading, isThinking]);
 
     // Scroll to bottom exactly once when a thread finishes initial message sync.
     useEffect(() => {
-        if (!messagesReady || !isThreadSynchronized || visibleMessages.length === 0) {
+        if (!messagesReady || visibleMessages.length === 0) {
             return;
         }
         if (initialBottomScrollChatIdRef.current === chatId) {
@@ -434,7 +407,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' });
             });
         });
-    }, [chatId, messagesReady, isThreadSynchronized, visibleMessages.length]);
+    }, [chatId, messagesReady, visibleMessages.length]);
 
     const handleAtBottomStateChange = useCallback((nextIsAtBottom: boolean) => {
         setIsAtBottom((prev) => (prev === nextIsAtBottom ? prev : nextIsAtBottom));
@@ -483,11 +456,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
     // Check for pending user message on load (e.g. new chat from home).
     useEffect(() => {
-        // Don't auto-retry if the last request failed or if messages don't belong to current chat.
-        if (lastRequestFailed || messagesChatId !== chatId) {
+        // Don't auto-retry if the last request failed or if canonical messages are still loading.
+        if (lastRequestFailed || !messagesReady) {
             return;
         }
-        if (hasInitialized.current && messages.length > 0 && !isLoading && !isThinking) {
+        if (messages.length > 0 && !isLoading && !isThinking) {
             const lastMessage = messages[messages.length - 1];
             if (lastMessage.role === 'user') {
                 const pendingGenerationThreadId = window.sessionStorage.getItem(PENDING_GENERATION_THREAD_KEY);
@@ -517,7 +490,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 );
             }
         }
-    }, [messages, isLoading, isThinking, generateResponse, chatId, lastRequestFailed, messagesChatId]);
+    }, [messages, messagesReady, isLoading, isThinking, generateResponse, chatId, lastRequestFailed]);
 
     const sendMessage = useCallback(async (
         userMessage: string,
@@ -620,6 +593,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             await deleteMessagesByIds(deleteIds, {
                 reason: 'edit',
                 anchorMessageId: anchorBeforeEditId,
+                threadId: chatId,
             });
             const persistedUser = await addMessage(chatId, 'user', newContent, undefined, editModelId, editedMessageAttachments);
             const keptMessages = canonicalMessages.slice(0, deleteStartIndex).map((m) => ({
@@ -669,11 +643,11 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         confirmDestructiveDelete,
     ]);
 
-    const shouldShowEmptyState = messagesReady && isThreadSynchronized && visibleMessages.length === 0 && !isThinking;
+    const shouldShowEmptyState = messagesReady && visibleMessages.length === 0 && !isThinking;
     // Keep Virtuoso permanently mounted so it never loses scroll position or
     // measured item sizes across thread switches.  Hide it with CSS when we
     // need to show the empty state or while messages are still loading.
-    const hideMessageList = !messagesReady || !isThreadSynchronized || shouldShowEmptyState;
+    const hideMessageList = !messagesReady || shouldShowEmptyState;
 
     return (
         <div className="flex flex-col h-full bg-[#1a1520]">

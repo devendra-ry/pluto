@@ -240,6 +240,7 @@ export function useRetryLogic({
             await deleteMessagesByIds(deleteIds, {
                 reason: 'retry',
                 anchorMessageId,
+                threadId: chatId,
             });
             const previousMessages: ChatViewMessage[] = canonicalMessages.slice(0, anchorDbIndex + 1).map((m) => ({
                 id: m.id,
