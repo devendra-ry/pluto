@@ -1,105 +1,131 @@
 # Pluto
 
-Pluto is a modern, local-first AI chat interface built with Next.js 16, designed to provide a premium experience for interacting with cutting-edge LLMs. It focuses on privacy, speed, and advanced reasoning capabilities.
+A fast, production-style AI workspace built on Next.js 16.
 
-## ✨ Features
+Pluto gives you one chat surface for multiple providers, plus dedicated generation modes for image, image edit, and image-to-video. It is optimized for realtime sync, secure request handling, and low-friction model expansion.
 
-- **Advanced Model Support**: Access the latest models via **Google Gemini** and **Chutes.ai** (TEE-protected), including:
-  - **Google**: Gemini 3 Flash, Gemini 2.5 Flash, Gemma 3.
-  - **DeepSeek**: DeepSeek V3.2 (with TEE security).
-  - **Qwen**: Qwen 3 (Thinking & Instruct variants).
-  - **Other Top Models**: Kimi K2.5, MiniMax M2.1, GLM 4.7, and Hermes 4.
-- **Visualized Reasoning**: specialized UI for "Thinking" models (like DeepSeek R1 and Gemini Flash Thinking), allowing you to expand/collapse the model's internal chain of thought.
-- **Multimodal Inputs**: model-aware file attachments with upload progress, cancel/retry, and per-provider capability checks.
-- **Image Generation Mode**: a dedicated Image pill routes prompts to internal z-image generation flow without exposing image-only models in selector.
-- **Gemini Search Mode**: optional Search pill uses Google Search grounding, restricted to Gemini 2.5 Flash and Gemini 2.5 Flash Lite.
-- **Supabase-Powered History**: Your chat history is stored securely in **Supabase**. This ensures your conversations are available across devices and stay in sync in real-time.
-- **Rich Text Rendering**:
-  - **Markdown Support**: Full GFM (GitHub Flavored Markdown) support.
-  - **LaTeX Math**: Beautifully renders mathematical equations using KaTeX.
-  - **Syntax Highlighting**: Auto-detects and highlights code blocks.
+## What Makes It Good
 
-- **Responsive Design**: Built with **Tailwind CSS v4** and **Shadcn UI** for a sleek, dark-mode-first aesthetic.
+- One model selector, multiple providers: Google, Chutes, OpenRouter.
+- Mode-driven UX:
+  - `Chat`
+  - `Search` (Gemini 2.5 Flash / Flash Lite only)
+  - `Image` (with inline image-model submenu)
+  - `Image Edit`
+  - `Image to Video`
+- Attachment pipeline with server validation and ownership checks.
+- Realtime message sync with Supabase + React Query canonical cache.
+- Hardened API boundaries (auth + origin checks + JSON/schema checks + SSRF guard).
 
-## 🧠 How it Works
+## Capability Snapshot
 
-Pluto operates as a client-heavy application with a lightweight API proxy.
+| Area | Implementation |
+|---|---|
+| Chat routing | Provider registry + model metadata |
+| Streaming | SSE from `/api/chat` with transformation |
+| Sync | Supabase Realtime + `@tanstack/react-query` |
+| Uploads | Multipart-only, max `100MB`, MIME allowlist |
+| Image Gen | Chutes-backed `/api/images` with model-specific payload mapping |
+| Image Edit | Chutes Qwen image edit path with robust response parsing |
+| Video Gen | Chutes WAN i2v path via `/api/videos` |
+| Security | Auth middleware, CSRF-style origin checks, SSRF-safe media fetch |
 
-### Data Flow
-1.  **User Input**: You type a message and hit send.
-2.  **Optimistic UI**: The message is immediately added to the UI and saved to **IndexedDB** locally.
-3.  **API Request**: The client sends the chat history to the Next.js API route (`/api/chat`).
-4.  **Provider Routing**: The API determines which provider to use (Google, Chutes, or OpenRouter) based on the selected model.
-5.  **Stream Transformation**: The API establishes a stream with the LLM provider.
-    -   It parses incoming chunks.
-    -   It detects `<think>` tags (generic or provider-specific) and standardizes them into a `reasoning_content` field.
-6.  **Real-time Update**: The client receives these standardized chunks and updates the message in real-time, separating "thought" from "response".
+## Current Image Generation Models
 
-### Database
-Pluto uses **Supabase** to manage `threads` and `messages`. This means:
--   **Sync**: Your conversations are synchronized across all your devices.
--   **Real-time**: The UI updates instantly when changes occur, powerd by Supabase Realtime.
--   **Persistence**: Your chats are safely stored in the cloud.
+- `zai-org/z-image-turbo`
+- `tencent/hunyuan-image-3`
+- `Qwen/Qwen-Image-2512`
+- `hidream/hidream`
 
-## 🛠️ Tech Stack
+The UI auto-populates this list inside the existing mode dropdown submenu.
 
-- **Framework**: [Next.js 16](https://nextjs.org/) (App Router)
-- **Language**: [TypeScript](https://www.typescriptlang.org/)
-- **UI Library**: [React 19](https://react.dev/), [Shadcn UI](https://ui.shadcn.com/), [Tailwind CSS v4](https://tailwindcss.com/)
-- **State/Database**: [Supabase](https://supabase.com/)
-- **AI Integration**: [Google GenAI SDK](https://github.com/googleapis/js-genai), [OpenRouter SDK](https://openrouter.ai/docs), Chutes API
-- **Markdown/Math**: `react-markdown`, `rehype-katex`, `remark-math`
+## Architecture
 
-## 🚀 Getting Started
+```text
+Client (chat page)
+  -> optimistic message/update
+  -> API route (/api/chat | /api/images | /api/videos)
+  -> provider call (Google/Chutes/OpenRouter)
+  -> stream or generated asset
+  -> persist (Supabase DB/Storage)
+  -> realtime fanout (Supabase Realtime)
+  -> React Query cache updates UI
+```
 
-### Prerequisites
+## Tech Stack
 
-- Node.js 18+ installed
-- API Keys for the providers:
-  - **[Google AI Studio](https://aistudio.google.com/)**: Required for Gemini models.
-  - **[Chutes.ai](https://chutes.ai/)**: Required for DeepSeek, Qwen, Kimi, and other TEE models.
-  - **[OpenRouter](https://openrouter.ai/)**: Optional, for other models.
+- Next.js 16 (App Router)
+- React 19 + TypeScript
+- Tailwind CSS v4 + shadcn/ui
+- Supabase (auth, DB, storage, realtime)
+- `@tanstack/react-query`
+- Google GenAI SDK, OpenRouter SDK, Chutes APIs
 
-### Installation
+## Quick Start
 
-1.  **Clone the repository**
-    ```bash
-    git clone https://github.com/yourusername/pluto.git
-    cd pluto
-    ```
+### 1. Install and run
 
-2.  **Install dependencies**
-    ```bash
-    npm install
-    # or
-    pnpm install
-    ```
+```bash
+npm install
+npm run dev
+```
 
-3.  **Set up Environment Variables**
-    Create a `.env.local` file in the root directory and add your keys:
+Open `http://localhost:3000`.
 
-    ```env
-    # Google Gemini (Required for Gemini models)
-    GEMINI_API_KEY=your_google_api_key_here
+### 2. Configure `.env.local`
 
-    # Chutes.ai (Required for DeepSeek, Qwen, etc.)
-    CHUTES_API_KEY=your_chutes_api_key_here
+```env
+# Required
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+GEMINI_API_KEY=...
 
-    # OpenRouter (Optional)
-    OPENROUTER_API_KEY=your_openrouter_api_key_here
+# Optional provider keys
+CHUTES_API_KEY=...
+CHUTES_API_TOKEN=...
+OPENROUTER_API_KEY=...
 
-    # App URL (for OpenRouter identification)
-    NEXT_PUBLIC_APP_URL=http://localhost:3000
-    ```
+# Optional origin configuration (recommended)
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+APP_URL=http://localhost:3000
+VERCEL_URL=
 
-4.  **Run the development server**
-    ```bash
-    npm run dev
-    ```
+# Optional storage bucket override (default: chat-attachments)
+SUPABASE_ATTACHMENTS_BUCKET=chat-attachments
+NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET=chat-attachments
 
-5.  **Open the app**
-    Navigate to [http://localhost:3000](http://localhost:3000) in your browser.
+# Optional SSRF allowlist extensions (comma-separated patterns)
+CHUTES_MEDIA_FETCH_ALLOWED_HOSTS=
 
-## 🤝 Contributing
+# Optional WAN i2v default negative prompt
+CHUTES_WAN_I2V_NEGATIVE_PROMPT=
+```
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+## Extending Image Models (Minimal UI Changes)
+
+To add another Chutes image model, update three places:
+
+1. Add model to `src/lib/constants.ts` -> `IMAGE_GENERATION_MODELS`.
+2. Add endpoint candidates in `src/lib/chutes.ts`.
+3. Add payload mapping in `src/app/api/images/route.ts` -> `getImageRequestAttempts(...)` if required.
+
+No extra settings panel is needed; the mode dropdown submenu picks it up automatically.
+
+### Optional endpoint override pattern
+
+- `CHUTES_IMAGE_API_URL_<MODEL_ID_SUFFIX>`
+- Example: `CHUTES_IMAGE_API_URL_QWEN_QWEN_IMAGE_2512=...`
+
+## Useful Scripts
+
+- `npm run dev`
+- `npm run build`
+- `npm run lint`
+- `npm run db:types`
+
+## Uptime Monitor Targets
+
+- `GET /`
+- `GET /login`
+
+Note: most `/api/*` routes are authenticated by design; use an authenticated monitor if you check APIs directly.
