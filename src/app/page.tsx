@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, isImageGenerationModel, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_SYSTEM_PROMPT_KEY, VIDEO_GENERATION_MODEL } from '@/lib/constants';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, isImageGenerationModel, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_REASONING_EFFORT_KEY, PENDING_SYSTEM_PROMPT_KEY, VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -29,6 +29,7 @@ export default function HomePage() {
   const [model, setModel] = useState(DEFAULT_MODEL);
   const modelRef = useRef(DEFAULT_MODEL);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
+  const reasoningEffortRef = useRef<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [draftThreadId, setDraftThreadId] = useState<string | null>(null);
@@ -43,6 +44,9 @@ export default function HomePage() {
   useEffect(() => {
     modelRef.current = model;
   }, [model]);
+  useEffect(() => {
+    reasoningEffortRef.current = reasoningEffort;
+  }, [reasoningEffort]);
 
   const ensureThread = useCallback(async () => {
     if (draftThreadIdRef.current) {
@@ -54,7 +58,7 @@ export default function HomePage() {
     }
 
     const createPromise = (async () => {
-      const thread = await createThread(modelRef.current, reasoningEffort, systemPrompt);
+      const thread = await createThread(modelRef.current, reasoningEffortRef.current, systemPrompt);
       draftThreadIdRef.current = thread.id;
       setDraftThreadId(thread.id);
       return thread.id;
@@ -68,7 +72,7 @@ export default function HomePage() {
         ensureThreadPromiseRef.current = null;
       }
     }
-  }, [reasoningEffort, systemPrompt]);
+  }, [systemPrompt]);
 
   const handleSystemPromptChange = async (nextPrompt: string) => {
     const previousPrompt = systemPrompt;
@@ -107,6 +111,7 @@ export default function HomePage() {
 
   const handleReasoningEffortChange = (nextEffort: ReasoningEffort) => {
     const previousEffort = reasoningEffort;
+    reasoningEffortRef.current = nextEffort;
     setReasoningEffort(nextEffort);
     if (!draftThreadId) return;
 
@@ -114,6 +119,7 @@ export default function HomePage() {
       try {
         await updateReasoningEffort(draftThreadId, nextEffort);
       } catch (error) {
+        reasoningEffortRef.current = previousEffort;
         setReasoningEffort((current) => current === nextEffort ? previousEffort : current);
         const message = error instanceof Error ? error.message : 'Failed to update reasoning effort';
         showToast(message, 'error');
@@ -149,6 +155,11 @@ export default function HomePage() {
       // The ChatPageClient will pick up the user message and start generating
       window.sessionStorage.setItem(PENDING_GENERATION_THREAD_KEY, threadId);
       window.sessionStorage.setItem(PENDING_GENERATION_MODEL_KEY, targetModel);
+      if (!isImageMode && !isVideoMode) {
+        window.sessionStorage.setItem(PENDING_REASONING_EFFORT_KEY, reasoningEffortRef.current);
+      } else {
+        window.sessionStorage.removeItem(PENDING_REASONING_EFFORT_KEY);
+      }
       if (isSearchMode && !isImageMode) {
         window.sessionStorage.setItem(PENDING_GENERATION_SEARCH_KEY, '1');
       } else {

@@ -259,6 +259,7 @@ export const VIDEO_GENERATION_MODEL = 'Qwen/WAN-2.2-I2V-14B-Fast';
 export const PENDING_GENERATION_THREAD_KEY = 'pending-generation-thread-id';
 export const PENDING_GENERATION_MODEL_KEY = 'pending-generation-model-id';
 export const PENDING_GENERATION_SEARCH_KEY = 'pending-generation-search';
+export const PENDING_REASONING_EFFORT_KEY = 'pending-reasoning-effort';
 export const PENDING_SYSTEM_PROMPT_KEY = 'pending-system-prompt';
 export const SEARCH_ENABLED_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'] as const;
 

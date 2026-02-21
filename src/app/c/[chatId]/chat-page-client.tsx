@@ -29,6 +29,7 @@ import {
     PENDING_GENERATION_MODEL_KEY,
     PENDING_GENERATION_SEARCH_KEY,
     PENDING_GENERATION_THREAD_KEY,
+    PENDING_REASONING_EFFORT_KEY,
     PENDING_SYSTEM_PROMPT_KEY,
     SEARCH_ENABLED_MODELS,
     VIDEO_GENERATION_MODEL,
@@ -186,6 +187,13 @@ function isSelectableChatModel(modelId: string): boolean {
     const modelConfig = AVAILABLE_MODELS.find((m) => m.id === modelId);
     if (!modelConfig) return false;
     return !modelConfig.hidden && !modelConfig.capabilities.includes('imageGen');
+}
+
+function toReasoningEffort(value: string | null): ReasoningEffort | null {
+    if (value === 'low' || value === 'medium' || value === 'high') {
+        return value;
+    }
+    return null;
 }
 
 export function ChatPageClient({ chatId }: ChatPageClientProps) {
@@ -477,11 +485,18 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 }
                 const pendingGenerationModelId = window.sessionStorage.getItem(PENDING_GENERATION_MODEL_KEY);
                 const pendingGenerationSearch = window.sessionStorage.getItem(PENDING_GENERATION_SEARCH_KEY);
+                const pendingReasoningEffortRaw = window.sessionStorage.getItem(PENDING_REASONING_EFFORT_KEY);
                 const pendingSystemPrompt = window.sessionStorage.getItem(PENDING_SYSTEM_PROMPT_KEY);
                 const pendingModelId = pendingGenerationModelId ?? undefined;
+                const pendingReasoningEffort = toReasoningEffort(pendingReasoningEffortRaw);
+                if (pendingReasoningEffort) {
+                    reasoningEffortRef.current = pendingReasoningEffort;
+                    setReasoningEffort(pendingReasoningEffort);
+                }
                 window.sessionStorage.removeItem(PENDING_GENERATION_THREAD_KEY);
                 window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
                 window.sessionStorage.removeItem(PENDING_GENERATION_SEARCH_KEY);
+                window.sessionStorage.removeItem(PENDING_REASONING_EFFORT_KEY);
                 window.sessionStorage.removeItem(PENDING_SYSTEM_PROMPT_KEY);
                 if (
                     pendingModelId
