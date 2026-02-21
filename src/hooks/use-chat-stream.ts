@@ -205,12 +205,10 @@ export function useChatStream({
         const isMediaGenModel = isImageGenModel || isVideoGenModel;
         const useSearch = !isMediaGenModel && forceSearchMode;
         const supportsReasoning = isMediaGenModel ? false : (selectedModel?.supportsReasoning ?? true);
-        const suppressReasoningForLowEffort = selectedModel?.usesThinkingParam === true && effectiveReasoningEffort === 'low';
-        const shouldCollectReasoning = supportsReasoning && !suppressReasoningForLowEffort;
         const retryMode: RetryMode = isImageGenModel ? 'image' : (isVideoGenModel ? 'video' : (useSearch ? 'search' : 'chat'));
         persistRetryModeHintRef.current?.(lastMsg.id, retryMode);
 
-        const willThink = shouldCollectReasoning;
+        const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && effectiveReasoningEffort === 'low');
 
         dispatch({ type: 'BEGIN', messageId: lastMsg.id, thinking: !isMediaGenModel && willThink });
         abortControllerRef.current = new AbortController();
@@ -444,7 +442,7 @@ export function useChatStream({
                                 const reasoningContent =
                                     (typeof delta.reasoning_content === 'string' ? delta.reasoning_content : '') ||
                                     (typeof delta.thinking === 'string' ? delta.thinking : '');
-                                if (reasoningContent && shouldCollectReasoning) {
+                                if (reasoningContent && supportsReasoning) {
                                     fullReasoning += reasoningContent;
                                     hasPendingAssistantUpdate = true;
                                     scheduleAssistantUpdate();
