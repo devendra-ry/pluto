@@ -115,7 +115,7 @@ function streamReducer(state: StreamState, action: StreamAction): StreamState {
 interface UseChatStreamParams {
     chatId: string;
     model: string;
-    reasoningEffort: ReasoningEffort;
+    reasoningEffortRef: MutableRefObject<ReasoningEffort>;
     systemPrompt: string;
     setMessages: Dispatch<SetStateAction<ChatViewMessage[]>>;
     justAddedMessageIdRef: MutableRefObject<string | null>;
@@ -139,7 +139,7 @@ function isAttachment(value: unknown): value is Attachment {
 export function useChatStream({
     chatId,
     model,
-    reasoningEffort,
+    reasoningEffortRef,
     systemPrompt,
     setMessages,
     justAddedMessageIdRef,
@@ -198,6 +198,7 @@ export function useChatStream({
         }
 
         const activeModelId = forcedModelId || model;
+        const effectiveReasoningEffort = reasoningEffortRef.current;
         const selectedModel = AVAILABLE_MODELS.find(m => m.id === activeModelId);
         const isImageGenModel = isImageGenerationModel(activeModelId);
         const isVideoGenModel = activeModelId === VIDEO_GENERATION_MODEL;
@@ -207,7 +208,7 @@ export function useChatStream({
         const retryMode: RetryMode = isImageGenModel ? 'image' : (isVideoGenModel ? 'video' : (useSearch ? 'search' : 'chat'));
         persistRetryModeHintRef.current?.(lastMsg.id, retryMode);
 
-        const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && reasoningEffort === 'low');
+        const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && effectiveReasoningEffort === 'low');
 
         dispatch({ type: 'BEGIN', messageId: lastMsg.id, thinking: !isMediaGenModel && willThink });
         abortControllerRef.current = new AbortController();
@@ -386,7 +387,7 @@ export function useChatStream({
                         attachments: m.attachments ?? [],
                     })),
                     model: activeModelId,
-                    reasoningEffort,
+                    reasoningEffort: effectiveReasoningEffort,
                     systemPrompt: !isMediaGenModel && effectiveSystemPrompt ? effectiveSystemPrompt : undefined,
                     search: useSearch,
                 }),
@@ -508,7 +509,7 @@ export function useChatStream({
             abortControllerRef.current = null;
             dispatch({ type: 'COMPLETE', failed: requestFailed });
         }
-    }, [chatId, model, reasoningEffort, systemPrompt, showToast, setMessages, justAddedMessageIdRef, persistRetryModeHintRef]);
+    }, [chatId, model, reasoningEffortRef, systemPrompt, showToast, setMessages, justAddedMessageIdRef, persistRetryModeHintRef]);
 
     return {
         isLoading: state.phase !== 'idle',

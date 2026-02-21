@@ -197,6 +197,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const modelRef = useRef<string>(DEFAULT_MODEL);
     const [messages, setMessages] = useState<ChatViewMessage[]>([]);
     const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
+    const reasoningEffortRef = useRef<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
     const [systemPrompt, setSystemPrompt] = useState('');
     const [isAtBottom, setIsAtBottom] = useState(true);
     const [deleteConfirm, setDeleteConfirm] = useState<DestructiveDeleteConfirm | null>(null);
@@ -220,7 +221,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     } = useChatStream({
         chatId,
         model,
-        reasoningEffort,
+        reasoningEffortRef,
         systemPrompt,
         setMessages,
         justAddedMessageIdRef,
@@ -274,6 +275,9 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     useEffect(() => {
         modelRef.current = model;
     }, [model]);
+    useEffect(() => {
+        reasoningEffortRef.current = reasoningEffort;
+    }, [reasoningEffort]);
 
     const applyThreadState = useCallback(() => {
         if (thread?.model && isSelectableChatModel(thread.model)) {
@@ -281,6 +285,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             setModel(thread.model);
         }
         if (thread?.reasoning_effort) {
+            reasoningEffortRef.current = thread.reasoning_effort;
             setReasoningEffort(thread.reasoning_effort);
         }
         setSystemPrompt(thread?.system_prompt ?? '');
@@ -343,6 +348,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         }
 
         resetStreamState();
+        reasoningEffortRef.current = DEFAULT_REASONING_EFFORT;
         setReasoningEffort(DEFAULT_REASONING_EFFORT);
         setSystemPrompt('');
         setIsAtBottom(true);
@@ -432,10 +438,12 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
 
     const handleReasoningEffortChange = async (effort: ReasoningEffort) => {
         const previousEffort = reasoningEffort;
+        reasoningEffortRef.current = effort;
         setReasoningEffort(effort);
         try {
             await updateReasoningEffort(chatId, effort);
         } catch (error) {
+            reasoningEffortRef.current = previousEffort;
             setReasoningEffort(previousEffort);
             const message = error instanceof Error ? error.message : 'Failed to update reasoning effort';
             showToast(message, 'error');
