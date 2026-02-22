@@ -32,19 +32,16 @@ to authenticated
 using (user_id = (select auth.uid()));
 
 -- Messages
+-- Add user_id column for performance optimization (avoid joins in RLS).
+alter table public.messages
+  add column if not exists user_id uuid default auth.uid();
+
 drop policy if exists "Users can view messages in their threads" on public.messages;
 create policy "Users can view messages in their threads"
 on public.messages
 for select
 to authenticated
-using (
-  exists (
-    select 1
-    from public.threads
-    where threads.id = messages.thread_id
-      and threads.user_id = (select auth.uid())
-  )
-);
+using (user_id = auth.uid());
 
 drop policy if exists "Users can insert messages in their threads" on public.messages;
 create policy "Users can insert messages in their threads"
@@ -52,11 +49,12 @@ on public.messages
 for insert
 to authenticated
 with check (
-  exists (
+  user_id = auth.uid()
+  and exists (
     select 1
     from public.threads
     where threads.id = messages.thread_id
-      and threads.user_id = (select auth.uid())
+      and threads.user_id = auth.uid()
   )
 );
 
@@ -65,34 +63,21 @@ create policy "Users can delete messages in their threads"
 on public.messages
 for delete
 to authenticated
-using (
-  exists (
-    select 1
-    from public.threads
-    where threads.id = messages.thread_id
-      and threads.user_id = (select auth.uid())
-  )
-);
+using (user_id = auth.uid());
 
 drop policy if exists "Users can update messages in their threads" on public.messages;
 create policy "Users can update messages in their threads"
 on public.messages
 for update
 to authenticated
-using (
-  exists (
-    select 1
-    from public.threads
-    where threads.id = messages.thread_id
-      and threads.user_id = (select auth.uid())
-  )
-)
+using (user_id = auth.uid())
 with check (
-  exists (
+  user_id = auth.uid()
+  and exists (
     select 1
     from public.threads
     where threads.id = messages.thread_id
-      and threads.user_id = (select auth.uid())
+      and threads.user_id = auth.uid()
   )
 );
 
@@ -224,6 +209,9 @@ grant execute on function public.cleanup_empty_new_chat_threads(uuid) to authent
 -- 5) Query-performance indexes for common app reads.
 create index if not exists messages_thread_created_idx
   on public.messages (thread_id, created_at);
+
+create index if not exists messages_user_id_idx
+  on public.messages (user_id);
 
 create index if not exists messages_thread_created_id_desc_idx
   on public.messages (thread_id, created_at desc, id desc);
