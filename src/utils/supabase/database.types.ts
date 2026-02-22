@@ -26,6 +26,7 @@ export type Database = {
           reasoning: string | null
           role: string
           thread_id: string
+          user_id: string
         }
         Insert: {
           attachments?: Json
@@ -38,6 +39,7 @@ export type Database = {
           reasoning?: string | null
           role: string
           thread_id: string
+          user_id?: string
         }
         Update: {
           attachments?: Json
@@ -50,6 +52,7 @@ export type Database = {
           reasoning?: string | null
           role?: string
           thread_id?: string
+          user_id?: string
         }
         Relationships: [
           {
