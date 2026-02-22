@@ -7,7 +7,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import Image from 'next/image';
 import { Copy, RefreshCcw, SquarePen, GitBranch, ChevronDown, Check, Brain, Loader2, type LucideIcon } from 'lucide-react';
-import { useState, memo } from 'react';
+import { useState, memo, type ComponentProps } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
@@ -41,6 +41,41 @@ function ActionIcon({ icon: Icon, title, onClick, className }: ActionIconProps) 
     );
 }
 
+const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex];
+const REMARK_PLUGINS = [remarkGfm, remarkMath];
+
+const preprocessLaTeX = (text: string) => {
+    if (!text) return text;
+    return text
+        // Replace block math: \[ ... \] or \\[ ... \\]
+        .replace(/\\+\[([\s\S]*?)\\+\]/g, (_, equation) => `\n$$\n${equation}\n$$\n`)
+        // Replace inline math: \( ... \) or \\( ... \\)
+        .replace(/\\+\(([\s\S]*?)\\+\)/g, (_, equation) => `$${equation}$`);
+};
+
+const MARKDOWN_COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = {
+    pre: ({ children }) => (
+        <pre className="bg-[#1a1520]/80 backdrop-blur-sm rounded-xl p-5 overflow-x-auto my-4 border border-[#2d2235]/60 scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
+            {children}
+        </pre>
+    ),
+    code: ({ className, children, ...props }) => {
+        const isInline = !className;
+        return isInline ? (
+            <code className="bg-[#2a2035]/60 px-1.5 py-0.5 rounded-md text-[15px] text-pink-300 font-mono border border-white/5" {...props}>
+                {children}
+            </code>
+        ) : (
+            <code className={cn(className, "font-mono text-[15px] leading-relaxed")} {...props}>
+                {children}
+            </code>
+        );
+    },
+    li: ({ children }) => (
+        <li className="text-zinc-200/90 my-1">{children}</li>
+    ),
+};
+
 interface ChatMessageProps {
     id: string;
     role: 'user' | 'assistant';
@@ -73,15 +108,6 @@ export const ChatMessage = memo(function ChatMessage({
     const [copied, setCopied] = useState(false);
     const isUser = role === 'user';
     const { showToast } = useToast();
-
-    const preprocessLaTeX = (text: string) => {
-        if (!text) return text;
-        return text
-            // Replace block math: \[ ... \] or \\[ ... \\]
-            .replace(/\\+\[([\s\S]*?)\\+\]/g, (_, equation) => `\n$$\n${equation}\n$$\n`)
-            // Replace inline math: \( ... \) or \\( ... \\)
-            .replace(/\\+\(([\s\S]*?)\\+\)/g, (_, equation) => `$${equation}$`);
-    };
 
     const handleCopy = async () => {
         await navigator.clipboard.writeText(content);
@@ -292,8 +318,8 @@ export const ChatMessage = memo(function ChatMessage({
                                                     [&_.katex]:text-[15px]
                                                 ">
                                                     <ReactMarkdown
-                                                        rehypePlugins={[rehypeHighlight, rehypeKatex]}
-                                                        remarkPlugins={[remarkGfm, remarkMath]}
+                                                        rehypePlugins={REHYPE_PLUGINS}
+                                                        remarkPlugins={REMARK_PLUGINS}
                                                     >
                                                         {preprocessLaTeX(reasoning)}
                                                     </ReactMarkdown>
@@ -329,30 +355,9 @@ export const ChatMessage = memo(function ChatMessage({
                             [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden
                         ">
                             <ReactMarkdown
-                                rehypePlugins={[rehypeHighlight, rehypeKatex]}
-                                remarkPlugins={[remarkGfm, remarkMath]}
-                                components={{
-                                    pre: ({ children }) => (
-                                        <pre className="bg-[#1a1520]/80 backdrop-blur-sm rounded-xl p-5 overflow-x-auto my-4 border border-[#2d2235]/60 scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
-                                            {children}
-                                        </pre>
-                                    ),
-                                    code: ({ className, children, ...props }) => {
-                                        const isInline = !className;
-                                        return isInline ? (
-                                            <code className="bg-[#2a2035]/60 px-1.5 py-0.5 rounded-md text-[15px] text-pink-300 font-mono border border-white/5" {...props}>
-                                                {children}
-                                            </code>
-                                        ) : (
-                                            <code className={cn(className, "font-mono text-[15px] leading-relaxed")} {...props}>
-                                                {children}
-                                            </code>
-                                        );
-                                    },
-                                    li: ({ children }) => (
-                                        <li className="text-zinc-200/90 my-1">{children}</li>
-                                    ),
-                                }}
+                                rehypePlugins={REHYPE_PLUGINS}
+                                remarkPlugins={REMARK_PLUGINS}
+                                components={MARKDOWN_COMPONENTS}
                             >
                                 {preprocessLaTeX(content)}
                             </ReactMarkdown>
