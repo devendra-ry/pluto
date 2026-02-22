@@ -1,7 +1,8 @@
 import 'server-only';
 
-import { lookup } from 'node:dns/promises';
+import { lookup } from 'node:dns';
 import { isIP } from 'node:net';
+import { Agent, fetch as undiciFetch } from 'undici';
 
 import { serverEnv } from '@/lib/env/server';
 
@@ -113,6 +114,44 @@ function isHostAllowed(hostname: string, allowedHostPatterns: string[]) {
     });
 }
 
+// Create a safe agent with custom lookup that blocks private IPs
+const safeAgent = new Agent({
+    connect: {
+        lookup: (hostname, options, callback) => {
+            let cb = callback;
+            let opts = options;
+            if (typeof options === 'function') {
+                cb = options;
+                opts = {};
+            }
+
+            lookup(hostname, opts, (err, addresses, family) => {
+                if (err) return cb(err, addresses, family);
+
+                const checkAddress = (addr: string) => {
+                    if (isPrivateIpAddress(addr)) {
+                        return new Error(`Remote host resolves to a private network address: ${hostname}`);
+                    }
+                    return null;
+                };
+
+                if (Array.isArray(addresses)) {
+                    for (const addr of addresses) {
+                        const ip = typeof addr === 'string' ? addr : addr.address;
+                        const error = checkAddress(ip);
+                        if (error) return cb(error, addresses, family);
+                    }
+                } else {
+                    const error = checkAddress(addresses as string);
+                    if (error) return cb(error, addresses, family);
+                }
+
+                cb(null, addresses, family);
+            });
+        },
+    },
+});
+
 async function assertSafeRemoteUrl(rawUrl: string, allowedHostPatterns: string[]) {
     let parsed: URL;
     try {
@@ -133,17 +172,7 @@ async function assertSafeRemoteUrl(rawUrl: string, allowedHostPatterns: string[]
         throw new Error(`Remote host is not allowed: ${hostname}`);
     }
 
-    // Validate DNS resolution to prevent requests to private network targets.
-    const resolved = await lookup(hostname, { all: true, verbatim: true });
-    if (!resolved.length) {
-        throw new Error(`Could not resolve remote host: ${hostname}`);
-    }
-
-    for (const record of resolved) {
-        if (isPrivateIpAddress(record.address)) {
-            throw new Error(`Remote host resolves to a private network address: ${hostname}`);
-        }
-    }
+    // DNS resolution is now handled by the custom Agent lookup
 
     return parsed;
 }
@@ -164,11 +193,13 @@ export async function fetchWithSsrfGuard(
     let currentUrl = rawUrl;
     for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
         const safeUrl = await assertSafeRemoteUrl(currentUrl, allowedHostPatterns);
-        const response = await fetch(safeUrl, {
+        // Use undiciFetch with the safeAgent
+        const response = (await undiciFetch(safeUrl, {
             method: 'GET',
             signal: options.signal,
             redirect: 'manual',
-        });
+            dispatcher: safeAgent,
+        })) as unknown as Response;
 
         if (response.status >= 300 && response.status < 400) {
             if (redirectCount === maxRedirects) {
