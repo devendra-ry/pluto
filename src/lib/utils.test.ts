@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { getOption } from './utils.ts';
+import { getOption } from './utils';
 
 test('getOption', async (t) => {
     await t.test('returns the matching option', () => {
