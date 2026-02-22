@@ -1,0 +1,195 @@
+import { prepareMessageAttachments } from '@/lib/chat-attachments';
+import {
+    CONTEXT_RETRY_SCALE,
+    estimatePreparedConversationTokens,
+    estimateSystemPromptTokens,
+    isContextOverflowError,
+    resolveOutputTokenPlan,
+    trimMessagesToInputBudget,
+    type TrimmedContext,
+} from '@/lib/context-budget';
+import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/lib/constants';
+import { resolveModelLimits } from '@/lib/providers/model-limits';
+import { resolveChatProvider } from '@/lib/providers/provider-registry';
+import { processAndTransformStream } from '@/lib/stream-transform';
+import { ChatRequestSchema } from '@/lib/types';
+import type { AuthenticatedContext } from '@/utils/route-handler';
+
+const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
+const GENERIC_CHAT_ERROR_MESSAGE = 'Unable to complete request right now. Please try again.';
+const IS_DEV = process.env.NODE_ENV !== 'production';
+
+export async function handleChatRequest(
+    req: Request,
+    { user, supabase }: AuthenticatedContext
+): Promise<Response> {
+    const encoder = new TextEncoder();
+    const signal = req.signal;
+
+    const safeEnqueue = (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
+        try {
+            if (signal.aborted) return;
+            const encoded = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
+            controller.enqueue(encoded);
+        } catch (error) {
+            if (IS_DEV) {
+                console.warn('[chat][controller] Failed to enqueue stream chunk', error);
+            }
+            // Ignore closed controller errors
+        }
+    };
+
+    const stream = new ReadableStream({
+        async start(controller) {
+            let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
+
+            if (signal.aborted) return;
+
+            try {
+                const body = await req.json();
+                const parseResult = ChatRequestSchema.safeParse(body);
+                if (!parseResult.success) {
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid request' })}\n\n`);
+                    controller.close();
+                    return;
+                }
+
+                const { messages, model, reasoningEffort, systemPrompt, search } = parseResult.data;
+                const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
+                if (!modelConfig) {
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid model selection' })}\n\n`);
+                    controller.close();
+                    return;
+                }
+
+                const useSearch = search === true;
+                const normalizedSystemPrompt = systemPrompt?.trim() ?? '';
+                const chatProvider = resolveChatProvider(modelConfig);
+
+                if (modelConfig.capabilities.includes('imageGen')) {
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Selected model is image-generation only. Use image generation flow.' })}\n\n`);
+                    controller.close();
+                    return;
+                }
+
+                if (useSearch && (chatProvider.id !== 'google' || !SEARCH_ENABLED_MODEL_SET.has(model))) {
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Search is supported only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite.' })}\n\n`);
+                    controller.close();
+                    return;
+                }
+
+                const limits = await resolveModelLimits(model, modelConfig, signal);
+                const systemPromptTokenEstimate = estimateSystemPromptTokens(normalizedSystemPrompt);
+                const systemPromptPlan = resolveOutputTokenPlan(limits, limits.maxOutputTokens, systemPromptTokenEstimate);
+                if (systemPromptPlan.remainingForOutput <= 0) {
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'System prompt is too long for the selected model context window.' })}\n\n`);
+                    controller.close();
+                    return;
+                }
+
+                let trimmedContext = trimMessagesToInputBudget(messages, limits, 1, systemPromptTokenEstimate);
+                if (trimmedContext.trimmedCount > 0) {
+                    console.log(
+                        `[chat] context-trimmed model=${model} source=${limits.source} trimmed=${trimmedContext.trimmedCount} ` +
+                        `kept=${trimmedContext.messages.length} estTokens=${trimmedContext.estimatedTokens} ` +
+                        `inputBudget=${trimmedContext.inputBudget} outputReserve=${trimmedContext.outputReserve} ` +
+                        `systemPromptTokens=${systemPromptTokenEstimate} ` +
+                        `window=${trimmedContext.contextWindow}`
+                    );
+                }
+
+                heartbeatInterval = setInterval(() => {
+                    safeEnqueue(controller, ': keep-alive\n\n');
+                }, 15000);
+
+                const getSourceStream = async (context: TrimmedContext) => {
+                    const outputPlan = resolveOutputTokenPlan(
+                        limits,
+                        limits.maxOutputTokens,
+                        context.estimatedTokens + systemPromptTokenEstimate
+                    );
+                    if (outputPlan.remainingForOutput <= 0) {
+                        throw new Error('Input is too long for selected model context window.');
+                    }
+
+                    const preparedMessages = await prepareMessageAttachments(
+                        context.messages,
+                        supabase,
+                        user.id,
+                        modelConfig,
+                        signal
+                    );
+                    const estimatedInputTokens = estimatePreparedConversationTokens(preparedMessages);
+                    const estimatedInputTokensWithSystemPrompt = estimatedInputTokens + systemPromptTokenEstimate;
+                    const tokenEstimates = {
+                        estimatedInputTokens,
+                        estimatedInputTokensWithSystemPrompt,
+                    };
+
+                    return chatProvider.getStream({
+                        model,
+                        messages: preparedMessages,
+                        reasoningEffort: reasoningEffort || 'low',
+                        modelConfig,
+                        maxOutputTokens: outputPlan.requestMaxTokens,
+                        systemPrompt: normalizedSystemPrompt,
+                        useSearch,
+                        tokenEstimates,
+                        signal,
+                    });
+                };
+
+                let sourceStream: ReadableStream;
+                try {
+                    sourceStream = await getSourceStream(trimmedContext);
+                } catch (error) {
+                    const shouldRetry = isContextOverflowError(error);
+                    if (!shouldRetry || signal.aborted) {
+                        throw error;
+                    }
+
+                    const retryContext = trimMessagesToInputBudget(messages, limits, CONTEXT_RETRY_SCALE, systemPromptTokenEstimate);
+                    const canTighten = retryContext.messages.length < trimmedContext.messages.length
+                        || retryContext.inputBudget < trimmedContext.inputBudget;
+                    if (!canTighten) {
+                        throw error;
+                    }
+
+                    console.warn(
+                        `[chat] context-overflow model=${model} source=${limits.source} retrying with tighter budget ` +
+                        `(inputBudget=${retryContext.inputBudget}, kept=${retryContext.messages.length})`
+                    );
+                    trimmedContext = retryContext;
+                    sourceStream = await getSourceStream(trimmedContext);
+                }
+
+                if (heartbeatInterval) clearInterval(heartbeatInterval);
+                await processAndTransformStream(sourceStream, controller, signal);
+
+                if (!signal.aborted) {
+                    controller.close();
+                }
+            } catch (error) {
+                if (heartbeatInterval) clearInterval(heartbeatInterval);
+
+                if (!signal.aborted) {
+                    console.error('Chat API error:', error);
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: GENERIC_CHAT_ERROR_MESSAGE })}\n\n`);
+                    try { controller.close(); } catch (closeError) {
+                        if (IS_DEV) {
+                            console.warn('[chat][controller] Failed to close stream controller', closeError);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    return new Response(stream, {
+        headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        },
+    });
+}
