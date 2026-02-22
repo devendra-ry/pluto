@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, isImageGenerationModel, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_REASONING_EFFORT_KEY, PENDING_SYSTEM_PROMPT_KEY, VIDEO_GENERATION_MODEL } from '@/lib/constants';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, isImageGenerationModel, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_MODE_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_REASONING_EFFORT_KEY, PENDING_SYSTEM_PROMPT_KEY, VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -155,6 +155,7 @@ export default function HomePage() {
       // The ChatPageClient will pick up the user message and start generating
       window.sessionStorage.setItem(PENDING_GENERATION_THREAD_KEY, threadId);
       window.sessionStorage.setItem(PENDING_GENERATION_MODEL_KEY, targetModel);
+      window.sessionStorage.setItem(PENDING_GENERATION_MODE_KEY, options.mode);
       if (!isImageMode && !isVideoMode) {
         window.sessionStorage.setItem(PENDING_REASONING_EFFORT_KEY, reasoningEffortRef.current);
       } else {

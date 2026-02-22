@@ -13,7 +13,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle, ImagePlus, ScrollText, Film, MessageSquare } from 'lucide-react';
-import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, SEARCH_ENABLED_MODELS } from '@/lib/constants';
+import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, SEARCH_ENABLED_MODELS, isImageGenerationModel } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { ModelSelector } from '@/components/model-selector';
@@ -25,6 +25,8 @@ import { scheduleFrame } from '@/lib/animation-frame';
 export interface ChatInputHandle {
     setValue: (value: string) => void;
     focus: () => void;
+    setMode: (mode: ChatSubmitMode) => void;
+    setImageModelId: (modelId: string) => void;
     getMode: () => ChatSubmitMode;
     getImageModelId: () => string;
 }
@@ -176,21 +178,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         if (isSearchModeRef.current) return 'search';
         return 'chat';
     }, []);
-
-    useImperativeHandle(ref, () => ({
-        setValue: (newValue: string) => {
-            setValue(newValue);
-            scheduleFrame(() => {
-                if (textareaRef.current) {
-                    textareaRef.current.style.height = 'auto';
-                    textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
-                }
-            });
-        },
-        focus: () => textareaRef.current?.focus(),
-        getMode: () => getSubmitMode(),
-        getImageModelId: () => selectedImageModelIdRef.current,
-    }), [getSubmitMode]);
 
     useEffect(() => {
         if (textareaRef.current) {
@@ -408,6 +395,29 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             }
         }
     }, [activeMode, supportsSearchMode, showToast, isLoading]);
+
+    const setImageModelId = useCallback((modelId: string) => {
+        if (!isImageGenerationModel(modelId)) return;
+        selectedImageModelIdRef.current = modelId;
+        setSelectedImageModelId(modelId);
+    }, []);
+
+    useImperativeHandle(ref, () => ({
+        setValue: (newValue: string) => {
+            setValue(newValue);
+            scheduleFrame(() => {
+                if (textareaRef.current) {
+                    textareaRef.current.style.height = 'auto';
+                    textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
+                }
+            });
+        },
+        focus: () => textareaRef.current?.focus(),
+        setMode: (mode: ChatSubmitMode) => setMode(mode),
+        setImageModelId: (modelId: string) => setImageModelId(modelId),
+        getMode: () => getSubmitMode(),
+        getImageModelId: () => selectedImageModelIdRef.current,
+    }), [getSubmitMode, setImageModelId, setMode]);
 
     const handleAttachClick = () => {
         if (isLoading || !supportsAttachments) return;

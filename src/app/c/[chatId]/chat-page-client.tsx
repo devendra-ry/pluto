@@ -7,7 +7,7 @@ import dynamic from 'next/dynamic';
 import { ChatEmptyState } from '@/components/chat-empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatHeader } from '@/components/chat-header';
-import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
+import { ChatInput, type ChatInputHandle, type ChatSubmitMode, type ChatSubmitOptions } from '@/components/chat-input';
 import { useToast } from '@/components/ui/toast';
 import { scheduleFrame } from '@/lib/animation-frame';
 import { isImageAttachment } from '@/lib/attachments';
@@ -27,6 +27,7 @@ import {
     IMAGE_GENERATION_MODEL,
     isImageGenerationModel,
     PENDING_GENERATION_MODEL_KEY,
+    PENDING_GENERATION_MODE_KEY,
     PENDING_GENERATION_SEARCH_KEY,
     PENDING_GENERATION_THREAD_KEY,
     PENDING_REASONING_EFFORT_KEY,
@@ -191,6 +192,13 @@ function isSelectableChatModel(modelId: string): boolean {
 
 function toReasoningEffort(value: string | null): ReasoningEffort | null {
     if (value === 'low' || value === 'medium' || value === 'high') {
+        return value;
+    }
+    return null;
+}
+
+function toChatSubmitMode(value: string | null): ChatSubmitMode | null {
+    if (value === 'chat' || value === 'image' || value === 'image-edit' || value === 'video' || value === 'search') {
         return value;
     }
     return null;
@@ -484,17 +492,31 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                     return;
                 }
                 const pendingGenerationModelId = window.sessionStorage.getItem(PENDING_GENERATION_MODEL_KEY);
+                const pendingGenerationModeRaw = window.sessionStorage.getItem(PENDING_GENERATION_MODE_KEY);
                 const pendingGenerationSearch = window.sessionStorage.getItem(PENDING_GENERATION_SEARCH_KEY);
                 const pendingReasoningEffortRaw = window.sessionStorage.getItem(PENDING_REASONING_EFFORT_KEY);
                 const pendingSystemPrompt = window.sessionStorage.getItem(PENDING_SYSTEM_PROMPT_KEY);
                 const pendingModelId = pendingGenerationModelId ?? undefined;
+                const pendingMode = toChatSubmitMode(pendingGenerationModeRaw);
                 const pendingReasoningEffort = toReasoningEffort(pendingReasoningEffortRaw);
                 if (pendingReasoningEffort) {
                     reasoningEffortRef.current = pendingReasoningEffort;
                     setReasoningEffort(pendingReasoningEffort);
                 }
+                if (pendingMode) {
+                    chatInputRef.current?.setMode(pendingMode);
+                }
+                if (
+                    pendingMode
+                    && (pendingMode === 'image' || pendingMode === 'image-edit')
+                    && pendingModelId
+                    && isImageGenerationModel(pendingModelId)
+                ) {
+                    chatInputRef.current?.setImageModelId(pendingModelId);
+                }
                 window.sessionStorage.removeItem(PENDING_GENERATION_THREAD_KEY);
                 window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
+                window.sessionStorage.removeItem(PENDING_GENERATION_MODE_KEY);
                 window.sessionStorage.removeItem(PENDING_GENERATION_SEARCH_KEY);
                 window.sessionStorage.removeItem(PENDING_REASONING_EFFORT_KEY);
                 window.sessionStorage.removeItem(PENDING_SYSTEM_PROMPT_KEY);
