@@ -6,6 +6,12 @@ import { Agent, fetch as undiciFetch } from 'undici';
 
 import { serverEnv } from '@/lib/env/server';
 
+let fetchImplementation = undiciFetch;
+
+export function _setFetchImplementation(fn: typeof undiciFetch) {
+    fetchImplementation = fn;
+}
+
 const DEFAULT_ALLOWED_HOST_PATTERNS = ['chutes.ai', '*.chutes.ai'] as const;
 const LOCAL_HOSTNAMES = new Set(['localhost', 'localhost.localdomain']);
 const MAX_REDIRECTS = 3;
@@ -194,7 +200,7 @@ export async function fetchWithSsrfGuard(
     for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
         const safeUrl = await assertSafeRemoteUrl(currentUrl, allowedHostPatterns);
         // Use undiciFetch with the safeAgent
-        const response = (await undiciFetch(safeUrl, {
+        const response = (await fetchImplementation(safeUrl, {
             method: 'GET',
             signal: options.signal,
             redirect: 'manual',

@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { isPrivateIpAddress } from './ssrf-guard';
+
+// Set up env vars for ssrf-guard dependencies
+process.env.GEMINI_API_KEY = 'dummy-key';
+process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'dummy-key';
+
+const { isPrivateIpAddress } = await import('./ssrf-guard');
 
 test('isPrivateIpAddress', async (t) => {
     await t.test('returns true for IPv4 private ranges', () => {
