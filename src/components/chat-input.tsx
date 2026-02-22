@@ -2,52 +2,22 @@
 
 import { useRef, useEffect, forwardRef, useState, useImperativeHandle, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuSeparator,
-    DropdownMenuSub,
-    DropdownMenuSubContent,
-    DropdownMenuSubTrigger,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle, ImagePlus, ScrollText, Film, MessageSquare } from 'lucide-react';
-import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, SEARCH_ENABLED_MODELS, isImageGenerationModel } from '@/lib/constants';
-import { cn } from '@/lib/utils';
+import { ArrowUp, Square, Paperclip } from 'lucide-react';
+import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, SEARCH_ENABLED_MODELS, isImageGenerationModel } from '@/lib/constants';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { ModelSelector } from '@/components/model-selector';
 import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment, isPdfAttachment, isSupportedAttachmentMimeType, isTextAttachment } from '@/lib/attachments';
 import { startUploadFileForThread } from '@/lib/uploads';
 import { useToast } from '@/components/ui/toast';
 import { scheduleFrame } from '@/lib/animation-frame';
+import { ChatSubmitMode, ChatSubmitOptions, LocalAttachmentItem, ChatInputHandle, LocalAttachmentStatus } from './chat-input-components/chat-input-types';
+import { AttachmentList } from './chat-input-components/attachment-list';
+import { ModeSelector } from './chat-input-components/mode-selector';
+import { ReasoningSelector } from './chat-input-components/reasoning-selector';
+import { SystemPromptSelector } from './chat-input-components/system-prompt-selector';
 
-export interface ChatInputHandle {
-    setValue: (value: string) => void;
-    focus: () => void;
-    setMode: (mode: ChatSubmitMode) => void;
-    setImageModelId: (modelId: string) => void;
-    getMode: () => ChatSubmitMode;
-    getImageModelId: () => string;
-}
-
-type LocalAttachmentStatus = 'uploading' | 'uploaded' | 'failed';
-
-interface LocalAttachmentItem {
-    localId: string;
-    file: File;
-    status: LocalAttachmentStatus;
-    progress: number;
-    attachment?: Attachment;
-    error?: string;
-}
-
-export type ChatSubmitMode = 'chat' | 'image' | 'image-edit' | 'video' | 'search';
-
-export interface ChatSubmitOptions {
-    mode: ChatSubmitMode;
-    imageModelId?: string;
-}
+// Re-export types for backward compatibility
+export type { ChatSubmitMode, ChatSubmitOptions, LocalAttachmentItem, ChatInputHandle, LocalAttachmentStatus };
 
 interface ChatInputProps {
     initialValue?: string;
@@ -68,24 +38,6 @@ interface ChatInputProps {
     systemPrompt?: string;
     onSystemPromptChange?: (prompt: string) => Promise<void> | void;
 }
-
-const REASONING_OPTIONS: { value: ReasoningEffort; label: string; pro?: boolean }[] = [
-    { value: 'low', label: 'Low' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'high', label: 'High' },
-];
-
-const MODE_OPTIONS: Array<{
-    value: ChatSubmitMode;
-    label: string;
-    icon: React.ComponentType<{ className?: string }>;
-}> = [
-    { value: 'chat', label: 'Chat', icon: MessageSquare },
-    { value: 'search', label: 'Search', icon: Globe },
-    { value: 'image', label: 'Image', icon: ImagePlus },
-    { value: 'image-edit', label: 'Image Edit', icon: ImagePlus },
-    { value: 'video', label: 'Image to Video', icon: Film },
-];
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     initialValue = '',
@@ -118,14 +70,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const isVideoModeRef = useRef(false);
     const isSearchModeRef = useRef(false);
     const selectedImageModelIdRef = useRef(IMAGE_GENERATION_MODEL);
-    const [isSystemMenuOpen, setIsSystemMenuOpen] = useState(false);
-    const [systemPromptDraft, setSystemPromptDraft] = useState(systemPrompt);
-    const [isSavingSystemPrompt, setIsSavingSystemPrompt] = useState(false);
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
     const { showToast } = useToast();
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
-    const selectedImageModel = IMAGE_GENERATION_MODELS.find((model) => model.id === selectedImageModelId) ?? IMAGE_GENERATION_MODELS[0];
-    const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
     const supportsSearchMode = SEARCH_ENABLED_MODELS.includes(currentModel as typeof SEARCH_ENABLED_MODELS[number]);
     const isOpenRouterModel = selectedModel.provider === 'openrouter';
     const supportsImages = !isOpenRouterModel && selectedModel.capabilities.includes('vision');
@@ -151,7 +98,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     );
     const hasUploadingAttachments = activeAttachmentItems.some((item) => item.status === 'uploading');
     const hasFailedAttachments = activeAttachmentItems.some((item) => item.status === 'failed');
-    const hasSystemPrompt = systemPrompt.trim().length > 0;
+
     const activeMode: ChatSubmitMode = isImageMode
         ? 'image'
         : isImageEditMode
@@ -161,7 +108,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         : isSearchMode
         ? 'search'
         : 'chat';
-    const activeModeOption = MODE_OPTIONS.find((option) => option.value === activeMode) ?? MODE_OPTIONS[0];
 
     useEffect(() => {
         if (!supportsSearchMode && isSearchMode) {
@@ -196,10 +142,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             tasks.clear();
         };
     }, []);
-
-    useEffect(() => {
-        setSystemPromptDraft(systemPrompt);
-    }, [systemPrompt]);
 
     useEffect(() => {
         attachmentItemsRef.current = attachmentItems;
@@ -424,41 +366,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         fileInputRef.current?.click();
     };
 
-    const handleSaveSystemPrompt = async () => {
-        if (!onSystemPromptChange) {
-            setIsSystemMenuOpen(false);
-            return;
-        }
-        setIsSavingSystemPrompt(true);
-        try {
-            await onSystemPromptChange(systemPromptDraft);
-            setIsSystemMenuOpen(false);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to save system prompt';
-            showToast(message, 'error');
-        } finally {
-            setIsSavingSystemPrompt(false);
-        }
-    };
-
-    const handleClearSystemPrompt = async () => {
-        setSystemPromptDraft('');
-        if (!onSystemPromptChange) {
-            setIsSystemMenuOpen(false);
-            return;
-        }
-        setIsSavingSystemPrompt(true);
-        try {
-            await onSystemPromptChange('');
-            setIsSystemMenuOpen(false);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to clear system prompt';
-            showToast(message, 'error');
-        } finally {
-            setIsSavingSystemPrompt(false);
-        }
-    };
-
     const enqueueLocalFiles = useCallback((files: File[], source: 'picker' | 'paste') => {
         if (files.length === 0) return;
         if (!supportsAttachments) {
@@ -586,12 +493,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         void uploadLocalFile(localId, item.file);
     };
 
-    const formatFileSize = (bytes: number) => {
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    };
-
     return (
         <div className="pb-4 px-4 pt-0 bg-[#1a1520]">
             <div className="max-w-3xl mx-auto">
@@ -627,73 +528,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         className="w-full px-5 pt-4 pb-3 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
                     />
 
-                    {activeAttachmentItems.length > 0 && (
-                        <div className="px-3 pb-2 flex flex-col gap-2">
-                            <div className="max-h-24 overflow-y-auto pr-1 space-y-2">
-                                {activeAttachmentItems.map((item) => (
-                                    <div
-                                        key={item.localId}
-                                        className="rounded-xl bg-[#2a2035]/60 border border-white/10 px-3 py-2"
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            {item.status === 'failed' ? (
-                                                <AlertCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
-                                            ) : (
-                                                <Paperclip className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
-                                            )}
-                                            <span className="text-xs text-zinc-200 truncate flex-1">{item.file.name}</span>
-                                            <span className="text-[11px] text-zinc-400">{formatFileSize(item.file.size)}</span>
-
-                                            {item.status === 'failed' && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleRetryAttachment(item.localId)}
-                                                    className="text-zinc-400 hover:text-zinc-100 transition-colors"
-                                                    aria-label={`Retry ${item.file.name}`}
-                                                >
-                                                    <RotateCcw className="h-3.5 w-3.5" />
-                                                </button>
-                                            )}
-
-                                            <button
-                                                type="button"
-                                                onClick={() => handleRemoveAttachment(item.localId)}
-                                                className="text-zinc-400 hover:text-zinc-100 transition-colors"
-                                                aria-label={`Remove ${item.file.name}`}
-                                            >
-                                                <X className="h-3.5 w-3.5" />
-                                            </button>
-                                        </div>
-
-                                        {item.status === 'uploading' && (
-                                            <div className="mt-1.5">
-                                                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                                                    <div
-                                                        className="h-full bg-pink-400/80 transition-all duration-200"
-                                                        style={{ width: `${item.progress}%` }}
-                                                    />
-                                                </div>
-                                                <p className="mt-1 text-[10px] text-zinc-400">Uploading {item.progress}%</p>
-                                            </div>
-                                        )}
-
-                                        {item.status === 'uploaded' && (
-                                            <p className="mt-1 text-[10px] text-emerald-300">Uploaded</p>
-                                        )}
-
-                                        {item.status === 'failed' && (
-                                            <p className="mt-1 text-[10px] text-red-300">{item.error || 'Upload failed'}</p>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                            {hasFailedAttachments && (
-                                <p className="text-[11px] text-red-300/90">
-                                    Retry or remove failed files before sending.
-                                </p>
-                            )}
-                        </div>
-                    )}
+                    <AttachmentList
+                        items={activeAttachmentItems}
+                        onRemove={handleRemoveAttachment}
+                        onRetry={handleRetryAttachment}
+                    />
 
                     <div className="flex items-center justify-between gap-2 px-3 md:px-4 pb-3 pt-1">
                         <div className="flex min-w-0 items-center gap-1.5 md:gap-3">
@@ -705,174 +544,25 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                             </div>
 
                             {selectedModel.supportsReasoning && (
-                                <div className="group/reasoning relative flex shrink-0 flex-col items-center">
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                className="h-8 px-2 md:px-3 gap-1.5 md:gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all text-sm font-semibold"
-                                            >
-                                                <Brain className="h-3.5 w-3.5 md:h-4 md:w-4" />
-                                                <span className="capitalize hidden md:inline">{selectedReasoning.label}</span>
-                                            </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent
-                                            align="start"
-                                            side="top"
-                                            className="w-44 bg-[#1a1520] border-[#3a3045] shadow-2xl mb-2"
-                                        >
-                                            {REASONING_OPTIONS.map((option) => (
-                                                <DropdownMenuItem
-                                                    key={option.value}
-                                                    onClick={() => onReasoningEffortChange(option.value)}
-                                                    className={cn(
-                                                        'flex items-center gap-3 py-2 px-3 cursor-pointer focus:bg-[#2a2535]',
-                                                        option.value === reasoningEffort && 'bg-[#2a2535]'
-                                                    )}
-                                                >
-                                                    <Brain className="h-4 w-4 text-zinc-400 shrink-0" />
-                                                    <span className="text-zinc-100 flex-1">{option.label}</span>
-                                                    {option.value === reasoningEffort && (
-                                                        <Check className="h-4 w-4 text-emerald-400 shrink-0" />
-                                                    )}
-                                                </DropdownMenuItem>
-                                            ))}
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-
-                                    <div className="absolute bottom-full mb-2 hidden group-hover/reasoning:block z-50 pointer-events-none">
-                                        <div className="bg-[#1a1520]/95 backdrop-blur-md text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
-                                            <span className="text-[#fce7ef]">Reasoning Effort</span>
-                                        </div>
-                                    </div>
-                                </div>
+                                <ReasoningSelector
+                                    reasoningEffort={reasoningEffort}
+                                    onReasoningEffortChange={onReasoningEffortChange}
+                                />
                             )}
 
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        type="button"
-                                        className={cn(
-                                            "shrink-0 h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
-                                            activeMode !== 'chat'
-                                                ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
-                                                : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
-                                        )}
-                                    >
-                                        <activeModeOption.icon className="h-3.5 w-3.5 md:h-4 md:w-4" />
-                                        <span className="hidden md:inline">{activeModeOption.label}</span>
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent
-                                    align="start"
-                                    side="top"
-                                    className="w-44 bg-[#1a1520] border-[#3a3045] shadow-2xl mb-2"
-                                >
-                                    {MODE_OPTIONS.map((option) => (
-                                        <DropdownMenuItem
-                                            key={option.value}
-                                            disabled={option.value === 'search' && !supportsSearchMode}
-                                            onClick={() => setMode(option.value)}
-                                            className={cn(
-                                                "flex items-center gap-2 py-2 px-3 cursor-pointer focus:bg-[#2a2535]",
-                                                option.value === activeMode && "bg-[#2a2535]"
-                                            )}
-                                        >
-                                            <option.icon className="h-4 w-4 text-zinc-400 shrink-0" />
-                                            <span className="text-zinc-100 flex-1">{option.label}</span>
-                                            {option.value === activeMode && (
-                                                <Check className="h-4 w-4 text-emerald-400 shrink-0" />
-                                            )}
-                                        </DropdownMenuItem>
-                                    ))}
-                                    <DropdownMenuSeparator className="bg-[#2a2535]/80" />
-                                    <DropdownMenuSub>
-                                        <DropdownMenuSubTrigger className="flex items-center gap-2 py-2 px-3 cursor-pointer focus:bg-[#2a2535] data-[state=open]:bg-[#2a2535]">
-                                            <ImagePlus className="h-4 w-4 text-zinc-400 shrink-0" />
-                                            <span className="text-zinc-100 flex-1">Image Model</span>
-                                            <span className="text-[11px] text-zinc-500 truncate max-w-[88px]">
-                                                {selectedImageModel?.name ?? 'Image'}
-                                            </span>
-                                        </DropdownMenuSubTrigger>
-                                        <DropdownMenuSubContent className="w-52 bg-[#1a1520] border-[#3a3045] shadow-2xl">
-                                            {IMAGE_GENERATION_MODELS.map((model) => (
-                                                <DropdownMenuItem
-                                                    key={model.id}
-                                                    onClick={() => setSelectedImageModelId(model.id)}
-                                                    className={cn(
-                                                        "flex items-center gap-2 py-2 px-3 cursor-pointer focus:bg-[#2a2535]",
-                                                        model.id === selectedImageModelId && "bg-[#2a2535]"
-                                                    )}
-                                                >
-                                                    <span className="text-zinc-100 flex-1">{model.name}</span>
-                                                    {model.id === selectedImageModelId && (
-                                                        <Check className="h-4 w-4 text-emerald-400 shrink-0" />
-                                                    )}
-                                                </DropdownMenuItem>
-                                            ))}
-                                        </DropdownMenuSubContent>
-                                    </DropdownMenuSub>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
+                            <ModeSelector
+                                activeMode={activeMode}
+                                supportsSearchMode={supportsSearchMode}
+                                isLoading={isLoading}
+                                onModeChange={setMode}
+                                selectedImageModelId={selectedImageModelId}
+                                onImageModelChange={setImageModelId}
+                            />
 
-                            <DropdownMenu open={isSystemMenuOpen} onOpenChange={setIsSystemMenuOpen}>
-                                <DropdownMenuTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        type="button"
-                                        className={cn(
-                                            "shrink-0 h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
-                                            hasSystemPrompt
-                                                ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
-                                                : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
-                                        )}
-                                    >
-                                        <ScrollText className="h-3.5 w-3.5 md:h-4 md:w-4" />
-                                        <span className="hidden md:inline">System</span>
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent
-                                    align="start"
-                                    side="top"
-                                    className="w-[min(90vw,420px)] p-3 bg-[#1a1520] border-[#3a3045] shadow-2xl mb-2"
-                                    onCloseAutoFocus={(e) => e.preventDefault()}
-                                >
-                                    <div className="space-y-2">
-                                        <p className="text-xs text-zinc-300 font-semibold tracking-tight">
-                                            System Prompt (chat only)
-                                        </p>
-                                        <textarea
-                                            value={systemPromptDraft}
-                                            onChange={(e) => setSystemPromptDraft(e.target.value)}
-                                            placeholder="Set behavior, rules, or lore for this thread..."
-                                            className="w-full min-h-[120px] max-h-[260px] resize-y rounded-xl bg-[#120f18] border border-[#3a3045]/70 p-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-[#7a58a3]/70"
-                                        />
-                                        <p className="text-[11px] text-zinc-500">
-                                            Applied to chat responses only. Ignored in Image, Image Edit, and Image to Video modes.
-                                        </p>
-                                        <div className="flex items-center justify-end gap-2">
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                onClick={() => void handleClearSystemPrompt()}
-                                                disabled={isSavingSystemPrompt || (!hasSystemPrompt && systemPromptDraft.length === 0)}
-                                                className="h-8 px-3 text-zinc-300 hover:text-zinc-100 hover:bg-[#2a2535]"
-                                            >
-                                                Clear
-                                            </Button>
-                                            <Button
-                                                type="button"
-                                                onClick={() => void handleSaveSystemPrompt()}
-                                                disabled={isSavingSystemPrompt}
-                                                className="h-8 px-3 bg-[#3a283e] hover:bg-[#4a354e] text-pink-200"
-                                            >
-                                                Save
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
+                            <SystemPromptSelector
+                                systemPrompt={systemPrompt}
+                                onSystemPromptChange={onSystemPromptChange}
+                            />
 
                             <div className="group/attach relative flex shrink-0 flex-col items-center">
                                 <Button
