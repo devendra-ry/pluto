@@ -15,6 +15,7 @@ import { processAndTransformStream } from '@/lib/stream-transform';
 import { ChatRequestSchema } from '@/lib/types';
 
 import { assertJsonRequest, assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
+import { assertRateLimit, chatRateLimiter } from '@/utils/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -31,6 +32,7 @@ export async function POST(req: Request) {
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
+        assertRateLimit(user.id, chatRateLimiter);
     } catch (error) {
         const response = toJsonErrorResponse(error);
         if (response) {

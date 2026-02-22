@@ -15,6 +15,7 @@ import {
     requireUser,
     toJsonErrorResponse,
 } from '@/utils/api-security';
+import { assertRateLimit, uploadRateLimiter } from '@/utils/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -117,6 +118,7 @@ export async function POST(req: Request) {
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
+        assertRateLimit(user.id, uploadRateLimiter);
     } catch (error) {
         const response = toJsonErrorResponse(error);
         if (response) {
@@ -223,6 +225,7 @@ export async function DELETE(req: Request) {
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
+        assertRateLimit(user.id, uploadRateLimiter);
     } catch (error) {
         const response = toJsonErrorResponse(error);
         if (response) {
