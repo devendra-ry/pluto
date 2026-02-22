@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ArrowUp, Square, Paperclip, Check, Globe, Brain, X, RotateCcw, AlertCircle, ImagePlus, ScrollText, Film, MessageSquare } from 'lucide-react';
 import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, SEARCH_ENABLED_MODELS, isImageGenerationModel } from '@/lib/constants';
-import { cn } from '@/lib/utils';
+import { cn, getOption } from '@/lib/utils';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { ModelSelector } from '@/components/model-selector';
 import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment, isPdfAttachment, isSupportedAttachmentMimeType, isTextAttachment } from '@/lib/attachments';
@@ -123,9 +123,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const [isSavingSystemPrompt, setIsSavingSystemPrompt] = useState(false);
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
     const { showToast } = useToast();
-    const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
-    const selectedImageModel = IMAGE_GENERATION_MODELS.find((model) => model.id === selectedImageModelId) ?? IMAGE_GENERATION_MODELS[0];
-    const selectedReasoning = REASONING_OPTIONS.find(r => r.value === reasoningEffort) ?? REASONING_OPTIONS[0];
+    const selectedModel = getOption(AVAILABLE_MODELS, (m) => m.id === currentModel);
+    const selectedImageModel = getOption(IMAGE_GENERATION_MODELS, (model) => model.id === selectedImageModelId);
+    const selectedReasoning = getOption(REASONING_OPTIONS, (r) => r.value === reasoningEffort);
     const supportsSearchMode = SEARCH_ENABLED_MODELS.includes(currentModel as typeof SEARCH_ENABLED_MODELS[number]);
     const isOpenRouterModel = selectedModel.provider === 'openrouter';
     const supportsImages = !isOpenRouterModel && selectedModel.capabilities.includes('vision');
@@ -161,7 +161,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         : isSearchMode
         ? 'search'
         : 'chat';
-    const activeModeOption = MODE_OPTIONS.find((option) => option.value === activeMode) ?? MODE_OPTIONS[0];
+    const activeModeOption = getOption(MODE_OPTIONS, (option) => option.value === activeMode);
 
     useEffect(() => {
         if (!supportsSearchMode && isSearchMode) {
