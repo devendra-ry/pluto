@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { z } from 'zod';
+
 import { getMessagesQueryKey, getQueryClient, MESSAGE_QUERY_KEY_PREFIX } from '@/lib/query-client';
-import { type Attachment } from '@/lib/types';
+import { type Attachment, AttachmentSchema } from '@/lib/types';
 import { createClient } from '@/utils/supabase/client';
 import type { Database, Json } from '@/utils/supabase/database.types';
 
@@ -52,57 +54,34 @@ function removeMessagesById(existing: Message[], ids: Set<string>) {
     return existing.filter((message) => !ids.has(message.id));
 }
 
+const AttachmentsArraySchema = z.array(z.unknown())
+    .transform((items) => items.flatMap((item) => {
+        const result = AttachmentSchema.safeParse(item);
+        return result.success ? [result.data] : [];
+    }))
+    .or(z.any().transform(() => []));
+
+const MessageSchema = z.object({
+    id: z.string(),
+    thread_id: z.string(),
+    role: z.enum(['user', 'assistant']),
+    content: z.string().catch(''),
+    attachments: AttachmentsArraySchema.optional().default([]),
+    reasoning: z.string().optional().catch(undefined),
+    model_id: z.string().optional().catch(undefined),
+    created_at: z.string(),
+    deleted_at: z.string().nullable().optional().default(null).catch(null),
+});
+
 function toMessage(value: unknown): Message | null {
-    if (!value || typeof value !== 'object') return null;
-    const record = value as Record<string, unknown>;
-
-    if (
-        typeof record.id !== 'string' ||
-        typeof record.thread_id !== 'string' ||
-        (record.role !== 'user' && record.role !== 'assistant') ||
-        typeof record.created_at !== 'string'
-    ) {
-        return null;
-    }
-
-    return {
-        id: record.id,
-        thread_id: record.thread_id,
-        role: record.role,
-        content: typeof record.content === 'string' ? record.content : '',
-        attachments: attachmentsFromUnknown(record.attachments),
-        reasoning: typeof record.reasoning === 'string' ? record.reasoning : undefined,
-        model_id: typeof record.model_id === 'string' ? record.model_id : undefined,
-        created_at: record.created_at,
-        deleted_at: typeof record.deleted_at === 'string' ? record.deleted_at : null,
-    };
+    const result = MessageSchema.safeParse(value);
+    if (!result.success) return null;
+    return result.data;
 }
 
 function attachmentsFromUnknown(value: unknown): Attachment[] {
-    if (!Array.isArray(value)) return [];
-    const attachments: Attachment[] = [];
-    for (const item of value) {
-        if (!item || typeof item !== 'object') continue;
-        const record = item as Record<string, unknown>;
-        if (
-            typeof record.id === 'string' &&
-            typeof record.name === 'string' &&
-            typeof record.mimeType === 'string' &&
-            typeof record.size === 'number' &&
-            typeof record.path === 'string' &&
-            typeof record.url === 'string'
-        ) {
-            attachments.push({
-                id: record.id,
-                name: record.name,
-                mimeType: record.mimeType,
-                size: record.size,
-                path: record.path,
-                url: record.url,
-            });
-        }
-    }
-    return attachments;
+    const result = AttachmentsArraySchema.safeParse(value);
+    return result.success ? result.data : [];
 }
 
 function mapMessageRowToMessage(row: MessageRow): Message {
