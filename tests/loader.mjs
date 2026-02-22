@@ -4,6 +4,14 @@ import { resolve as pathResolve } from 'node:path';
 const ROOT_DIR = process.cwd();
 
 export async function resolve(specifier, context, defaultResolve) {
+    if (specifier === 'server-only') {
+        const mockPath = pathResolve(ROOT_DIR, 'tests/mocks/server-only.js');
+        return {
+            url: pathToFileURL(mockPath).href,
+            shortCircuit: true,
+        };
+    }
+
     let nextSpecifier = specifier;
 
     // Handle @/ alias
