@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { preprocessLaTeX } from './latex-utils.ts';
+import { preprocessLaTeX } from './latex-utils';
 
 test('preprocessLaTeX', async (t) => {
     await t.test('returns original text if empty', () => {
