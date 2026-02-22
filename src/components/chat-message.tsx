@@ -11,6 +11,7 @@ import { useState, memo, type ComponentProps } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
+import { preprocessLaTeX } from '@/lib/latex-utils';
 import { type Attachment } from '@/lib/types';
 
 interface ActionIconProps {
@@ -43,15 +44,6 @@ function ActionIcon({ icon: Icon, title, onClick, className }: ActionIconProps) 
 
 const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex];
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
-
-const preprocessLaTeX = (text: string) => {
-    if (!text) return text;
-    return text
-        // Replace block math: \[ ... \] or \\[ ... \\]
-        .replace(/\\+\[([\s\S]*?)\\+\]/g, (_, equation) => `\n$$\n${equation}\n$$\n`)
-        // Replace inline math: \( ... \) or \\( ... \\)
-        .replace(/\\+\(([\s\S]*?)\\+\)/g, (_, equation) => `$${equation}$`);
-};
 
 const MARKDOWN_COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = {
     pre: ({ children }) => (
