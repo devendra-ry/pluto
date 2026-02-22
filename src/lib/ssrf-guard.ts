@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { lookup } from 'node:dns';
+import dns from 'node:dns';
 import { isIP } from 'node:net';
 import { Agent, fetch as undiciFetch } from 'undici';
 
@@ -125,7 +125,7 @@ const safeAgent = new Agent({
                 opts = {};
             }
 
-            lookup(hostname, opts, (err, addresses, family) => {
+            dns.lookup(hostname, opts, (err, addresses, family) => {
                 if (err) return cb(err, addresses, family);
 
                 const checkAddress = (addr: string) => {
@@ -152,7 +152,7 @@ const safeAgent = new Agent({
     },
 });
 
-async function assertSafeRemoteUrl(rawUrl: string, allowedHostPatterns: string[]) {
+export async function assertSafeRemoteUrl(rawUrl: string, allowedHostPatterns: string[]) {
     let parsed: URL;
     try {
         parsed = new URL(rawUrl);

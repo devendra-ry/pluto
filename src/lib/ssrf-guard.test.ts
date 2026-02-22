@@ -1,6 +1,7 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert';
-import { isPrivateIpAddress } from './ssrf-guard';
+import dns from 'node:dns';
+import { assertSafeRemoteUrl, fetchWithSsrfGuard, isPrivateIpAddress } from './ssrf-guard';
 
 test('isPrivateIpAddress', async (t) => {
     await t.test('returns true for IPv4 private ranges', () => {
@@ -100,5 +101,92 @@ test('isPrivateIpAddress', async (t) => {
         assert.strictEqual(isPrivateIpAddress(''), true);
         assert.strictEqual(isPrivateIpAddress('256.256.256.256'), true); // Invalid IPv4
         assert.strictEqual(isPrivateIpAddress('1.2.3'), true); // Invalid IPv4 format
+    });
+});
+
+test('assertSafeRemoteUrl', async (t) => {
+    await t.test('accepts valid HTTPS URL with allowed host', async () => {
+        const url = 'https://chutes.ai/image.png';
+        const parsed = await assertSafeRemoteUrl(url, ['chutes.ai']);
+        assert.strictEqual(parsed.hostname, 'chutes.ai');
+    });
+
+    await t.test('throws for invalid URL string', async () => {
+        await assert.rejects(
+            assertSafeRemoteUrl('not-a-url', ['chutes.ai']),
+            { message: 'Invalid remote media URL' }
+        );
+    });
+
+    await t.test('throws for non-HTTPS protocol', async () => {
+        await assert.rejects(
+            assertSafeRemoteUrl('http://chutes.ai/image.png', ['chutes.ai']),
+            { message: 'Only HTTPS remote media URLs are allowed' }
+        );
+    });
+
+    await t.test('throws for credentials in URL', async () => {
+        await assert.rejects(
+            assertSafeRemoteUrl('https://user:pass@chutes.ai/image.png', ['chutes.ai']),
+            { message: 'Credentials are not allowed in remote media URLs' }
+        );
+    });
+
+    await t.test('throws for disallowed host', async () => {
+        await assert.rejects(
+            assertSafeRemoteUrl('https://evil.com/image.png', ['chutes.ai']),
+            { message: /Remote host is not allowed/ }
+        );
+    });
+
+    await t.test('accepts allowed host with wildcard pattern', async () => {
+        const url = 'https://sub.chutes.ai/image.png';
+        const parsed = await assertSafeRemoteUrl(url, ['*.chutes.ai']);
+        assert.strictEqual(parsed.hostname, 'sub.chutes.ai');
+    });
+
+    await t.test('accepts exact match for wildcard pattern suffix', async () => {
+         // The implementation logic for wildcard:
+         // if (pattern.startsWith('*.')) {
+         //    const suffix = pattern.slice(2);
+         //    return host === suffix || host.endsWith(`.${suffix}`);
+         // }
+         // So *.chutes.ai allows chutes.ai
+        const url = 'https://chutes.ai/image.png';
+        const parsed = await assertSafeRemoteUrl(url, ['*.chutes.ai']);
+        assert.strictEqual(parsed.hostname, 'chutes.ai');
+    });
+
+    await t.test('throws for invalid wildcard match', async () => {
+        await assert.rejects(
+            assertSafeRemoteUrl('https://notchutes.ai/image.png', ['*.chutes.ai']),
+            { message: /Remote host is not allowed/ }
+        );
+    });
+});
+
+test('fetchWithSsrfGuard', async (t) => {
+    await t.test('blocks private IP address', async (t) => {
+        const url = 'https://private.example.com/image.png';
+
+        mock.method(dns, 'lookup', (hostname, options, callback) => {
+             let cb = callback;
+             if (typeof options === 'function') {
+                 cb = options;
+             }
+             // Return private IP
+             cb(null, [{ address: '127.0.0.1', family: 4 }]);
+        });
+
+        t.after(() => mock.restoreAll());
+
+        await assert.rejects(
+            fetchWithSsrfGuard(url, { allowedHostPatterns: ['private.example.com'] }),
+            (err: any) => {
+                assert.strictEqual(err.message, 'fetch failed');
+                assert.match(err.cause.message, /Remote host resolves to a private network address/);
+                return true;
+            }
+        );
     });
 });
