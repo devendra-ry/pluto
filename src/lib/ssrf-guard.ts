@@ -158,7 +158,7 @@ const safeAgent = new Agent({
     },
 });
 
-async function assertSafeRemoteUrl(rawUrl: string, allowedHostPatterns: string[]) {
+export async function assertSafeRemoteUrl(rawUrl: string, allowedHostPatterns: string[]) {
     let parsed: URL;
     try {
         parsed = new URL(rawUrl);
