@@ -13,6 +13,7 @@ import {
 import { addMessage } from '@/hooks/use-messages';
 import { touchThread, updateThreadTitleIfNewChat } from '@/hooks/use-threads';
 import { cancelScheduledFrame, scheduleFrame, type ScheduledFrame } from '@/lib/animation-frame';
+import { chatService } from '@/lib/chat-service';
 import { AVAILABLE_MODELS, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { type ChatViewMessage, type RetryMode } from '@/lib/chat-view';
 import { sanitizeThreadTitle } from '@/lib/sanitize';
@@ -121,19 +122,6 @@ interface UseChatStreamParams {
     justAddedMessageIdRef: MutableRefObject<string | null>;
     persistRetryModeHintRef: MutableRefObject<((userMessageId: string, mode: RetryMode) => void) | null>;
     showToast: (message: string, type?: ToastType) => void;
-}
-
-function isAttachment(value: unknown): value is Attachment {
-    if (!value || typeof value !== 'object') return false;
-    const record = value as Record<string, unknown>;
-    return (
-        typeof record.id === 'string' &&
-        typeof record.name === 'string' &&
-        typeof record.mimeType === 'string' &&
-        typeof record.size === 'number' &&
-        typeof record.path === 'string' &&
-        typeof record.url === 'string'
-    );
 }
 
 export function useChatStream({
@@ -307,47 +295,17 @@ export function useChatStream({
                 const userImageAttachments = (lastMsg.attachments ?? []).filter((attachment) =>
                     attachment.mimeType.startsWith('image/')
                 );
-                const endpoint = isVideoGenModel ? '/api/videos' : '/api/images';
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        threadId: chatId,
-                        model: activeModelId,
-                        prompt: lastMsg.content,
-                        attachments: userImageAttachments,
-                    }),
+
+                const { content, attachment, operation, revisedPrompt } = await chatService.generateImageOrVideo({
+                    threadId: chatId,
+                    model: activeModelId,
+                    prompt: lastMsg.content,
+                    attachments: userImageAttachments,
+                    isVideo: isVideoGenModel,
                     signal: abortControllerRef.current.signal,
                 });
 
-                const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-                if (!response.ok) {
-                    const errorMessage =
-                        typeof payload.error === 'string'
-                            ? payload.error
-                            : (
-                                isVideoGenModel
-                                    ? 'Failed to generate video'
-                                    : (userImageAttachments.length > 0 ? 'Failed to edit image' : 'Failed to generate image')
-                            );
-                    throw new Error(errorMessage);
-                }
-
-                const attachment = isAttachment(payload.attachment) ? payload.attachment : null;
-                if (!attachment) {
-                    throw new Error(isVideoGenModel
-                        ? 'Video generation did not return a valid attachment'
-                        : 'Image generation did not return a valid attachment');
-                }
-
-                const revisedPrompt = typeof payload.revisedPrompt === 'string'
-                    ? payload.revisedPrompt.trim()
-                    : '';
-                const operation = typeof payload.operation === 'string' ? payload.operation : '';
                 const isEditOperation = !isVideoGenModel && (operation === 'edit' || userImageAttachments.length > 0);
-                const assistantContent = revisedPrompt
-                    ? `${isVideoGenModel ? 'Generated video.' : (isEditOperation ? 'Edited image.' : 'Generated image.')}\nPrompt rewrite: ${revisedPrompt}`
-                    : (isVideoGenModel ? 'Generated video.' : (isEditOperation ? 'Edited image.' : 'Generated image.'));
 
                 setMessages((prev) => {
                     const updated = [...prev];
@@ -355,7 +313,7 @@ export function useChatStream({
                     if (msgIdx !== -1) {
                         updated[msgIdx] = {
                             ...updated[msgIdx],
-                            content: assistantContent,
+                            content: content,
                             attachments: [attachment],
                             model_id: activeModelId,
                         };
@@ -363,7 +321,7 @@ export function useChatStream({
                     return updated;
                 });
 
-                const persisted = await persistAssistantMessage(assistantContent, undefined, [attachment]);
+                const persisted = await persistAssistantMessage(content, undefined, [attachment]);
                 if (!persisted) {
                     throw new Error(
                         isVideoGenModel
@@ -375,98 +333,36 @@ export function useChatStream({
             }
 
             dispatch({ type: 'STREAMING' });
-            const decoder = new TextDecoder();
             const effectiveSystemPrompt = (forcedSystemPrompt ?? systemPrompt).trim();
-            const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    messages: currentMessages.map((m) => ({
-                        role: m.role,
-                        content: m.content,
-                        attachments: m.attachments ?? [],
-                    })),
-                    model: activeModelId,
-                    reasoningEffort: effectiveReasoningEffort,
-                    systemPrompt: !isMediaGenModel && effectiveSystemPrompt ? effectiveSystemPrompt : undefined,
-                    search: useSearch,
-                }),
+
+            const messages = currentMessages.map((m) => ({
+                role: m.role,
+                content: m.content,
+                attachments: m.attachments ?? [],
+            }));
+
+            const stream = chatService.streamChat({
+                messages,
+                model: activeModelId,
+                reasoningEffort: effectiveReasoningEffort,
+                systemPrompt: !isMediaGenModel && effectiveSystemPrompt ? effectiveSystemPrompt : undefined,
+                search: useSearch,
                 signal: abortControllerRef.current.signal,
             });
 
-            if (!response.ok) {
-                let message = `Failed to get response (${response.status})`;
-                try {
-                    const payload = await response.json() as Record<string, unknown>;
-                    const errorText = typeof payload.error === 'string' ? payload.error : '';
-                    const detailsText = typeof payload.details === 'string' ? payload.details : '';
-                    if (errorText) {
-                        message = detailsText ? `${errorText}: ${detailsText}` : errorText;
+            for await (const chunk of stream) {
+                if (chunk.type === 'reasoning') {
+                    if (supportsReasoning) {
+                        fullReasoning += chunk.value;
+                        hasPendingAssistantUpdate = true;
+                        scheduleAssistantUpdate();
+                        dispatch({ type: 'SET_THINKING', thinking: true });
                     }
-                } catch {
-                    // Ignore parse failures and keep fallback status message.
-                }
-                throw new Error(message);
-            }
-
-            const reader = response.body?.getReader();
-
-            if (reader) {
-                let buffer = '';
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
-
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = line.slice(6);
-                            if (data === '[DONE]') continue;
-
-                            try {
-                                const parsed = JSON.parse(data) as Record<string, unknown>;
-                                const streamError = typeof parsed.error === 'string' ? parsed.error.trim() : '';
-                                if (streamError) {
-                                    const streamDetails = typeof parsed.details === 'string' ? parsed.details.trim() : '';
-                                    const normalizedStreamError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
-                                    throw new Error(`STREAM_ERROR:${normalizedStreamError}`);
-                                }
-                                const choices = Array.isArray(parsed.choices)
-                                    ? parsed.choices as Array<Record<string, unknown>>
-                                    : [];
-                                const delta = (choices[0]?.delta ?? {}) as Record<string, unknown>;
-
-                                const reasoningContent =
-                                    (typeof delta.reasoning_content === 'string' ? delta.reasoning_content : '') ||
-                                    (typeof delta.thinking === 'string' ? delta.thinking : '');
-                                if (reasoningContent && supportsReasoning) {
-                                    fullReasoning += reasoningContent;
-                                    hasPendingAssistantUpdate = true;
-                                    scheduleAssistantUpdate();
-                                    dispatch({ type: 'SET_THINKING', thinking: true });
-                                }
-
-                                const content = typeof delta.content === 'string' ? delta.content : '';
-                                if (content) {
-                                    dispatch({ type: 'SET_THINKING', thinking: false });
-                                    fullContent += content;
-                                    hasPendingAssistantUpdate = true;
-                                    scheduleAssistantUpdate();
-                                }
-                            } catch (streamChunkError) {
-                                if (
-                                    streamChunkError instanceof Error
-                                    && streamChunkError.message.startsWith('STREAM_ERROR:')
-                                ) {
-                                    throw new Error(streamChunkError.message.slice('STREAM_ERROR:'.length));
-                                }
-                                // Skip malformed JSON
-                            }
-                        }
-                    }
+                } else if (chunk.type === 'content') {
+                    dispatch({ type: 'SET_THINKING', thinking: false });
+                    fullContent += chunk.value;
+                    hasPendingAssistantUpdate = true;
+                    scheduleAssistantUpdate();
                 }
             }
 
