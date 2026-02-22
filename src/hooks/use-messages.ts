@@ -23,20 +23,12 @@ export interface Message {
 const MESSAGE_SELECT_COLUMNS = 'id,thread_id,role,content,attachments,reasoning,model_id,created_at,deleted_at';
 type MessageRow = Pick<
     Database['public']['Tables']['messages']['Row'],
-    'id' | 'thread_id' | 'role' | 'content' | 'attachments' | 'reasoning' | 'model_id' | 'created_at'
-> & {
-    deleted_at?: string | null;
-};
+    'id' | 'thread_id' | 'role' | 'content' | 'attachments' | 'reasoning' | 'model_id' | 'created_at' | 'deleted_at'
+>;
 
 export type RefreshMessagesResult =
     | { ok: true }
     | { ok: false; error: string };
-
-function isMissingDeletedAtColumnError(error: { message?: string; code?: string } | null) {
-    if (!error) return false;
-    if (error.code === '42703') return true;
-    return (error.message ?? '').toLowerCase().includes('deleted_at');
-}
 
 function sortMessagesByCreatedAt(messages: Message[]) {
     return [...messages].sort((a, b) => {
@@ -131,7 +123,7 @@ async function fetchThreadMessagesWithClient(
     supabase: ReturnType<typeof createClient>,
     threadId: string
 ): Promise<Message[]> {
-    const result = await supabase
+    const { data, error } = await supabase
         .from('messages')
         .select(MESSAGE_SELECT_COLUMNS)
         .eq('thread_id', threadId)
@@ -139,21 +131,6 @@ async function fetchThreadMessagesWithClient(
         .order('created_at', { ascending: true })
         .order('id', { ascending: true });
 
-    if (result.error && isMissingDeletedAtColumnError(result.error)) {
-        const legacyResult = await supabase
-            .from('messages')
-            .select('id,thread_id,role,content,attachments,reasoning,model_id,created_at')
-            .eq('thread_id', threadId)
-            .order('created_at', { ascending: true })
-            .order('id', { ascending: true });
-        if (legacyResult.error) throw legacyResult.error;
-        return (legacyResult.data ?? []).map((row) => ({
-            ...mapMessageRowToMessage(row as MessageRow),
-            deleted_at: null,
-        }));
-    }
-
-    const { data, error } = result;
     if (error) throw error;
     return (data ?? []).map(mapMessageRowToMessage);
 }
@@ -408,19 +385,12 @@ export async function restoreMessagesByIds(ids: string[], restoreWindowMinutes: 
 // Soft delete all visible messages in a thread.
 export async function clearThreadMessages(threadId: string) {
     const supabase = createClient();
-    let { data, error } = await supabase
+    const { data, error } = await supabase
         .from('messages')
         .select('id')
         .eq('thread_id', threadId)
         .is('deleted_at', null);
-    if (error && isMissingDeletedAtColumnError(error)) {
-        const legacy = await supabase
-            .from('messages')
-            .select('id')
-            .eq('thread_id', threadId);
-        data = legacy.data;
-        error = legacy.error;
-    }
+
     if (error) throw error;
 
     const ids = (data ?? [])
