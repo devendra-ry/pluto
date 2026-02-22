@@ -88,7 +88,7 @@ function isPrivateIPv6(address: string) {
     return false;
 }
 
-function isPrivateIpAddress(address: string) {
+export function isPrivateIpAddress(address: string) {
     const version = isIP(address);
     if (version === 4) {
         return isPrivateIPv4(address);
