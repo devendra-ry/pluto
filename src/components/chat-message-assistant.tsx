@@ -11,6 +11,7 @@ import { useState, type ComponentProps } from 'react';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import { type Attachment } from '@/lib/types';
+import { isLegacyAttachmentProxyUrl } from '@/lib/attachment-url';
 import { preprocessLaTeX } from '@/lib/latex-utils';
 import { ActionIcon } from './chat-action-icon';
 
@@ -206,7 +207,7 @@ export function AssistantMessage({
                                                 width={768}
                                                 height={512}
                                                 className="h-auto w-full object-cover"
-                                                unoptimized
+                                                unoptimized={isLegacyAttachmentProxyUrl(attachment.url)}
                                             />
                                         </div>
                                     )}

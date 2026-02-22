@@ -3,6 +3,7 @@ import {
     MAX_ATTACHMENT_BYTES,
     isSupportedAttachmentMimeType,
 } from '@/lib/attachments';
+import { createSignedAttachmentUrl } from '@/lib/attachment-signed-url';
 import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/lib/attachment-route-utils';
 import { UploadCleanupRequestSchema } from '@/lib/request-validation';
 import { assertThreadOwnership } from '@/lib/thread-ownership';
@@ -195,6 +196,7 @@ export async function POST(req: Request) {
         if (uploadError) {
             return jsonResponse({ error: uploadError.message || 'Upload failed' }, 500);
         }
+        const signedUrl = await createSignedAttachmentUrl(supabase, bucket, objectPath);
 
         const attachment: Attachment = {
             id: attachmentId,
@@ -202,7 +204,7 @@ export async function POST(req: Request) {
             mimeType,
             size: file.size,
             path: objectPath,
-            url: buildAttachmentUrl(threadId, objectPath),
+            url: signedUrl || buildAttachmentUrl(threadId, objectPath),
         };
 
         return jsonResponse({ attachment });

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import { type Attachment } from '@/lib/types';
+import { isLegacyAttachmentProxyUrl } from '@/lib/attachment-url';
 import { ActionIcon } from './chat-action-icon';
 
 interface UserMessageProps {
@@ -110,7 +111,7 @@ export function UserMessage({
                                                         width={480}
                                                         height={320}
                                                         className="h-auto w-full object-cover"
-                                                        unoptimized
+                                                        unoptimized={isLegacyAttachmentProxyUrl(attachment.url)}
                                                     />
                                                 </div>
                                             )}

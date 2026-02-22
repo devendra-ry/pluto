@@ -1,4 +1,5 @@
 import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/lib/attachment-route-utils';
+import { createSignedAttachmentUrl } from '@/lib/attachment-signed-url';
 import { VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { VideoGenerateRequestSchema } from '@/lib/request-validation';
 import { type Attachment } from '@/lib/types';
@@ -337,6 +338,7 @@ export async function POST(req: Request) {
         if (uploadError) {
             return jsonResponse({ error: uploadError.message || 'Failed to store generated video' }, 500);
         }
+        const signedUrl = await createSignedAttachmentUrl(supabase, bucket, objectPath);
 
         const attachment: Attachment = {
             id: attachmentId,
@@ -344,7 +346,7 @@ export async function POST(req: Request) {
             mimeType,
             size: bytes.byteLength,
             path: objectPath,
-            url: buildAttachmentUrl(threadId, objectPath),
+            url: signedUrl || buildAttachmentUrl(threadId, objectPath),
         };
 
         return jsonResponse({
