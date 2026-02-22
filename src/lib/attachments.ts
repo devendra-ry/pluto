@@ -20,19 +20,19 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
 ]);
 
 export function isImageAttachment(mimeType: string) {
-    return SUPPORTED_IMAGE_MIME_TYPES.has(mimeType);
+    return SUPPORTED_IMAGE_MIME_TYPES.has(mimeType.toLowerCase());
 }
 
 export function isPdfAttachment(mimeType: string) {
-    return mimeType === 'application/pdf';
+    return mimeType.toLowerCase() === 'application/pdf';
 }
 
 export function isTextAttachment(mimeType: string) {
-    return mimeType === 'text/plain';
+    return mimeType.toLowerCase() === 'text/plain';
 }
 
 export function isSupportedAttachmentMimeType(mimeType: string) {
     return SUPPORTED_ATTACHMENT_MIME_TYPES.includes(
-        mimeType as typeof SUPPORTED_ATTACHMENT_MIME_TYPES[number]
+        mimeType.toLowerCase() as typeof SUPPORTED_ATTACHMENT_MIME_TYPES[number]
     );
 }
