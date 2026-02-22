@@ -6,6 +6,16 @@ const ROOT_DIR = process.cwd();
 export async function resolve(specifier, context, defaultResolve) {
     let nextSpecifier = specifier;
 
+    // Handle server-only mock
+    if (specifier === 'server-only') {
+        const absolutePath = pathResolve(ROOT_DIR, 'tests/mocks/server-only.js');
+        return {
+            url: pathToFileURL(absolutePath).href,
+            shortCircuit: true,
+            format: 'module',
+        };
+    }
+
     // Handle @/ alias
     if (specifier.startsWith('@/')) {
         const relativePath = specifier.slice(2);

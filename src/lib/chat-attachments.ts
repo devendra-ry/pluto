@@ -1,7 +1,9 @@
 import type { ModelConfig } from '@/lib/constants';
 import type { ChatMessage } from '@/lib/types';
-import { createClient } from '@/utils/supabase/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/utils/supabase/database.types';
 import { getAttachmentsBucketName } from '@/lib/attachment-route-utils';
+import { AttachmentCache, attachmentCache } from '@/lib/attachment-cache';
 
 import {
     MAX_ATTACHMENTS_PER_MESSAGE,
@@ -73,7 +75,7 @@ async function mapWithConcurrency<T, R>(
 
 export async function prepareMessageAttachments(
     messages: ChatMessage[],
-    supabase: ReturnType<typeof createClient>,
+    supabase: SupabaseClient<Database>,
     userId: string,
     modelConfig: ModelConfig,
     signal?: AbortSignal
@@ -89,6 +91,12 @@ export async function prepareMessageAttachments(
         attachment: NonNullable<ChatMessage['attachments']>[number];
     }
     const downloadTasks: DownloadTask[] = [];
+    const cachedAttachments: Array<{
+        messageIndex: number;
+        attachmentIndex: number;
+        byteLength: number;
+        attachment: PreparedAttachment;
+    }> = [];
 
     const prepared: PreparedChatMessage[] = [];
     for (const [messageIndex, message] of messages.entries()) {
@@ -135,11 +143,23 @@ export async function prepareMessageAttachments(
             }
             declaredTotalAttachmentBytes += attachment.size;
 
-            downloadTasks.push({
-                messageIndex,
-                attachmentIndex,
-                attachment,
-            });
+            const cacheKey = AttachmentCache.generateKey(userId, attachment.path);
+            const cached = attachmentCache.get(cacheKey);
+
+            if (cached) {
+                cachedAttachments.push({
+                    messageIndex,
+                    attachmentIndex,
+                    byteLength: cached.byteLength,
+                    attachment: cached.attachment,
+                });
+            } else {
+                downloadTasks.push({
+                    messageIndex,
+                    attachmentIndex,
+                    attachment,
+                });
+            }
         }
 
         prepared.push({
@@ -186,12 +206,23 @@ export async function prepareMessageAttachments(
         }
     );
 
+    // Update cache with downloaded items
+    for (const item of downloadedAttachments) {
+        // Find the original attachment path using message index and attachment index
+        // We know that downloadTasks has the same order, but we can also look up from messages
+        const originalAttachment = messages[item.messageIndex].attachments![item.attachmentIndex];
+        const cacheKey = AttachmentCache.generateKey(userId, originalAttachment.path);
+        attachmentCache.set(cacheKey, item.attachment, item.byteLength);
+    }
+
+    const allAttachments = [...cachedAttachments, ...downloadedAttachments];
+
     let totalAttachmentBytes = 0;
     const attachmentsByMessage = new Map<number, Array<{
         attachmentIndex: number;
         attachment: PreparedAttachment;
     }>>();
-    for (const downloaded of downloadedAttachments) {
+    for (const downloaded of allAttachments) {
         totalAttachmentBytes += downloaded.byteLength;
         if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL) {
             const maxMb = Math.floor(MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL / (1024 * 1024));
