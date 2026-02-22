@@ -1,123 +1,28 @@
 'use client';
 
-import { useCallback, useEffect, useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { getMessagesQueryKey, getQueryClient, MESSAGE_QUERY_KEY_PREFIX } from '@/lib/query-client';
 import { type Attachment } from '@/lib/types';
 import { createClient } from '@/utils/supabase/client';
-import type { Database, Json } from '@/utils/supabase/database.types';
+import type { Json } from '@/utils/supabase/database.types';
 
-export interface Message {
-    id: string;
-    thread_id: string;
-    role: 'user' | 'assistant';
-    content: string;
-    attachments?: Attachment[];
-    reasoning?: string;
-    model_id?: string;
-    created_at: string;
-    deleted_at?: string | null;
-}
+import {
+    type Message,
+    MESSAGE_SELECT_COLUMNS,
+    mapMessageRowToMessage,
+    mergeMessagesSorted,
+    removeMessagesById
+} from '@/lib/message-helpers';
+import { useMessageSubscription } from '@/hooks/use-message-subscription';
 
-const MESSAGE_SELECT_COLUMNS = 'id,thread_id,role,content,attachments,reasoning,model_id,created_at,deleted_at';
-type MessageRow = Pick<
-    Database['public']['Tables']['messages']['Row'],
-    'id' | 'thread_id' | 'role' | 'content' | 'attachments' | 'reasoning' | 'model_id' | 'created_at' | 'deleted_at'
->;
+// Re-export Message type for backward compatibility
+export type { Message };
 
 export type RefreshMessagesResult =
     | { ok: true }
     | { ok: false; error: string };
-
-function sortMessagesByCreatedAt(messages: Message[]) {
-    return [...messages].sort((a, b) => {
-        const byCreatedAt = a.created_at.localeCompare(b.created_at);
-        if (byCreatedAt !== 0) return byCreatedAt;
-        return a.id.localeCompare(b.id);
-    });
-}
-
-function mergeMessagesSorted(existing: Message[], incoming: Message[]) {
-    if (incoming.length === 0) return existing;
-    const byId = new Map(existing.map((message) => [message.id, message]));
-    for (const message of incoming) {
-        byId.set(message.id, message);
-    }
-    return sortMessagesByCreatedAt(Array.from(byId.values()));
-}
-
-function removeMessagesById(existing: Message[], ids: Set<string>) {
-    if (ids.size === 0) return existing;
-    return existing.filter((message) => !ids.has(message.id));
-}
-
-function toMessage(value: unknown): Message | null {
-    if (!value || typeof value !== 'object') return null;
-    const record = value as Record<string, unknown>;
-
-    if (
-        typeof record.id !== 'string' ||
-        typeof record.thread_id !== 'string' ||
-        (record.role !== 'user' && record.role !== 'assistant') ||
-        typeof record.created_at !== 'string'
-    ) {
-        return null;
-    }
-
-    return {
-        id: record.id,
-        thread_id: record.thread_id,
-        role: record.role,
-        content: typeof record.content === 'string' ? record.content : '',
-        attachments: attachmentsFromUnknown(record.attachments),
-        reasoning: typeof record.reasoning === 'string' ? record.reasoning : undefined,
-        model_id: typeof record.model_id === 'string' ? record.model_id : undefined,
-        created_at: record.created_at,
-        deleted_at: typeof record.deleted_at === 'string' ? record.deleted_at : null,
-    };
-}
-
-function attachmentsFromUnknown(value: unknown): Attachment[] {
-    if (!Array.isArray(value)) return [];
-    const attachments: Attachment[] = [];
-    for (const item of value) {
-        if (!item || typeof item !== 'object') continue;
-        const record = item as Record<string, unknown>;
-        if (
-            typeof record.id === 'string' &&
-            typeof record.name === 'string' &&
-            typeof record.mimeType === 'string' &&
-            typeof record.size === 'number' &&
-            typeof record.path === 'string' &&
-            typeof record.url === 'string'
-        ) {
-            attachments.push({
-                id: record.id,
-                name: record.name,
-                mimeType: record.mimeType,
-                size: record.size,
-                path: record.path,
-                url: record.url,
-            });
-        }
-    }
-    return attachments;
-}
-
-function mapMessageRowToMessage(row: MessageRow): Message {
-    return {
-        id: row.id,
-        thread_id: row.thread_id,
-        role: row.role === 'assistant' ? 'assistant' : 'user',
-        content: row.content ?? '',
-        attachments: attachmentsFromUnknown(row.attachments),
-        reasoning: row.reasoning ?? undefined,
-        model_id: row.model_id ?? undefined,
-        created_at: row.created_at,
-        deleted_at: row.deleted_at ?? null,
-    };
-}
 
 async function fetchThreadMessagesWithClient(
     supabase: ReturnType<typeof createClient>,
@@ -161,7 +66,6 @@ export async function getThreadMessages(threadId: string): Promise<Message[]> {
 
 // Get all messages for a thread
 export function useMessages(threadId: string | null) {
-    const queryClient = useQueryClient();
     const supabase = useMemo(() => createClient(), []);
 
     const query = useQuery({
@@ -182,99 +86,8 @@ export function useMessages(threadId: string | null) {
         return { ok: true };
     }, [query, threadId]);
 
-    useEffect(() => {
-        if (!threadId) {
-            return;
-        }
-
-        const queryKey = getMessagesQueryKey(threadId);
-        let isActive = true;
-        let channel: ReturnType<ReturnType<typeof createClient>['channel']> | null = null;
-
-        const applyRealtimePayload = (payload: {
-            eventType: 'INSERT' | 'UPDATE' | 'DELETE';
-            new: unknown;
-            old: unknown;
-        }) => {
-            queryClient.setQueryData<Message[]>(queryKey, (previous) => {
-                const existing = previous ?? [];
-
-                if (payload.eventType === 'DELETE') {
-                    const deletedId =
-                        payload.old && typeof payload.old === 'object' && typeof (payload.old as { id?: unknown }).id === 'string'
-                            ? (payload.old as { id: string }).id
-                            : null;
-                    if (!deletedId) return existing;
-                    return removeMessagesById(existing, new Set([deletedId]));
-                }
-
-                const nextMessage = toMessage(payload.new);
-                if (!nextMessage || nextMessage.thread_id !== threadId) {
-                    return existing;
-                }
-
-                if (nextMessage.deleted_at) {
-                    return removeMessagesById(existing, new Set([nextMessage.id]));
-                }
-
-                return mergeMessagesSorted(existing, [nextMessage]);
-            });
-        };
-
-        const unsubscribeRealtime = () => {
-            if (channel) {
-                supabase.removeChannel(channel);
-                channel = null;
-            }
-        };
-
-        const subscribeRealtime = () => {
-            if (!isActive || channel) {
-                return;
-            }
-
-            channel = supabase
-                .channel(`messages_${threadId}`)
-                .on('postgres_changes', {
-                    event: '*',
-                    schema: 'public',
-                    table: 'messages',
-                    filter: `thread_id=eq.${threadId}`
-                }, (payload) => {
-                    if (!isActive) return;
-                    if (payload.eventType !== 'INSERT' && payload.eventType !== 'UPDATE' && payload.eventType !== 'DELETE') {
-                        return;
-                    }
-                    applyRealtimePayload({
-                        eventType: payload.eventType,
-                        new: payload.new,
-                        old: payload.old,
-                    });
-                })
-                .subscribe();
-        };
-
-        subscribeRealtime();
-
-        const handleVisibilityChange = () => {
-            if (!isActive) return;
-            if (document.visibilityState === 'visible') {
-                void queryClient.invalidateQueries({ queryKey });
-            }
-        };
-
-        if (typeof document !== 'undefined') {
-            document.addEventListener('visibilitychange', handleVisibilityChange);
-        }
-
-        return () => {
-            isActive = false;
-            if (typeof document !== 'undefined') {
-                document.removeEventListener('visibilitychange', handleVisibilityChange);
-            }
-            unsubscribeRealtime();
-        };
-    }, [queryClient, supabase, threadId]);
+    // Use the new subscription hook
+    useMessageSubscription(threadId);
 
     const messages = useMemo(() => {
         if (!threadId) return [] as Message[] | null;
