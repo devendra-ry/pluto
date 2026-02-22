@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { groupThreadsByDate } from './date-utils';
+import { format } from 'date-fns';
+import { groupThreadsByDate, formatThreadDate } from './date-utils';
 import type { Thread } from '@/hooks/use-threads';
 
 // Helper to create a partial Thread object cast to Thread
@@ -112,5 +113,46 @@ test('groupThreadsByDate', async (t) => {
         // Order is preserved from input
         assert.strictEqual(result[0].threads[0].id, '1');
         assert.strictEqual(result[0].threads[1].id, '2');
+    });
+});
+
+test('formatThreadDate', async (t) => {
+    // Set "Now" to Wednesday, October 11, 2023 12:00:00 UTC
+    // Week (Sunday start): Oct 8 - Oct 14
+    const NOW = new Date('2023-10-11T12:00:00Z').getTime();
+    t.mock.timers.enable({ now: NOW });
+
+    await t.test('should format today as time', () => {
+        // Today at 10:30 UTC
+        const date = new Date('2023-10-11T10:30:00Z');
+        const result = formatThreadDate(date);
+        // Depending on local timezone, 10:30 UTC might be different.
+        // We compare against what date-fns format outputs for the same date.
+        const expected = format(date, 'h:mm a');
+        assert.strictEqual(result, expected);
+    });
+
+    await t.test('should format yesterday as "Yesterday"', () => {
+        // Yesterday at 12:00 UTC
+        const date = new Date('2023-10-10T12:00:00Z');
+        const result = formatThreadDate(date);
+        assert.strictEqual(result, 'Yesterday');
+    });
+
+    await t.test('should format this week (not today/yesterday) as day name', () => {
+        // Sunday at 12:00 UTC
+        const date = new Date('2023-10-08T12:00:00Z');
+        const result = formatThreadDate(date);
+        // Should be "Sunday" if locale is EN
+        const expected = format(date, 'EEEE');
+        assert.strictEqual(result, expected);
+    });
+
+    await t.test('should format older dates as "MMM d"', () => {
+        // Thursday last week
+        const date = new Date('2023-10-05T12:00:00Z');
+        const result = formatThreadDate(date);
+        const expected = format(date, 'MMM d');
+        assert.strictEqual(result, expected);
     });
 });
