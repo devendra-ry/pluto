@@ -425,17 +425,23 @@ export async function POST(req: Request) {
         let lastAttemptUrl = '';
 
         if (isImageEditRequest) {
-            const imageB64s: string[] = [];
-            for (const attachment of imageEditAttachments) {
-                const { data, error } = await supabase.storage.from(bucket).download(attachment.path);
-                if (error || !data) {
-                    return jsonResponse({ error: error?.message || `Failed to read attachment ${attachment.name}` }, 400);
-                }
-                const bytes = new Uint8Array(await data.arrayBuffer());
-                if (bytes.length === 0) {
-                    return jsonResponse({ error: `Attachment ${attachment.name} is empty` }, 400);
-                }
-                imageB64s.push(Buffer.from(bytes).toString('base64'));
+            let imageB64s: string[];
+            try {
+                imageB64s = await Promise.all(
+                    imageEditAttachments.map(async (attachment) => {
+                        const { data, error } = await supabase.storage.from(bucket).download(attachment.path);
+                        if (error || !data) {
+                            throw new Error(error?.message || `Failed to read attachment ${attachment.name}`);
+                        }
+                        const bytes = new Uint8Array(await data.arrayBuffer());
+                        if (bytes.length === 0) {
+                            throw new Error(`Attachment ${attachment.name} is empty`);
+                        }
+                        return Buffer.from(bytes).toString('base64');
+                    }),
+                );
+            } catch (error) {
+                return jsonResponse({ error: error instanceof Error ? error.message : 'Failed to read attachment' }, 400);
             }
 
             const targetApiUrls = getChutesImageEditApiUrlCandidates();
