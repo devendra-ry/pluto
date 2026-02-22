@@ -1,7 +1,9 @@
 import type { ModelConfig } from '@/lib/constants';
 import type { ChatMessage } from '@/lib/types';
-import { createClient } from '@/utils/supabase/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/utils/supabase/database.types';
 import { getAttachmentsBucketName } from '@/lib/attachment-route-utils';
+import { AttachmentCache } from '@/lib/attachment-cache';
 
 import {
     MAX_ATTACHMENTS_PER_MESSAGE,
@@ -14,6 +16,14 @@ import {
 const MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL = MAX_ATTACHMENTS_PER_MESSAGE * MAX_ATTACHMENT_BYTES_FOR_MODEL;
 const ATTACHMENT_DOWNLOAD_CONCURRENCY = 4;
 const ATTACHMENTS_BUCKET = getAttachmentsBucketName();
+
+// In-memory cache for downloaded attachments
+interface CachedAttachment {
+    attachment: PreparedAttachment;
+    byteLength: number;
+}
+
+const attachmentCache = new AttachmentCache<CachedAttachment>();
 
 export interface PreparedAttachment {
     name: string;
@@ -73,7 +83,7 @@ async function mapWithConcurrency<T, R>(
 
 export async function prepareMessageAttachments(
     messages: ChatMessage[],
-    supabase: ReturnType<typeof createClient>,
+    supabase: SupabaseClient<Database>,
     userId: string,
     modelConfig: ModelConfig,
     signal?: AbortSignal
@@ -162,6 +172,19 @@ export async function prepareMessageAttachments(
         ATTACHMENT_DOWNLOAD_CONCURRENCY,
         async (task) => {
             if (signal?.aborted) throw new Error('Request aborted');
+
+            // Use path as cache key. Since we validate path starts with userId/ below,
+            // this effectively scopes the cache to the user, preventing RLS bypass.
+            const cached = attachmentCache.get(task.attachment.path);
+            if (cached) {
+                return {
+                    messageIndex: task.messageIndex,
+                    attachmentIndex: task.attachmentIndex,
+                    byteLength: cached.byteLength,
+                    attachment: cached.attachment,
+                };
+            }
+
             const { data, error } = await supabase.storage.from(ATTACHMENTS_BUCKET).download(task.attachment.path);
             if (error || !data) {
                 throw new Error(`Failed to load attachment: ${task.attachment.name}`);
@@ -173,15 +196,22 @@ export async function prepareMessageAttachments(
                 throw new Error(`Attachment "${task.attachment.name}" exceeds model limit (${maxMb}MB).`);
             }
 
+            const preparedAttachment: PreparedAttachment = {
+                name: task.attachment.name,
+                mimeType: task.attachment.mimeType,
+                base64Data: toBase64(buffer),
+            };
+
+            attachmentCache.set(task.attachment.path, {
+                attachment: preparedAttachment,
+                byteLength: buffer.byteLength,
+            });
+
             return {
                 messageIndex: task.messageIndex,
                 attachmentIndex: task.attachmentIndex,
                 byteLength: buffer.byteLength,
-                attachment: {
-                    name: task.attachment.name,
-                    mimeType: task.attachment.mimeType,
-                    base64Data: toBase64(buffer),
-                } satisfies PreparedAttachment,
+                attachment: preparedAttachment,
             };
         }
     );
