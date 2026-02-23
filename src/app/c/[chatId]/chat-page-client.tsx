@@ -15,7 +15,7 @@ import { useChatMessageState } from '@/features/chat/hooks/use-chat-message-stat
 import { useChatScroll } from '@/features/chat/hooks/use-chat-scroll';
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
 import { useDestructiveDeleteConfirm } from '@/features/chat/hooks/use-destructive-delete-confirm';
-import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages } from '@/hooks/use-messages';
+import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages } from '@/features/messages/hooks/use-messages';
 import { usePendingGeneration } from '@/features/chat/hooks/use-pending-generation';
 import { useRetryLogic } from '@/features/chat/hooks/use-retry-logic';
 import { useThread } from '@/features/threads/hooks/use-threads';
@@ -478,4 +478,5 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         </div>
     );
 }
+
 

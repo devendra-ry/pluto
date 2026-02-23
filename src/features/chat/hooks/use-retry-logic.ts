@@ -3,7 +3,7 @@
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 
 import { type ChatSubmitMode } from '@/components/chat-input-components/chat-input-types';
-import { deleteMessagesByIds, getThreadMessages, type RefreshMessagesResult } from '@/hooks/use-messages';
+import { deleteMessagesByIds, getThreadMessages, type RefreshMessagesResult } from '@/features/messages/hooks/use-messages';
 import { IMAGE_GENERATION_MODEL, isImageGenerationModel, SEARCH_ENABLED_MODELS, VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { type ChatViewMessage, type RetryMode } from '@/lib/chat-view';
 
@@ -283,3 +283,4 @@ export function useRetryLogic({
         persistRetryModeHint,
     };
 }
+

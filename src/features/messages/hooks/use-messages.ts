@@ -17,7 +17,7 @@ import {
     mergeMessagesSorted,
     removeMessagesById
 } from '@/lib/message-helpers';
-import { useMessageSubscription } from '@/hooks/use-message-subscription';
+import { useMessageSubscription } from '@/features/messages/hooks/use-message-subscription';
 
 // Re-export Message type for backward compatibility
 export type { Message };
@@ -322,3 +322,4 @@ export async function clearThreadMessages(threadId: string) {
         .filter((value): value is string => value !== null);
     await deleteMessagesByIds(ids, { reason: 'clear_thread', threadId });
 }
+
