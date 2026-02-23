@@ -14,6 +14,75 @@ export type Database = {
   }
   public: {
     Tables: {
+      generation_jobs: {
+        Row: {
+          claim_expires_at: string | null
+          claimed_at: string | null
+          created_at: string
+          error: string | null
+          id: string
+          mode: string
+          model_id: string | null
+          reasoning_effort: string | null
+          status: string
+          system_prompt: string | null
+          thread_id: string
+          updated_at: string
+          use_search: boolean
+          user_id: string
+          user_message_id: string
+        }
+        Insert: {
+          claim_expires_at?: string | null
+          claimed_at?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          mode: string
+          model_id?: string | null
+          reasoning_effort?: string | null
+          status?: string
+          system_prompt?: string | null
+          thread_id: string
+          updated_at?: string
+          use_search?: boolean
+          user_id?: string
+          user_message_id: string
+        }
+        Update: {
+          claim_expires_at?: string | null
+          claimed_at?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          mode?: string
+          model_id?: string | null
+          reasoning_effort?: string | null
+          status?: string
+          system_prompt?: string | null
+          thread_id?: string
+          updated_at?: string
+          use_search?: boolean
+          user_id?: string
+          user_message_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "generation_jobs_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "threads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "generation_jobs_user_message_id_fkey"
+            columns: ["user_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           attachments: Json
@@ -105,9 +174,29 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_pending_generation_job: {
+        Args: {
+          p_lease_seconds?: number
+          p_thread_id: string
+          p_user_message_id?: string
+        }
+        Returns: {
+          id: string
+          mode: string
+          model_id: string | null
+          reasoning_effort: string | null
+          system_prompt: string | null
+          use_search: boolean
+          user_message_id: string
+        }[]
+      }
       cleanup_empty_new_chat_threads: {
         Args: { exclude_thread_id?: string }
         Returns: number
+      }
+      complete_generation_job: {
+        Args: { p_error?: string; p_job_id: string; p_status: string }
+        Returns: boolean
       }
       restore_soft_deleted_messages: {
         Args: { p_message_ids: string[]; p_restore_window_minutes?: number }

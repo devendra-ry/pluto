@@ -128,7 +128,7 @@ interface UseRetryLogicParams {
         forcedModelId?: string,
         forcedSystemPrompt?: string,
         forceSearchMode?: boolean
-    ) => Promise<void>;
+    ) => Promise<boolean>;
     refreshStoredMessages: () => Promise<RefreshMessagesResult>;
     locallyDeletedMessageIdsRef: MutableRefObject<Set<string>>;
     confirmDestructiveDelete: (context: {

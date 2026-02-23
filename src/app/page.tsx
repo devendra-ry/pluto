@@ -4,7 +4,8 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, isImageGenerationModel, PENDING_GENERATION_MODEL_KEY, PENDING_GENERATION_MODE_KEY, PENDING_GENERATION_SEARCH_KEY, PENDING_GENERATION_THREAD_KEY, PENDING_REASONING_EFFORT_KEY, PENDING_SYSTEM_PROMPT_KEY, VIDEO_GENERATION_MODEL } from '@/lib/constants';
+import { enqueueGenerationJob } from '@/hooks/use-generation-jobs';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -149,28 +150,23 @@ export default function HomePage() {
       const threadId = await ensureThread();
 
       // 2. Add the user message
-      await addMessage(threadId, 'user', value.trim(), undefined, messageModel, attachments);
+      const userMessage = await addMessage(threadId, 'user', value.trim(), undefined, messageModel, attachments);
 
-      // 3. Navigate to the new chat
-      // The ChatPageClient will pick up the user message and start generating
-      window.sessionStorage.setItem(PENDING_GENERATION_THREAD_KEY, threadId);
-      window.sessionStorage.setItem(PENDING_GENERATION_MODEL_KEY, targetModel);
-      window.sessionStorage.setItem(PENDING_GENERATION_MODE_KEY, options.mode);
-      if (!isImageMode && !isVideoMode) {
-        window.sessionStorage.setItem(PENDING_REASONING_EFFORT_KEY, reasoningEffortRef.current);
-      } else {
-        window.sessionStorage.removeItem(PENDING_REASONING_EFFORT_KEY);
-      }
-      if (isSearchMode && !isImageMode) {
-        window.sessionStorage.setItem(PENDING_GENERATION_SEARCH_KEY, '1');
-      } else {
-        window.sessionStorage.removeItem(PENDING_GENERATION_SEARCH_KEY);
-      }
-      if (systemPrompt.trim().length > 0 && !isImageMode && !isVideoMode) {
-        window.sessionStorage.setItem(PENDING_SYSTEM_PROMPT_KEY, systemPrompt.trim());
-      } else {
-        window.sessionStorage.removeItem(PENDING_SYSTEM_PROMPT_KEY);
-      }
+      // 3. Persist durable generation context for chat-page handoff.
+      await enqueueGenerationJob({
+        threadId,
+        userMessageId: userMessage.id,
+        mode: options.mode,
+        modelId: targetModel,
+        useSearch: isSearchMode && !isImageMode && !isVideoMode,
+        reasoningEffort: !isImageMode && !isVideoMode ? reasoningEffortRef.current : null,
+        systemPrompt: systemPrompt.trim().length > 0 && !isImageMode && !isVideoMode
+          ? systemPrompt.trim()
+          : null,
+      });
+
+      // 4. Navigate to the new chat.
+      // The ChatPageClient claims the queued generation job and starts generating.
       router.push(`/c/${threadId}`);
       return true;
     } catch (error: unknown) {

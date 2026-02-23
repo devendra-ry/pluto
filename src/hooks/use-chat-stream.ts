@@ -172,17 +172,17 @@ export function useChatStream({
         forcedModelId?: string,
         forcedSystemPrompt?: string,
         forceSearchMode: boolean = false
-    ) => {
+    ): Promise<boolean> => {
         const lastMsg = currentMessages[currentMessages.length - 1];
-        if (!lastMsg || lastMsg.role !== 'user') return;
+        if (!lastMsg || lastMsg.role !== 'user') return false;
 
         const machine = stateRef.current;
         if (machine.phase !== 'idle' && machine.phase !== 'preparing') {
             // Never overlap runs. Prevent duplicate run for same anchor message.
             if (machine.activeUserMessageId === lastMsg.id) {
-                return;
+                return false;
             }
-            return;
+            return false;
         }
 
         const activeModelId = forcedModelId || model;
@@ -233,6 +233,7 @@ export function useChatStream({
         let hasPendingAssistantUpdate = false;
         let streamFlushFrame: ScheduledFrame | null = null;
         let requestFailed = false;
+        let requestSucceeded = false;
 
         const flushAssistantUpdate = () => {
             if (!hasPendingAssistantUpdate) return;
@@ -329,7 +330,8 @@ export function useChatStream({
                             : (isEditOperation ? 'Failed to persist edited image' : 'Failed to persist generated image')
                     );
                 }
-                return;
+                requestSucceeded = true;
+                return true;
             }
 
             dispatch({ type: 'STREAMING' });
@@ -374,14 +376,16 @@ export function useChatStream({
                 setMessages(currentMessages);
                 requestFailed = true;
                 showToast('No response returned. Please try again.', 'error');
+                return false;
             }
+            requestSucceeded = true;
         } catch (error) {
             cancelScheduledAssistantFrame();
             if (error instanceof Error && error.name === 'AbortError') {
                 if (isMediaGenModel) {
                     hasPendingAssistantUpdate = false;
                     setMessages(currentMessages);
-                    return;
+                    return false;
                 }
                 flushAssistantUpdate();
                 const persisted = await persistAssistantMessage(fullContent, fullReasoning);
@@ -389,7 +393,9 @@ export function useChatStream({
                     requestFailed = true;
                     hasPendingAssistantUpdate = false;
                     setMessages(currentMessages);
+                    return false;
                 }
+                requestSucceeded = true;
             } else {
                 console.error('Chat error:', error);
                 const errorMessage = error instanceof Error
@@ -399,12 +405,14 @@ export function useChatStream({
                 hasPendingAssistantUpdate = false;
                 setMessages(currentMessages);
                 requestFailed = true;
+                return false;
             }
         } finally {
             cancelScheduledAssistantFrame();
             abortControllerRef.current = null;
             dispatch({ type: 'COMPLETE', failed: requestFailed });
         }
+        return requestSucceeded;
     }, [chatId, model, reasoningEffortRef, systemPrompt, showToast, setMessages, justAddedMessageIdRef, persistRetryModeHintRef]);
 
     return {

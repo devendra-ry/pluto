@@ -1,34 +1,12 @@
 'use client';
 
-import { useEffect, type MutableRefObject } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 
-import { type ChatInputHandle, type ChatSubmitMode } from '@/components/chat-input-components/chat-input-types';
-import {
-    PENDING_GENERATION_MODEL_KEY,
-    PENDING_GENERATION_MODE_KEY,
-    PENDING_GENERATION_SEARCH_KEY,
-    PENDING_GENERATION_THREAD_KEY,
-    PENDING_REASONING_EFFORT_KEY,
-    PENDING_SYSTEM_PROMPT_KEY,
-    isImageGenerationModel,
-    VIDEO_GENERATION_MODEL,
-} from '@/lib/constants';
+import { type ChatInputHandle } from '@/components/chat-input-components/chat-input-types';
+import { claimPendingGenerationJob, completeGenerationJob } from '@/hooks/use-generation-jobs';
+import { isImageGenerationModel } from '@/lib/constants';
 import { type ChatViewMessage } from '@/lib/chat-view';
 import { type ReasoningEffort } from '@/lib/types';
-
-function toReasoningEffort(value: string | null): ReasoningEffort | null {
-    if (value === 'low' || value === 'medium' || value === 'high') {
-        return value;
-    }
-    return null;
-}
-
-function toChatSubmitMode(value: string | null): ChatSubmitMode | null {
-    if (value === 'chat' || value === 'image' || value === 'image-edit' || value === 'video' || value === 'search') {
-        return value;
-    }
-    return null;
-}
 
 interface UsePendingGenerationParams {
     chatId: string;
@@ -44,7 +22,7 @@ interface UsePendingGenerationParams {
         forcedModelId?: string,
         forcedSystemPrompt?: string,
         forceSearchMode?: boolean
-    ) => Promise<void>;
+    ) => Promise<boolean>;
 }
 
 export function usePendingGeneration({
@@ -58,61 +36,87 @@ export function usePendingGeneration({
     applyPendingReasoningEffort,
     generateResponse,
 }: UsePendingGenerationParams) {
+    const inFlightRef = useRef(false);
+
     useEffect(() => {
+        if (inFlightRef.current) {
+            return;
+        }
         // Don't auto-retry if the last request failed or if canonical messages are still loading.
         if (lastRequestFailed || !messagesReady) {
             return;
         }
-        if (messages.length > 0 && !isLoading && !isThinking) {
-            const lastMessage = messages[messages.length - 1];
-            if (lastMessage.role === 'user') {
-                const pendingGenerationThreadId = window.sessionStorage.getItem(PENDING_GENERATION_THREAD_KEY);
-                if (pendingGenerationThreadId !== chatId) {
-                    return;
-                }
-                const pendingGenerationModelId = window.sessionStorage.getItem(PENDING_GENERATION_MODEL_KEY);
-                const pendingGenerationModeRaw = window.sessionStorage.getItem(PENDING_GENERATION_MODE_KEY);
-                const pendingGenerationSearch = window.sessionStorage.getItem(PENDING_GENERATION_SEARCH_KEY);
-                const pendingReasoningEffortRaw = window.sessionStorage.getItem(PENDING_REASONING_EFFORT_KEY);
-                const pendingSystemPrompt = window.sessionStorage.getItem(PENDING_SYSTEM_PROMPT_KEY);
-                const pendingModelId = pendingGenerationModelId ?? undefined;
-                const pendingMode = toChatSubmitMode(pendingGenerationModeRaw);
-                const pendingReasoningEffort = toReasoningEffort(pendingReasoningEffortRaw);
-                if (pendingReasoningEffort) {
-                    applyPendingReasoningEffort(pendingReasoningEffort);
-                }
-                if (pendingMode) {
-                    chatInputRef.current?.setMode(pendingMode);
-                }
-                if (
-                    pendingMode
-                    && (pendingMode === 'image' || pendingMode === 'image-edit')
-                    && pendingModelId
-                    && isImageGenerationModel(pendingModelId)
-                ) {
-                    chatInputRef.current?.setImageModelId(pendingModelId);
-                }
-                window.sessionStorage.removeItem(PENDING_GENERATION_THREAD_KEY);
-                window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
-                window.sessionStorage.removeItem(PENDING_GENERATION_MODE_KEY);
-                window.sessionStorage.removeItem(PENDING_GENERATION_SEARCH_KEY);
-                window.sessionStorage.removeItem(PENDING_REASONING_EFFORT_KEY);
-                window.sessionStorage.removeItem(PENDING_SYSTEM_PROMPT_KEY);
-                if (
-                    pendingModelId
-                    && (isImageGenerationModel(pendingModelId) || pendingModelId === VIDEO_GENERATION_MODEL)
-                ) {
-                    void generateResponse(messages, pendingModelId, undefined, false);
-                    return;
-                }
-                void generateResponse(
-                    messages,
-                    pendingModelId || lastMessage.model_id || undefined,
-                    pendingSystemPrompt || undefined,
-                    pendingGenerationSearch === '1'
-                );
-            }
+        if (messages.length === 0 || isLoading || isThinking) {
+            return;
         }
+
+        const lastMessage = messages[messages.length - 1];
+        if (lastMessage.role !== 'user') {
+            return;
+        }
+
+        let cancelled = false;
+        inFlightRef.current = true;
+
+        void (async () => {
+            const claimedJob = await (async () => {
+                try {
+                    return await claimPendingGenerationJob(chatId, lastMessage.id);
+                } catch (error) {
+                    console.error('Failed to claim generation job:', error);
+                    return null;
+                }
+            })();
+
+            if (cancelled || !claimedJob) {
+                return;
+            }
+
+            if (claimedJob.reasoningEffort) {
+                applyPendingReasoningEffort(claimedJob.reasoningEffort);
+            }
+            chatInputRef.current?.setMode(claimedJob.mode);
+
+            if (
+                (claimedJob.mode === 'image' || claimedJob.mode === 'image-edit')
+                && claimedJob.modelId
+                && isImageGenerationModel(claimedJob.modelId)
+            ) {
+                chatInputRef.current?.setImageModelId(claimedJob.modelId);
+            }
+
+            let succeeded = false;
+            try {
+                const forcedModelId = claimedJob.modelId || lastMessage.model_id || undefined;
+                const forcedSystemPrompt = claimedJob.systemPrompt || undefined;
+                succeeded = await generateResponse(
+                    messages,
+                    forcedModelId,
+                    forcedSystemPrompt,
+                    claimedJob.useSearch
+                );
+            } catch (error) {
+                console.error('Failed during pending generation:', error);
+                succeeded = false;
+            }
+
+            if (cancelled) {
+                return;
+            }
+
+            await completeGenerationJob(
+                claimedJob.id,
+                succeeded ? 'completed' : 'failed',
+                succeeded ? undefined : 'Generation did not complete'
+            );
+        })()
+            .finally(() => {
+                inFlightRef.current = false;
+            });
+
+        return () => {
+            cancelled = true;
+        };
     }, [
         messages,
         messagesReady,
