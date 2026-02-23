@@ -6,6 +6,7 @@ Current modules:
 
 - `providers/*` for provider orchestration and model limits.
 - `providers/chutes.ts` for Chutes-specific server config helpers.
+- `redis/client.ts` for Upstash Redis client access and key namespacing.
 - `security/ssrf-guard.ts` and related tests.
 
 Guideline:

@@ -364,7 +364,7 @@ export async function POST(req: Request) {
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
-        assertRateLimit(user.id, imageRateLimiter);
+        await assertRateLimit(user.id, imageRateLimiter);
     } catch (error) {
         const response = toJsonErrorResponse(error);
         if (response) {

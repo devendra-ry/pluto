@@ -119,7 +119,7 @@ export async function POST(req: Request) {
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
-        assertRateLimit(user.id, uploadRateLimiter);
+        await assertRateLimit(user.id, uploadRateLimiter);
     } catch (error) {
         const response = toJsonErrorResponse(error);
         if (response) {
@@ -227,7 +227,7 @@ export async function DELETE(req: Request) {
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
-        assertRateLimit(user.id, uploadRateLimiter);
+        await assertRateLimit(user.id, uploadRateLimiter);
     } catch (error) {
         const response = toJsonErrorResponse(error);
         if (response) {

@@ -19,7 +19,7 @@ export async function withSecureContext(
         const { user, supabase } = await requireUser();
 
         if (rateLimiter) {
-            assertRateLimit(user.id, rateLimiter);
+            await assertRateLimit(user.id, rateLimiter);
         }
 
         return await handler({ user, supabase });

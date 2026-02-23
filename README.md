@@ -86,6 +86,9 @@ GEMINI_API_KEY=...
 CHUTES_API_KEY=...
 CHUTES_API_TOKEN=...
 OPENROUTER_API_KEY=...
+UPSTASH_REDIS_REST_URL=...
+UPSTASH_REDIS_REST_TOKEN=...
+REDIS_KEY_PREFIX=pluto:dev
 
 # Optional origin configuration (recommended)
 NEXT_PUBLIC_APP_URL=http://localhost:3000
@@ -95,6 +98,9 @@ VERCEL_URL=
 # Optional storage bucket override (default: chat-attachments)
 SUPABASE_ATTACHMENTS_BUCKET=chat-attachments
 NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET=chat-attachments
+
+# Optional model limits cache TTL in milliseconds (default: 1800000)
+CHAT_LIMITS_CACHE_TTL_MS=1800000
 
 # Optional SSRF allowlist extensions (comma-separated patterns)
 CHUTES_MEDIA_FETCH_ALLOWED_HOSTS=
