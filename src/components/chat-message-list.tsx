@@ -13,6 +13,7 @@ interface ChatMessageListProps {
     model: string;
     isLoading: boolean;
     isThinking: boolean;
+    shouldAutoFollow: boolean;
     virtuosoRef: RefObject<VirtuosoHandle | null>;
     setIsAtBottom: (isAtBottom: boolean) => void;
     onEdit: (messageId: string, newContent: string) => void;
@@ -31,14 +32,15 @@ export function ChatMessageList({
     model,
     isLoading,
     isThinking,
+    shouldAutoFollow,
     virtuosoRef,
     setIsAtBottom,
     onEdit,
     onRetry,
 }: ChatMessageListProps) {
     const followOutput = useCallback(
-        (isAtBottom: boolean) => (isAtBottom ? 'auto' : false),
-        [],
+        (isAtBottom: boolean) => (shouldAutoFollow && isAtBottom ? 'auto' : false),
+        [shouldAutoFollow],
     );
 
     const computeItemKey = useCallback(

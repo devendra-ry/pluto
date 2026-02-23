@@ -222,7 +222,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const locallyDeletedMessageIdsRef = useRef<Set<string>>(new Set());
     const persistRetryModeHintRef = useRef<((userMessageId: string, mode: RetryMode) => void) | null>(null);
     const prevChatIdRef = useRef<string | null>(null);
-    const isAtBottomRef = useRef(true);
     const initialBottomScrollChatIdRef = useRef<string | null>(null);
     const { showToast } = useToast();
 
@@ -392,28 +391,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             setIsAtBottom(true);
         }
     }, [visibleMessages.length]);
-
-    useEffect(() => {
-        isAtBottomRef.current = isAtBottom;
-    }, [isAtBottom]);
-
-    // Keep viewport pinned only while actively streaming and only if user stayed at bottom.
-    useEffect(() => {
-        if (visibleMessages.length === 0) {
-            return;
-        }
-        if (!isAtBottomRef.current) {
-            return;
-        }
-        if (!isLoading && !isThinking) {
-            return;
-        }
-        if (virtuosoRef.current) {
-            scheduleFrame(() => {
-                virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' });
-            });
-        }
-    }, [visibleMessages.length, isLoading, isThinking]);
 
     // Scroll to bottom exactly once when a thread finishes initial message sync.
     useEffect(() => {
@@ -731,6 +708,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                             model={model}
                             isLoading={isLoading}
                             isThinking={isThinking}
+                            shouldAutoFollow={isLoading || isThinking}
                             virtuosoRef={virtuosoRef}
                             setIsAtBottom={handleAtBottomStateChange}
                             onEdit={handleEdit}
