@@ -5,9 +5,9 @@ import { type VirtuosoHandle } from 'react-virtuoso';
 import dynamic from 'next/dynamic';
 
 import { ChatDestructiveConfirmDialog } from '@/features/chat/components/chat-destructive-confirm-dialog';
-import { ChatEmptyState } from '@/components/chat-empty-state';
+import { ChatEmptyState } from '@/features/chat/components/chat-empty-state';
 import { ErrorBoundary } from '@/shared/components/error-boundary';
-import { ChatHeader } from '@/components/chat-header';
+import { ChatHeader } from '@/features/chat/components/chat-header';
 import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/features/chat/components/chat-input';
 import { useToast } from '@/components/ui/toast';
 import { useChatMessageState } from '@/features/chat/hooks/use-chat-message-state';

@@ -6,6 +6,9 @@ Current modules:
 
 - `components/chat-message-list.tsx`
 - `components/chat-destructive-confirm-dialog.tsx`
+- `components/chat-empty-state.tsx`
+- `components/chat-header.tsx`
+- `components/chat-message.tsx` (+ assistant/user/action subcomponents)
 - `components/chat-input.tsx` and `components/chat-input/*`
 - `hooks/*` for stream, retry, scroll, and pending-generation orchestration.
 
