@@ -16,7 +16,7 @@ import {
     mapMessageRowToMessage,
     mergeMessagesSorted,
     removeMessagesById
-} from '@/lib/message-helpers';
+} from '@/features/messages/lib/message-helpers';
 import { useMessageSubscription } from '@/features/messages/hooks/use-message-subscription';
 
 // Re-export Message type for backward compatibility
