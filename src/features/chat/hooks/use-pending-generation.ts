@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, type MutableRefObject } from 'react';
 
-import { type ChatInputHandle } from '@/components/chat-input-components/chat-input-types';
+import { type ChatInputHandle } from '@/features/chat/components/chat-input';
 import { claimPendingGenerationJob, completeGenerationJob } from '@/features/chat/hooks/use-generation-jobs';
 import { isImageGenerationModel } from '@/lib/constants';
 import { type ChatViewMessage } from '@/lib/chat-view';

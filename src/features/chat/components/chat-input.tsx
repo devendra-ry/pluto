@@ -10,11 +10,11 @@ import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment, isPdfAttachment, isSupp
 import { startUploadFileForThread } from '@/features/uploads/lib/uploads';
 import { useToast } from '@/components/ui/toast';
 import { scheduleFrame } from '@/lib/animation-frame';
-import { ChatSubmitMode, ChatSubmitOptions, LocalAttachmentItem, ChatInputHandle, LocalAttachmentStatus } from './chat-input-components/chat-input-types';
-import { AttachmentList } from './chat-input-components/attachment-list';
-import { ModeSelector } from './chat-input-components/mode-selector';
-import { ReasoningSelector } from './chat-input-components/reasoning-selector';
-import { SystemPromptSelector } from './chat-input-components/system-prompt-selector';
+import { ChatSubmitMode, ChatSubmitOptions, LocalAttachmentItem, ChatInputHandle, LocalAttachmentStatus } from './chat-input/chat-input-types';
+import { AttachmentList } from './chat-input/attachment-list';
+import { ModeSelector } from './chat-input/mode-selector';
+import { ReasoningSelector } from './chat-input/reasoning-selector';
+import { SystemPromptSelector } from './chat-input/system-prompt-selector';
 
 // Re-export types for backward compatibility
 export type { ChatSubmitMode, ChatSubmitOptions, LocalAttachmentItem, ChatInputHandle, LocalAttachmentStatus };

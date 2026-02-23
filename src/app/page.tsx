@@ -6,7 +6,7 @@ import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSys
 import { addMessage } from '@/features/messages/hooks/use-messages';
 import { enqueueGenerationJob } from '@/features/chat/hooks/use-generation-jobs';
 import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/lib/constants';
-import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input';
+import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/features/chat/components/chat-input';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';

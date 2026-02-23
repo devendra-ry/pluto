@@ -8,8 +8,7 @@ import { ChatDestructiveConfirmDialog } from '@/features/chat/components/chat-de
 import { ChatEmptyState } from '@/components/chat-empty-state';
 import { ErrorBoundary } from '@/shared/components/error-boundary';
 import { ChatHeader } from '@/components/chat-header';
-import { ChatInput } from '@/components/chat-input';
-import { type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input-components/chat-input-types';
+import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/features/chat/components/chat-input';
 import { useToast } from '@/components/ui/toast';
 import { useChatMessageState } from '@/features/chat/hooks/use-chat-message-state';
 import { useChatScroll } from '@/features/chat/hooks/use-chat-scroll';
