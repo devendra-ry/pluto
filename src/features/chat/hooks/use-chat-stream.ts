@@ -16,7 +16,7 @@ import { cancelScheduledFrame, scheduleFrame, type ScheduledFrame } from '@/lib/
 import { chatService } from '@/features/chat/lib/chat-service';
 import { AVAILABLE_MODELS, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
-import { sanitizeThreadTitle } from '@/lib/sanitize';
+import { sanitizeThreadTitle } from '@/features/threads/lib/sanitize-thread-title';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 
 type ToastType = 'success' | 'error' | 'info';

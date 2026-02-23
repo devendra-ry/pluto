@@ -8,6 +8,7 @@ Current modules:
 - `components/sidebar.tsx` for thread navigation and thread-level actions.
 - `server/thread-ownership.ts` for API-side thread access checks.
 - `lib/date-utils.ts` for thread date grouping/format utilities.
+- `lib/sanitize-thread-title.ts` for consistent thread-title sanitization.
 
 Guideline:
 

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { type ReasoningEffort } from '@/lib/types';
 import { cleanupThreadAttachments } from '@/features/uploads/lib/uploads';
-import { sanitizeThreadTitle } from '@/lib/sanitize';
+import { sanitizeThreadTitle } from '@/features/threads/lib/sanitize-thread-title';
 import { DEFAULT_MODEL } from '@/lib/constants';
 import type { Database } from '@/utils/supabase/database.types';
 
