@@ -20,8 +20,8 @@ import { type User as SupabaseUser } from '@supabase/supabase-js';
 import { List, type RowComponentProps } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useThreads, deleteThread, toggleThreadPin } from '@/hooks/use-threads';
-import { type Thread } from '@/hooks/use-threads';
+import { useThreads, deleteThread, toggleThreadPin } from '@/features/threads/hooks/use-threads';
+import { type Thread } from '@/features/threads/hooks/use-threads';
 import { groupThreadsByDate } from '@/lib/date-utils';
 import { useDebouncedValue } from '@/hooks/use-debounce';
 import { cn } from '@/lib/utils';
@@ -513,3 +513,4 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
 });
 
 export { Sidebar };
+

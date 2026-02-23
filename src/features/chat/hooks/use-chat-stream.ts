@@ -11,7 +11,7 @@ import {
 } from 'react';
 
 import { addMessage } from '@/hooks/use-messages';
-import { touchThread, updateThreadTitleIfNewChat } from '@/hooks/use-threads';
+import { touchThread, updateThreadTitleIfNewChat } from '@/features/threads/hooks/use-threads';
 import { cancelScheduledFrame, scheduleFrame, type ScheduledFrame } from '@/lib/animation-frame';
 import { chatService } from '@/lib/chat-service';
 import { AVAILABLE_MODELS, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/lib/constants';
@@ -426,3 +426,4 @@ export function useChatStream({
         resetStreamState,
     };
 }
+

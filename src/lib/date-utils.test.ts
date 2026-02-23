@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { format } from 'date-fns';
 import { groupThreadsByDate, formatThreadDate } from './date-utils';
-import type { Thread } from '@/hooks/use-threads';
+import type { Thread } from '@/features/threads/hooks/use-threads';
 
 // Helper to create a partial Thread object cast to Thread
 // We only need updated_at for the grouping logic.
@@ -156,3 +156,4 @@ test('formatThreadDate', async (t) => {
         assert.strictEqual(result, expected);
     });
 });
+

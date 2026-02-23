@@ -18,7 +18,7 @@ import { useDestructiveDeleteConfirm } from '@/features/chat/hooks/use-destructi
 import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages } from '@/hooks/use-messages';
 import { usePendingGeneration } from '@/features/chat/hooks/use-pending-generation';
 import { useRetryLogic } from '@/features/chat/hooks/use-retry-logic';
-import { useThread } from '@/hooks/use-threads';
+import { useThread } from '@/features/threads/hooks/use-threads';
 import { useThreadSettings } from '@/features/chat/hooks/use-thread-settings';
 import {
     IMAGE_GENERATION_MODEL,
@@ -478,3 +478,4 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         </div>
     );
 }
+

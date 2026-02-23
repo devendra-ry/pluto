@@ -5,7 +5,7 @@ import {
     isThisMonth,
     format,
 } from 'date-fns';
-import type { Thread } from '@/hooks/use-threads';
+import type { Thread } from '@/features/threads/hooks/use-threads';
 
 export interface GroupedThreads {
     label: string;
@@ -57,3 +57,4 @@ export function formatThreadDate(date: Date): string {
         return format(date, 'MMM d');
     }
 }
+

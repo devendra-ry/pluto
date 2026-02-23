@@ -7,7 +7,7 @@ import {
     updateThreadModel,
     updateThreadSystemPrompt,
     type Thread,
-} from '@/hooks/use-threads';
+} from '@/features/threads/hooks/use-threads';
 import { AVAILABLE_MODELS, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT } from '@/lib/constants';
 import { type ReasoningEffort } from '@/lib/types';
 
@@ -120,3 +120,4 @@ export function useThreadSettings({ chatId, thread, showToast }: UseThreadSettin
         handleSystemPromptChange,
     };
 }
+

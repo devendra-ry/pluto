@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/hooks/use-threads';
+import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/features/threads/hooks/use-threads';
 import { addMessage } from '@/hooks/use-messages';
 import { enqueueGenerationJob } from '@/features/chat/hooks/use-generation-jobs';
 import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/lib/constants';
@@ -262,3 +262,4 @@ export default function HomePage() {
     </div>
   );
 }
+
