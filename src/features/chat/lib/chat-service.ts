@@ -31,6 +31,16 @@ export interface GenerationResult {
     revisedPrompt?: string;
 }
 
+const MAX_STREAM_RESUME_ATTEMPTS = 2;
+
+function createIdempotencyKey(prefix: string) {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return `${prefix}-${crypto.randomUUID()}`;
+    }
+
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
 function isAttachment(value: unknown): value is Attachment {
     if (!value || typeof value !== 'object') return false;
     const record = value as Record<string, unknown>;
@@ -57,7 +67,10 @@ export class ChatService {
 
         const response = await fetch(endpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Idempotency-Key': createIdempotencyKey(isVideo ? 'video' : 'image'),
+            },
             body: JSON.stringify({
                 threadId,
                 model,
@@ -114,90 +127,125 @@ export class ChatService {
         search,
         signal,
     }: ChatStreamParams): AsyncGenerator<StreamChunk, void, unknown> {
-        const response = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                messages,
-                model,
-                reasoningEffort,
-                systemPrompt,
-                search,
-            }),
-            signal,
-        });
-
-        if (!response.ok) {
-            let message = `Failed to get response (${response.status})`;
-            try {
-                const payload = await response.json() as Record<string, unknown>;
-                const errorText = typeof payload.error === 'string' ? payload.error : '';
-                const detailsText = typeof payload.details === 'string' ? payload.details : '';
-                if (errorText) {
-                    message = detailsText ? `${errorText}: ${detailsText}` : errorText;
-                }
-            } catch {
-                // Ignore parse failures and keep fallback status message.
-            }
-            throw new Error(message);
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) return;
-
-        const decoder = new TextDecoder();
-        let buffer = '';
+        const streamId = createIdempotencyKey('chat');
+        let attempts = 0;
+        let resumeOffset = 0;
 
         while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Idempotency-Key': streamId,
+                    ...(resumeOffset > 0 ? { 'X-Chat-Resume-Offset': String(resumeOffset) } : {}),
+                },
+                body: JSON.stringify({
+                    messages,
+                    model,
+                    reasoningEffort,
+                    systemPrompt,
+                    search,
+                }),
+                signal,
+            });
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+            if (!response.ok) {
+                let message = `Failed to get response (${response.status})`;
+                try {
+                    const payload = await response.json() as Record<string, unknown>;
+                    const errorText = typeof payload.error === 'string' ? payload.error : '';
+                    const detailsText = typeof payload.details === 'string' ? payload.details : '';
+                    if (errorText) {
+                        message = detailsText ? `${errorText}: ${detailsText}` : errorText;
+                    }
+                } catch {
+                    // Ignore parse failures and keep fallback status message.
+                }
+                throw new Error(message);
+            }
 
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const data = line.slice(6);
-                    if (data === '[DONE]') continue;
+            const reader = response.body?.getReader();
+            if (!reader) return;
 
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            try {
+                while (true) {
+                    let readResult: ReadableStreamReadResult<Uint8Array<ArrayBufferLike>>;
                     try {
-                        const parsed = JSON.parse(data) as Record<string, unknown>;
-                        const streamError = typeof parsed.error === 'string' ? parsed.error.trim() : '';
+                        readResult = await reader.read();
+                    } catch (readError) {
+                        const message = readError instanceof Error ? readError.message : 'stream read failure';
+                        throw new Error(`RESUMEABLE_STREAM_READ:${message}`);
+                    }
 
-                        if (streamError) {
-                            const streamDetails = typeof parsed.details === 'string' ? parsed.details.trim() : '';
-                            const normalizedStreamError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
-                            throw new Error(`STREAM_ERROR:${normalizedStreamError}`);
+                    const { done, value } = readResult;
+                    if (done) {
+                        return;
+                    }
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const data = line.slice(6);
+                        resumeOffset += 1;
+                        if (data === '[DONE]') continue;
+
+                        try {
+                            const parsed = JSON.parse(data) as Record<string, unknown>;
+                            const streamError = typeof parsed.error === 'string' ? parsed.error.trim() : '';
+
+                            if (streamError) {
+                                const streamDetails = typeof parsed.details === 'string' ? parsed.details.trim() : '';
+                                const normalizedStreamError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
+                                throw new Error(`STREAM_ERROR:${normalizedStreamError}`);
+                            }
+
+                            const choices = Array.isArray(parsed.choices)
+                                ? parsed.choices as Array<Record<string, unknown>>
+                                : [];
+                            const delta = (choices[0]?.delta ?? {}) as Record<string, unknown>;
+
+                            const reasoningContent =
+                                (typeof delta.reasoning_content === 'string' ? delta.reasoning_content : '') ||
+                                (typeof delta.thinking === 'string' ? delta.thinking : '');
+
+                            if (reasoningContent) {
+                                yield { type: 'reasoning', value: reasoningContent };
+                            }
+
+                            const content = typeof delta.content === 'string' ? delta.content : '';
+                            if (content) {
+                                yield { type: 'content', value: content };
+                            }
+                        } catch (streamChunkError) {
+                             if (
+                                streamChunkError instanceof Error
+                                && streamChunkError.message.startsWith('STREAM_ERROR:')
+                            ) {
+                                throw new Error(streamChunkError.message.slice('STREAM_ERROR:'.length));
+                            }
+                            // Skip malformed JSON
                         }
-
-                        const choices = Array.isArray(parsed.choices)
-                            ? parsed.choices as Array<Record<string, unknown>>
-                            : [];
-                        const delta = (choices[0]?.delta ?? {}) as Record<string, unknown>;
-
-                        const reasoningContent =
-                            (typeof delta.reasoning_content === 'string' ? delta.reasoning_content : '') ||
-                            (typeof delta.thinking === 'string' ? delta.thinking : '');
-
-                        if (reasoningContent) {
-                            yield { type: 'reasoning', value: reasoningContent };
-                        }
-
-                        const content = typeof delta.content === 'string' ? delta.content : '';
-                        if (content) {
-                            yield { type: 'content', value: content };
-                        }
-                    } catch (streamChunkError) {
-                         if (
-                            streamChunkError instanceof Error
-                            && streamChunkError.message.startsWith('STREAM_ERROR:')
-                        ) {
-                            throw new Error(streamChunkError.message.slice('STREAM_ERROR:'.length));
-                        }
-                        // Skip malformed JSON
                     }
                 }
+            } catch (error) {
+                const isResumeableReadError =
+                    error instanceof Error
+                    && error.message.startsWith('RESUMEABLE_STREAM_READ:');
+
+                if (!isResumeableReadError || signal?.aborted || attempts >= MAX_STREAM_RESUME_ATTEMPTS) {
+                    if (isResumeableReadError) {
+                        throw new Error(error.message.slice('RESUMEABLE_STREAM_READ:'.length));
+                    }
+                    throw error;
+                }
+
+                attempts += 1;
             }
         }
     }

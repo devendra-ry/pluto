@@ -3,6 +3,8 @@ import { createSignedAttachmentUrl } from '@/features/attachments/server';
 import { VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
 import { VideoGenerateRequestSchema } from '@/shared/validation/request-validation';
 import { type Attachment } from '@/shared/core/types';
+import { executeIdempotentRequest } from '@/server/redis/idempotency';
+import { acquireScopedSlotsLock } from '@/server/redis/locks';
 import {
     CHUTES_MISSING_API_KEY_MESSAGE,
     getChutesApiKey,
@@ -10,6 +12,7 @@ import {
     getChutesWanI2vNegativePrompt,
 } from '@/server/providers/chutes';
 import { assertThreadOwnership } from '@/features/threads/server';
+import { assertNotTemporarilyBlocked, recordAbuseSignal } from '@/server/security/abuse-protection';
 import { fetchWithSsrfGuard } from '@/server/security/ssrf-guard';
 import { assertJsonRequest, assertValidPostOrigin, parseJsonObjectRequest, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { assertRateLimit, videoRateLimiter } from '@/utils/rate-limit';
@@ -161,7 +164,13 @@ export async function POST(req: Request) {
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
-        await assertRateLimit(user.id, videoRateLimiter);
+        await assertNotTemporarilyBlocked(user.id, 'video');
+        try {
+            await assertRateLimit(user.id, videoRateLimiter);
+        } catch (rateLimitError) {
+            await recordAbuseSignal(user.id, 'video', 'rate-limit');
+            throw rateLimitError;
+        }
     } catch (error) {
         const response = toJsonErrorResponse(error);
         if (response) {
@@ -204,8 +213,22 @@ export async function POST(req: Request) {
         return jsonResponse({ error: CHUTES_MISSING_API_KEY_MESSAGE }, 500);
     }
 
-    try {
+    return executeIdempotentRequest(
+        {
+            req,
+            scope: 'videos-post',
+            userId: user.id,
+            inProgressMessage: 'An equivalent video request is already being processed.',
+        },
+        async () => {
+            try {
         await assertThreadOwnership(supabase, threadId, user.id);
+        const generationLock = await acquireScopedSlotsLock('generation-video', user.id, 1);
+        if (!generationLock) {
+            await recordAbuseSignal(user.id, 'video', 'concurrency-limit');
+            return jsonResponse({ error: 'A video generation is already in progress. Please wait and retry.' }, 429);
+        }
+        try {
         const attachmentPrefix = `${user.id}/${threadId}/`;
         const imageAttachments = inputAttachments.filter((attachment) => attachment.mimeType.startsWith('image/'));
         if (imageAttachments.length === 0) {
@@ -353,8 +376,14 @@ export async function POST(req: Request) {
             attachment,
             operation: 'video',
         });
-    } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to generate video';
-        return jsonResponse({ error: message }, 500);
-    }
+        } finally {
+            await generationLock.release();
+        }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Failed to generate video';
+                await recordAbuseSignal(user.id, 'video', 'processing-error');
+                return jsonResponse({ error: message }, 500);
+            }
+        }
+    );
 }

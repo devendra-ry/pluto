@@ -2,6 +2,14 @@
 
 import { type Attachment } from '@/shared/core/types';
 
+function createIdempotencyKey(prefix: string) {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return `${prefix}-${crypto.randomUUID()}`;
+    }
+
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
 function extractErrorMessage(payload: unknown, fallback: string) {
     if (!payload || typeof payload !== 'object') return fallback;
     const record = payload as Record<string, unknown>;
@@ -29,9 +37,13 @@ export async function cleanupThreadAttachments(
     threadId: string,
     paths?: string[]
 ): Promise<void> {
+    const idempotencyKey = createIdempotencyKey('upload-cleanup');
     const response = await fetch('/api/uploads', {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Idempotency-Key': idempotencyKey,
+        },
         body: JSON.stringify({
             threadId,
             paths: paths && paths.length > 0 ? paths : undefined,
@@ -90,6 +102,10 @@ export function startUploadFileForThread(
         uploadXhr = new XMLHttpRequest();
         uploadXhr.open('POST', '/api/uploads');
         uploadXhr.responseType = 'json';
+        uploadXhr.setRequestHeader(
+            'X-Idempotency-Key',
+            `${createIdempotencyKey('upload')}-${threadId}-${file.size}-${file.lastModified}`
+        );
 
         uploadXhr.upload.onprogress = (event) => {
             if (!event.lengthComputable || !onProgress) return;

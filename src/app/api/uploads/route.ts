@@ -8,6 +8,8 @@ import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/fe
 import { UploadCleanupRequestSchema } from '@/shared/validation/request-validation';
 import { assertThreadOwnership } from '@/features/threads/server';
 import { type Attachment } from '@/shared/core/types';
+import { executeIdempotentRequest } from '@/server/redis/idempotency';
+import { assertNotTemporarilyBlocked, recordAbuseSignal } from '@/server/security/abuse-protection';
 import {
     ApiRequestError,
     assertJsonRequest,
@@ -119,7 +121,13 @@ export async function POST(req: Request) {
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
-        await assertRateLimit(user.id, uploadRateLimiter);
+        await assertNotTemporarilyBlocked(user.id, 'upload');
+        try {
+            await assertRateLimit(user.id, uploadRateLimiter);
+        } catch (rateLimitError) {
+            await recordAbuseSignal(user.id, 'upload', 'rate-limit');
+            throw rateLimitError;
+        }
     } catch (error) {
         const response = toJsonErrorResponse(error);
         if (response) {
@@ -172,7 +180,15 @@ export async function POST(req: Request) {
         return validationError;
     }
 
-    try {
+    return executeIdempotentRequest(
+        {
+            req,
+            scope: 'uploads-post',
+            userId: user.id,
+            inProgressMessage: 'An equivalent upload request is already being processed.',
+        },
+        async () => {
+            try {
         await assertThreadOwnership(
             supabase,
             threadId,
@@ -208,14 +224,17 @@ export async function POST(req: Request) {
         };
 
         return jsonResponse({ attachment });
-    } catch (error) {
-        const response = toJsonErrorResponse(error);
-        if (response) {
-            return response;
+            } catch (error) {
+                const response = toJsonErrorResponse(error);
+                if (response) {
+                    return response;
+                }
+                await recordAbuseSignal(user.id, 'upload', 'upload-failure');
+                const message = error instanceof Error ? error.message : 'Upload failed';
+                return jsonResponse({ error: message }, 500);
+            }
         }
-        const message = error instanceof Error ? error.message : 'Upload failed';
-        return jsonResponse({ error: message }, 500);
-    }
+    );
 }
 
 export async function DELETE(req: Request) {
@@ -227,7 +246,13 @@ export async function DELETE(req: Request) {
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
-        await assertRateLimit(user.id, uploadRateLimiter);
+        await assertNotTemporarilyBlocked(user.id, 'upload');
+        try {
+            await assertRateLimit(user.id, uploadRateLimiter);
+        } catch (rateLimitError) {
+            await recordAbuseSignal(user.id, 'upload', 'rate-limit');
+            throw rateLimitError;
+        }
     } catch (error) {
         const response = toJsonErrorResponse(error);
         if (response) {
@@ -253,7 +278,15 @@ export async function DELETE(req: Request) {
     const threadId = parsed.data.threadId;
     const rawPaths = parsed.data.paths ?? [];
 
-    try {
+    return executeIdempotentRequest(
+        {
+            req,
+            scope: 'uploads-delete',
+            userId: user.id,
+            inProgressMessage: 'An equivalent cleanup request is already being processed.',
+        },
+        async () => {
+            try {
         await assertThreadOwnership(
             supabase,
             threadId,
@@ -280,14 +313,17 @@ export async function DELETE(req: Request) {
 
         await removePathsInChunks(supabase, bucket, pathsToDelete);
         return jsonResponse({ removed: pathsToDelete.length });
-    } catch (error) {
-        const response = toJsonErrorResponse(error);
-        if (response) {
-            return response;
+            } catch (error) {
+                const response = toJsonErrorResponse(error);
+                if (response) {
+                    return response;
+                }
+                await recordAbuseSignal(user.id, 'upload', 'cleanup-failure');
+                const message = error instanceof Error ? error.message : 'Failed to cleanup attachments';
+                return jsonResponse({ error: message }, 500);
+            }
         }
-        const message = error instanceof Error ? error.message : 'Failed to cleanup attachments';
-        return jsonResponse({ error: message }, 500);
-    }
+    );
 }
 
 export async function GET(req: Request) {

@@ -13,6 +13,16 @@ import { resolveModelLimits } from '@/server/providers/model-limits';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
 import { processAndTransformStream } from '@/features/chat/lib/stream-transform';
 import { ChatRequestSchema } from '@/shared/core/types';
+import {
+    buildSseReplayResponse,
+    getCachedChatStreamEvents,
+    releaseChatStreamLock,
+    readChatResumeOffset,
+    readChatStreamId,
+    reserveChatStreamLock,
+    setCachedChatStreamEvents,
+} from '@/server/redis/chat-stream-cache';
+import { recordAbuseSignal } from '@/server/security/abuse-protection';
 import type { AuthenticatedContext } from '@/utils/route-handler';
 
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
@@ -25,10 +35,41 @@ export async function handleChatRequest(
 ): Promise<Response> {
     const encoder = new TextEncoder();
     const signal = req.signal;
+    const streamId = readChatStreamId(req);
+    const resumeOffset = readChatResumeOffset(req);
+    let streamLockToken: string | null = null;
+    if (streamId) {
+        const cached = await getCachedChatStreamEvents(user.id, streamId);
+        if (cached) {
+            return buildSseReplayResponse(cached.events, resumeOffset);
+        }
+        if (resumeOffset > 0) {
+            return new Response(
+                JSON.stringify({ error: 'Unable to resume chat stream. Please retry the request.' }),
+                {
+                    status: 409,
+                    headers: { 'Content-Type': 'application/json' },
+                }
+            );
+        }
+        streamLockToken = await reserveChatStreamLock(user.id, streamId);
+        if (!streamLockToken) {
+            return new Response(
+                JSON.stringify({ error: 'A matching chat request is already in progress.' }),
+                {
+                    status: 409,
+                    headers: { 'Content-Type': 'application/json' },
+                }
+            );
+        }
+    }
+
+    let captureChunk: ((chunk: string | Uint8Array) => void) | null = null;
 
     const safeEnqueue = (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
         try {
             if (signal.aborted) return;
+            if (captureChunk) captureChunk(chunk);
             const encoded = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
             controller.enqueue(encoded);
         } catch (error) {
@@ -42,6 +83,21 @@ export async function handleChatRequest(
     const stream = new ReadableStream({
         async start(controller) {
             let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
+            const capturedEvents: string[] = [];
+            const captureDecoder = new TextDecoder();
+            let captureBuffer = '';
+            captureChunk = (chunk) => {
+                const text = typeof chunk === 'string'
+                    ? chunk
+                    : captureDecoder.decode(chunk, { stream: true });
+                captureBuffer += text;
+                const lines = captureBuffer.split('\n');
+                captureBuffer = lines.pop() || '';
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    capturedEvents.push(line.slice(6));
+                }
+            };
 
             if (signal.aborted) return;
 
@@ -169,6 +225,9 @@ export async function handleChatRequest(
                 if (!signal.aborted) {
                     controller.close();
                 }
+                if (streamId && capturedEvents.length > 0) {
+                    await setCachedChatStreamEvents(user.id, streamId, capturedEvents);
+                }
             } catch (error) {
                 if (heartbeatInterval) clearInterval(heartbeatInterval);
 
@@ -180,6 +239,15 @@ export async function handleChatRequest(
                             console.warn('[chat][controller] Failed to close stream controller', closeError);
                         }
                     }
+                    await recordAbuseSignal(user.id, 'chat', 'stream-failure');
+                }
+                if (streamId && capturedEvents.length > 0) {
+                    await setCachedChatStreamEvents(user.id, streamId, capturedEvents);
+                }
+            } finally {
+                captureChunk = null;
+                if (streamId) {
+                    await releaseChatStreamLock(user.id, streamId, streamLockToken);
                 }
             }
         }

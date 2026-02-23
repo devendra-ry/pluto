@@ -11,7 +11,10 @@ import {
     getChutesImageEditApiUrlCandidates,
 } from '@/server/providers/chutes';
 import { assertThreadOwnership } from '@/features/threads/server';
+import { executeIdempotentRequest } from '@/server/redis/idempotency';
+import { acquireScopedSlotsLock } from '@/server/redis/locks';
 import { fetchWithSsrfGuard } from '@/server/security/ssrf-guard';
+import { assertNotTemporarilyBlocked, recordAbuseSignal } from '@/server/security/abuse-protection';
 import { assertJsonRequest, assertValidPostOrigin, parseJsonObjectRequest, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { assertRateLimit, imageRateLimiter } from '@/utils/rate-limit';
 import { createClient } from '@/utils/supabase/server';
@@ -364,7 +367,13 @@ export async function POST(req: Request) {
         const auth = await requireUser();
         supabase = auth.supabase;
         user = auth.user;
-        await assertRateLimit(user.id, imageRateLimiter);
+        await assertNotTemporarilyBlocked(user.id, 'image');
+        try {
+            await assertRateLimit(user.id, imageRateLimiter);
+        } catch (rateLimitError) {
+            await recordAbuseSignal(user.id, 'image', 'rate-limit');
+            throw rateLimitError;
+        }
     } catch (error) {
         const response = toJsonErrorResponse(error);
         if (response) {
@@ -399,7 +408,15 @@ export async function POST(req: Request) {
         }, 400);
     }
 
-    try {
+    return executeIdempotentRequest(
+        {
+            req,
+            scope: 'images-post',
+            userId: user.id,
+            inProgressMessage: 'An equivalent image request is already being processed.',
+        },
+        async () => {
+            try {
         await assertThreadOwnership(supabase, threadId, user.id);
         const attachmentPrefix = `${user.id}/${threadId}/`;
         for (const attachment of inputAttachments) {
@@ -407,6 +424,12 @@ export async function POST(req: Request) {
                 return jsonResponse({ error: 'Invalid attachment path' }, 400);
             }
         }
+        const generationLock = await acquireScopedSlotsLock('generation-image', user.id, 2);
+        if (!generationLock) {
+            await recordAbuseSignal(user.id, 'image', 'concurrency-limit');
+            return jsonResponse({ error: 'Too many concurrent image generations. Please wait and retry.' }, 429);
+        }
+        try {
 
         const imageEditAttachments = inputAttachments.filter((attachment) => attachment.mimeType.startsWith('image/'));
         if (inputAttachments.length > 0 && imageEditAttachments.length === 0) {
@@ -649,8 +672,14 @@ export async function POST(req: Request) {
             revisedPrompt: generated.revisedPrompt ?? null,
             operation: isImageEditRequest ? 'edit' : 'generate',
         });
-    } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to process image request';
-        return jsonResponse({ error: message }, 500);
-    }
+        } finally {
+            await generationLock.release();
+        }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Failed to process image request';
+                await recordAbuseSignal(user.id, 'image', 'processing-error');
+                return jsonResponse({ error: message }, 500);
+            }
+        }
+    );
 }
