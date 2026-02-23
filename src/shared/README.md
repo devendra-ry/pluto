@@ -6,6 +6,7 @@ Current modules:
 
 - `components/error-boundary.tsx`
 - `hooks/use-debounce.ts`
+- `providers/query-provider.tsx`
 
 Guideline:
 

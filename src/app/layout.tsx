@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import "./globals.css";
 import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
-import { QueryProvider } from "@/components/query-provider";
+import { QueryProvider } from "@/shared/providers/query-provider";
 import { ToastProvider } from "@/components/ui/toast";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
