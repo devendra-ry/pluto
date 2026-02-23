@@ -22,7 +22,7 @@ import { AutoSizer } from 'react-virtualized-auto-sizer';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useThreads, deleteThread, toggleThreadPin } from '@/features/threads/hooks/use-threads';
 import { type Thread } from '@/features/threads/hooks/use-threads';
-import { groupThreadsByDate } from '@/lib/date-utils';
+import { groupThreadsByDate } from '@/features/threads/lib/date-utils';
 import { useDebouncedValue } from '@/shared/hooks/use-debounce';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/toast';
@@ -513,5 +513,6 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
 });
 
 export { Sidebar };
+
 
 
