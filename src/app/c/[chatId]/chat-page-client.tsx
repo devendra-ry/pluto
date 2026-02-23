@@ -4,50 +4,35 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { type VirtuosoHandle } from 'react-virtuoso';
 import dynamic from 'next/dynamic';
 
+import { ChatDestructiveConfirmDialog } from '@/components/chat-destructive-confirm-dialog';
 import { ChatEmptyState } from '@/components/chat-empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatHeader } from '@/components/chat-header';
 import { ChatInput } from '@/components/chat-input';
-import { type ChatInputHandle, type ChatSubmitMode, type ChatSubmitOptions } from '@/components/chat-input-components/chat-input-types';
+import { type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input-components/chat-input-types';
 import { useToast } from '@/components/ui/toast';
-import { scheduleFrame } from '@/lib/animation-frame';
-import { isImageAttachment } from '@/lib/attachments';
+import { useChatMessageState } from '@/hooks/use-chat-message-state';
+import { useChatScroll } from '@/hooks/use-chat-scroll';
 import { useChatStream } from '@/hooks/use-chat-stream';
-import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages, type Message } from '@/hooks/use-messages';
+import { useDestructiveDeleteConfirm } from '@/hooks/use-destructive-delete-confirm';
+import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages } from '@/hooks/use-messages';
+import { usePendingGeneration } from '@/hooks/use-pending-generation';
 import { useRetryLogic } from '@/hooks/use-retry-logic';
+import { useThread } from '@/hooks/use-threads';
+import { useThreadSettings } from '@/hooks/use-thread-settings';
 import {
-    updateReasoningEffort,
-    updateThreadModel,
-    updateThreadSystemPrompt,
-    useThread,
-} from '@/hooks/use-threads';
-import {
-    AVAILABLE_MODELS,
-    DEFAULT_MODEL,
-    DEFAULT_REASONING_EFFORT,
     IMAGE_GENERATION_MODEL,
     isImageGenerationModel,
-    PENDING_GENERATION_MODEL_KEY,
-    PENDING_GENERATION_MODE_KEY,
-    PENDING_GENERATION_SEARCH_KEY,
-    PENDING_GENERATION_THREAD_KEY,
-    PENDING_REASONING_EFFORT_KEY,
-    PENDING_SYSTEM_PROMPT_KEY,
     SEARCH_ENABLED_MODELS,
     VIDEO_GENERATION_MODEL,
 } from '@/lib/constants';
+import { isImageAttachment } from '@/lib/attachments';
 import { type ChatViewMessage, type RetryMode } from '@/lib/chat-view';
-import { type Attachment, type ReasoningEffort } from '@/lib/types';
+import { type Attachment } from '@/lib/types';
 
 interface ChatPageClientProps {
     chatId: string;
 }
-
-type DestructiveDeleteConfirm = {
-    action: 'retry' | 'edit';
-    deleteCount: number;
-    resolve: (confirmed: boolean) => void;
-};
 
 const ChatMessageList = dynamic(
     () => import('@/components/chat-message-list').then((mod) => mod.ChatMessageList),
@@ -56,47 +41,6 @@ const ChatMessageList = dynamic(
 
 const RETRY_MODE_HINTS_KEY = 'retry-mode-hints';
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
-
-function areAttachmentListsEqual(left: Attachment[] | undefined, right: Attachment[] | undefined) {
-    const a = left ?? [];
-    const b = right ?? [];
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-        if (
-            a[i].id !== b[i].id
-            || a[i].name !== b[i].name
-            || a[i].mimeType !== b[i].mimeType
-            || a[i].size !== b[i].size
-            || a[i].path !== b[i].path
-            || a[i].url !== b[i].url
-        ) {
-            return false;
-        }
-    }
-    return true;
-}
-
-function mapStoredMessageToViewMessage(message: Message): ChatViewMessage {
-    return {
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        attachments: message.attachments ?? [],
-        reasoning: message.reasoning,
-        model_id: message.model_id,
-    };
-}
-
-function isSameMessageSnapshot(view: ChatViewMessage, stored: Message) {
-    return (
-        view.id === stored.id
-        && view.role === stored.role
-        && view.content === stored.content
-        && (view.reasoning ?? undefined) === (stored.reasoning ?? undefined)
-        && (view.model_id ?? undefined) === (stored.model_id ?? undefined)
-        && areAttachmentListsEqual(view.attachments, stored.attachments)
-    );
-}
 
 function readRetryModeHints(): Record<string, Record<string, RetryMode>> {
     if (typeof window === 'undefined') return {};
@@ -185,45 +129,34 @@ function inferEditGenerationMode(
     return { forcedModelId: undefined as string | undefined, forceSearchMode: false };
 }
 
-function isSelectableChatModel(modelId: string): boolean {
-    const modelConfig = AVAILABLE_MODELS.find((m) => m.id === modelId);
-    if (!modelConfig) return false;
-    return !modelConfig.hidden && !modelConfig.capabilities.includes('imageGen');
-}
-
-function toReasoningEffort(value: string | null): ReasoningEffort | null {
-    if (value === 'low' || value === 'medium' || value === 'high') {
-        return value;
-    }
-    return null;
-}
-
-function toChatSubmitMode(value: string | null): ChatSubmitMode | null {
-    if (value === 'chat' || value === 'image' || value === 'image-edit' || value === 'video' || value === 'search') {
-        return value;
-    }
-    return null;
-}
-
 export function ChatPageClient({ chatId }: ChatPageClientProps) {
     const thread = useThread(chatId);
     const { messages: storedMessages, refreshMessages: refreshStoredMessages } = useMessages(chatId);
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const chatInputRef = useRef<ChatInputHandle>(null);
-    const [model, setModel] = useState<string>(DEFAULT_MODEL);
-    const modelRef = useRef<string>(DEFAULT_MODEL);
     const [messages, setMessages] = useState<ChatViewMessage[]>([]);
-    const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
-    const reasoningEffortRef = useRef<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
-    const [systemPrompt, setSystemPrompt] = useState('');
-    const [isAtBottom, setIsAtBottom] = useState(true);
-    const [deleteConfirm, setDeleteConfirm] = useState<DestructiveDeleteConfirm | null>(null);
     const justAddedMessageIdRef = useRef<string | null>(null);
     const locallyDeletedMessageIdsRef = useRef<Set<string>>(new Set());
     const persistRetryModeHintRef = useRef<((userMessageId: string, mode: RetryMode) => void) | null>(null);
     const prevChatIdRef = useRef<string | null>(null);
-    const initialBottomScrollChatIdRef = useRef<string | null>(null);
     const { showToast } = useToast();
+
+    const {
+        model,
+        modelRef,
+        reasoningEffort,
+        reasoningEffortRef,
+        systemPrompt,
+        applyPendingReasoningEffort,
+        resetThreadScopedState,
+        handleModelChange,
+        handleReasoningEffortChange,
+        handleSystemPromptChange,
+    } = useThreadSettings({
+        chatId,
+        thread,
+        showToast,
+    });
 
     const {
         isLoading,
@@ -245,30 +178,32 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         showToast,
     });
 
+    const { messagesReady } = useChatMessageState({
+        setMessages,
+        storedMessages,
+        isLoading,
+        isThinking,
+        justAddedMessageIdRef,
+        locallyDeletedMessageIdsRef,
+    });
+
+    const visibleMessages = useMemo(() => messages, [messages]);
+
+    const { isAtBottom, setIsAtBottom, scrollToBottom, handleAtBottomStateChange } = useChatScroll({
+        chatId,
+        messagesReady,
+        messageCount: visibleMessages.length,
+        virtuosoRef,
+    });
+
+    const {
+        deleteConfirm,
+        confirmDestructiveDelete,
+        closeDeleteConfirm,
+    } = useDestructiveDeleteConfirm();
+
     const getInputMode = useCallback(() => chatInputRef.current?.getMode(), []);
     const getInputImageModelId = useCallback(() => chatInputRef.current?.getImageModelId(), []);
-
-    const confirmDestructiveDelete = useCallback((context: {
-        action: 'retry' | 'edit';
-        deleteCount: number;
-    }) => {
-        return new Promise<boolean>((resolve) => {
-            setDeleteConfirm({
-                action: context.action,
-                deleteCount: context.deleteCount,
-                resolve,
-            });
-        });
-    }, []);
-
-    const closeDeleteConfirm = useCallback((confirmed: boolean) => {
-        setDeleteConfirm((current) => {
-            if (current) {
-                current.resolve(confirmed);
-            }
-            return null;
-        });
-    }, []);
 
     const { handleRetry, persistRetryModeHint } = useRetryLogic({
         chatId,
@@ -288,232 +223,29 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         persistRetryModeHintRef.current = persistRetryModeHint;
     }, [persistRetryModeHint]);
 
-    useEffect(() => {
-        modelRef.current = model;
-    }, [model]);
-    useEffect(() => {
-        reasoningEffortRef.current = reasoningEffort;
-    }, [reasoningEffort]);
-
-    const applyThreadState = useCallback(() => {
-        if (thread?.model && isSelectableChatModel(thread.model)) {
-            modelRef.current = thread.model;
-            setModel(thread.model);
-        }
-        if (thread?.reasoning_effort) {
-            reasoningEffortRef.current = thread.reasoning_effort;
-            setReasoningEffort(thread.reasoning_effort);
-        }
-        setSystemPrompt(thread?.system_prompt ?? '');
-    }, [thread]);
-
-    useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        applyThreadState();
-    }, [applyThreadState]);
-
-    const applyStoredMessages = useCallback((nextStoredMessages: Message[]) => {
-        setMessages((prev) => {
-            if (prev.length === nextStoredMessages.length) {
-                const unchanged = prev.every((message, index) =>
-                    isSameMessageSnapshot(message, nextStoredMessages[index])
-                );
-                if (unchanged) {
-                    return prev;
-                }
-            }
-
-            return nextStoredMessages.map(mapStoredMessageToViewMessage);
-        });
-    }, []);
-
-    useEffect(() => {
-        if (storedMessages === null) return;
-
-        // Keep local retry/edit protection while waiting for canonical cache to settle.
-        if (locallyDeletedMessageIdsRef.current.size > 0) {
-            const hasLocallyDeleted = storedMessages.some((m) => locallyDeletedMessageIdsRef.current.has(m.id));
-            if (hasLocallyDeleted) {
-                return;
-            }
-            locallyDeletedMessageIdsRef.current.clear();
-        }
-
-        // Avoid overriding in-progress streaming content until message IDs are canonical.
-        if (justAddedMessageIdRef.current) {
-            const found = storedMessages.find((m) => m.id === justAddedMessageIdRef.current);
-            if (!found) {
-                return;
-            }
-            justAddedMessageIdRef.current = null;
-        }
-
-        if (isLoading || isThinking) {
-            return;
-        }
-
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        applyStoredMessages(storedMessages);
-    }, [storedMessages, isLoading, isThinking, applyStoredMessages]);
-
-    const resetLocalChatState = useCallback(() => {
-        setMessages([]);
-
-        if (chatInputRef.current) {
-            chatInputRef.current.setValue('');
-        }
-
-        resetStreamState();
-        reasoningEffortRef.current = DEFAULT_REASONING_EFFORT;
-        setReasoningEffort(DEFAULT_REASONING_EFFORT);
-        setSystemPrompt('');
-        setIsAtBottom(true);
-    }, [resetStreamState]);
-
     useLayoutEffect(() => {
         // Only reset when actually switching between different chats, not on initial mount.
         if (prevChatIdRef.current !== null && prevChatIdRef.current !== chatId) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect
-            resetLocalChatState();
-        }
-        if (prevChatIdRef.current !== chatId) {
-            initialBottomScrollChatIdRef.current = null;
-        }
-        prevChatIdRef.current = chatId;
-    }, [chatId, resetLocalChatState]);
-
-    const messagesReady = storedMessages !== null;
-    const visibleMessages = useMemo(() => messages, [messages]);
-
-    const scrollToBottom = useCallback(() => {
-        if (virtuosoRef.current) {
-            virtuosoRef.current.scrollToIndex({ index: visibleMessages.length - 1, align: 'end', behavior: 'smooth' });
+            setMessages([]);
+            chatInputRef.current?.setValue('');
+            resetStreamState();
+            resetThreadScopedState();
             setIsAtBottom(true);
         }
-    }, [visibleMessages.length]);
+        prevChatIdRef.current = chatId;
+    }, [chatId, resetStreamState, resetThreadScopedState, setIsAtBottom]);
 
-    // Scroll to bottom exactly once when a thread finishes initial message sync.
-    useEffect(() => {
-        if (!messagesReady || visibleMessages.length === 0) {
-            return;
-        }
-        if (initialBottomScrollChatIdRef.current === chatId) {
-            return;
-        }
-
-        initialBottomScrollChatIdRef.current = chatId;
-        scheduleFrame(() => {
-            scheduleFrame(() => {
-                virtuosoRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' });
-            });
-        });
-    }, [chatId, messagesReady, visibleMessages.length]);
-
-    const handleAtBottomStateChange = useCallback((nextIsAtBottom: boolean) => {
-        setIsAtBottom((prev) => (prev === nextIsAtBottom ? prev : nextIsAtBottom));
-    }, []);
-
-    const handleModelChange = async (newModel: string) => {
-        if (!isSelectableChatModel(newModel)) {
-            return;
-        }
-        const previousModel = modelRef.current;
-        modelRef.current = newModel;
-        setModel(newModel);
-        try {
-            await updateThreadModel(chatId, newModel);
-        } catch (error) {
-            modelRef.current = previousModel;
-            setModel(previousModel);
-            const message = error instanceof Error ? error.message : 'Failed to update model';
-            showToast(message, 'error');
-        }
-    };
-
-    const handleReasoningEffortChange = async (effort: ReasoningEffort) => {
-        const previousEffort = reasoningEffort;
-        reasoningEffortRef.current = effort;
-        setReasoningEffort(effort);
-        try {
-            await updateReasoningEffort(chatId, effort);
-        } catch (error) {
-            reasoningEffortRef.current = previousEffort;
-            setReasoningEffort(previousEffort);
-            const message = error instanceof Error ? error.message : 'Failed to update reasoning effort';
-            showToast(message, 'error');
-        }
-    };
-
-    const handleSystemPromptChange = async (nextPrompt: string) => {
-        const previousPrompt = systemPrompt;
-        setSystemPrompt(nextPrompt);
-        try {
-            await updateThreadSystemPrompt(chatId, nextPrompt);
-        } catch (error) {
-            setSystemPrompt(previousPrompt);
-            const message = error instanceof Error ? error.message : 'Failed to update system prompt';
-            showToast(message, 'error');
-        }
-    };
-
-    // Check for pending user message on load (e.g. new chat from home).
-    useEffect(() => {
-        // Don't auto-retry if the last request failed or if canonical messages are still loading.
-        if (lastRequestFailed || !messagesReady) {
-            return;
-        }
-        if (messages.length > 0 && !isLoading && !isThinking) {
-            const lastMessage = messages[messages.length - 1];
-            if (lastMessage.role === 'user') {
-                const pendingGenerationThreadId = window.sessionStorage.getItem(PENDING_GENERATION_THREAD_KEY);
-                if (pendingGenerationThreadId !== chatId) {
-                    return;
-                }
-                const pendingGenerationModelId = window.sessionStorage.getItem(PENDING_GENERATION_MODEL_KEY);
-                const pendingGenerationModeRaw = window.sessionStorage.getItem(PENDING_GENERATION_MODE_KEY);
-                const pendingGenerationSearch = window.sessionStorage.getItem(PENDING_GENERATION_SEARCH_KEY);
-                const pendingReasoningEffortRaw = window.sessionStorage.getItem(PENDING_REASONING_EFFORT_KEY);
-                const pendingSystemPrompt = window.sessionStorage.getItem(PENDING_SYSTEM_PROMPT_KEY);
-                const pendingModelId = pendingGenerationModelId ?? undefined;
-                const pendingMode = toChatSubmitMode(pendingGenerationModeRaw);
-                const pendingReasoningEffort = toReasoningEffort(pendingReasoningEffortRaw);
-                if (pendingReasoningEffort) {
-                    reasoningEffortRef.current = pendingReasoningEffort;
-                    setReasoningEffort(pendingReasoningEffort);
-                }
-                if (pendingMode) {
-                    chatInputRef.current?.setMode(pendingMode);
-                }
-                if (
-                    pendingMode
-                    && (pendingMode === 'image' || pendingMode === 'image-edit')
-                    && pendingModelId
-                    && isImageGenerationModel(pendingModelId)
-                ) {
-                    chatInputRef.current?.setImageModelId(pendingModelId);
-                }
-                window.sessionStorage.removeItem(PENDING_GENERATION_THREAD_KEY);
-                window.sessionStorage.removeItem(PENDING_GENERATION_MODEL_KEY);
-                window.sessionStorage.removeItem(PENDING_GENERATION_MODE_KEY);
-                window.sessionStorage.removeItem(PENDING_GENERATION_SEARCH_KEY);
-                window.sessionStorage.removeItem(PENDING_REASONING_EFFORT_KEY);
-                window.sessionStorage.removeItem(PENDING_SYSTEM_PROMPT_KEY);
-                if (
-                    pendingModelId
-                    && (isImageGenerationModel(pendingModelId) || pendingModelId === VIDEO_GENERATION_MODEL)
-                ) {
-                    generateResponse(messages, pendingModelId, undefined, false);
-                    return;
-                }
-                generateResponse(
-                    messages,
-                    pendingModelId || lastMessage.model_id || undefined,
-                    pendingSystemPrompt || undefined,
-                    pendingGenerationSearch === '1'
-                );
-            }
-        }
-    }, [messages, messagesReady, isLoading, isThinking, generateResponse, chatId, lastRequestFailed]);
+    usePendingGeneration({
+        chatId,
+        messages,
+        messagesReady,
+        isLoading,
+        isThinking,
+        lastRequestFailed,
+        chatInputRef,
+        applyPendingReasoningEffort,
+        generateResponse,
+    });
 
     const sendMessage = useCallback(async (
         userMessage: string,
@@ -558,20 +290,20 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
             showToast('Failed to send message. Please try again.', 'error');
             return false;
         }
-    }, [chatId, generateResponse, showToast, setIsLoading, clearLastRequestFailure]);
+    }, [chatId, generateResponse, showToast, setIsLoading, clearLastRequestFailure, modelRef]);
 
     const handleSend = useCallback(async (value: string, attachments: Attachment[], options: ChatSubmitOptions) => {
         if ((!value.trim() && attachments.length === 0) || isLoading) return false;
         setIsAtBottom(true);
         return sendMessage(value, attachments, visibleMessages, options);
-    }, [isLoading, visibleMessages, sendMessage]);
+    }, [isLoading, visibleMessages, sendMessage, setIsAtBottom]);
 
-    const handlePromptClick = (prompt: string) => {
+    const handlePromptClick = useCallback((prompt: string) => {
         if (chatInputRef.current) {
             chatInputRef.current.setValue(prompt);
             chatInputRef.current.focus();
         }
-    };
+    }, []);
 
     const handleEdit = useCallback(async (messageId: string, newContent: string) => {
         setIsLoading(true);
@@ -664,11 +396,12 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         refreshStoredMessages,
         setIsLoading,
         confirmDestructiveDelete,
+        modelRef,
     ]);
 
     const shouldShowEmptyState = messagesReady && visibleMessages.length === 0 && !isThinking;
     // Keep Virtuoso permanently mounted so it never loses scroll position or
-    // measured item sizes across thread switches.  Hide it with CSS when we
+    // measured item sizes across thread switches. Hide it with CSS when we
     // need to show the empty state or while messages are still loading.
     const hideMessageList = !messagesReady || shouldShowEmptyState;
 
@@ -738,46 +471,10 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                 onSystemPromptChange={handleSystemPromptChange}
             />
 
-            {deleteConfirm && (
-                <div
-                    className="fixed inset-0 z-[150] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-                    onClick={() => closeDeleteConfirm(false)}
-                >
-                    <div
-                        className="w-full max-w-md rounded-xl border border-[#3a2a40] bg-[#17101c] p-5 shadow-2xl"
-                        onClick={(e) => e.stopPropagation()}
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="delete-history-title"
-                    >
-                        <h2 id="delete-history-title" className="text-base font-semibold text-zinc-100">
-                            Confirm history rewrite
-                        </h2>
-                        <p className="mt-2 text-sm text-zinc-400">
-                            {deleteConfirm.action === 'retry'
-                                ? `Retry will remove ${deleteConfirm.deleteCount} later message${deleteConfirm.deleteCount === 1 ? '' : 's'} from this thread and regenerate from that point.`
-                                : `Edit & resend will remove ${deleteConfirm.deleteCount} later message${deleteConfirm.deleteCount === 1 ? '' : 's'} from this thread and regenerate from the edited message.`}
-                        </p>
-                        <p className="mt-1 text-sm text-zinc-400">
-                            This is now a soft delete and can be restored from audit history.
-                        </p>
-                        <div className="mt-5 flex items-center justify-end gap-2">
-                            <button
-                                className="rounded-md border border-white/20 px-3 py-2 text-sm text-zinc-300 hover:text-zinc-100 hover:bg-white/10"
-                                onClick={() => closeDeleteConfirm(false)}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                className="rounded-md bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-500"
-                                onClick={() => closeDeleteConfirm(true)}
-                            >
-                                Confirm
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <ChatDestructiveConfirmDialog
+                confirm={deleteConfirm}
+                onClose={closeDeleteConfirm}
+            />
         </div>
     );
 }
