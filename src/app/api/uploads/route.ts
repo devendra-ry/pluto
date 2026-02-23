@@ -6,7 +6,7 @@ import {
 import { createSignedAttachmentUrl } from '@/lib/attachment-signed-url';
 import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/lib/attachment-route-utils';
 import { UploadCleanupRequestSchema } from '@/lib/request-validation';
-import { assertThreadOwnership } from '@/lib/thread-ownership';
+import { assertThreadOwnership } from '@/features/threads/server/thread-ownership';
 import { type Attachment } from '@/lib/types';
 import {
     ApiRequestError,
@@ -352,3 +352,4 @@ export async function GET(req: Request) {
         return new Response(message, { status: 403 });
     }
 }
+

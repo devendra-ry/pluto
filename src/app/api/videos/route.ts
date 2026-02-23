@@ -9,7 +9,7 @@ import {
     getChutesVideoApiUrlCandidates,
     getChutesWanI2vNegativePrompt,
 } from '@/lib/chutes';
-import { assertThreadOwnership } from '@/lib/thread-ownership';
+import { assertThreadOwnership } from '@/features/threads/server/thread-ownership';
 import { fetchWithSsrfGuard } from '@/lib/ssrf-guard';
 import { assertJsonRequest, assertValidPostOrigin, parseJsonObjectRequest, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { assertRateLimit, videoRateLimiter } from '@/utils/rate-limit';
@@ -358,3 +358,4 @@ export async function POST(req: Request) {
         return jsonResponse({ error: message }, 500);
     }
 }
+

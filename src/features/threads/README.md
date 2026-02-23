@@ -5,6 +5,7 @@ This feature owns thread lifecycle state and operations.
 Current modules:
 
 - `hooks/use-threads.ts` for thread CRUD, pinning, refresh, and realtime sync.
+- `server/thread-ownership.ts` for API-side thread access checks.
 
 Guideline:
 
