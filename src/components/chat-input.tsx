@@ -7,7 +7,7 @@ import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, SEARCH_ENABLED_MODELS, isImag
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
 import { ModelSelector } from '@/components/model-selector';
 import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment, isPdfAttachment, isSupportedAttachmentMimeType, isTextAttachment } from '@/lib/attachments';
-import { startUploadFileForThread } from '@/lib/uploads';
+import { startUploadFileForThread } from '@/features/uploads/lib/uploads';
 import { useToast } from '@/components/ui/toast';
 import { scheduleFrame } from '@/lib/animation-frame';
 import { ChatSubmitMode, ChatSubmitOptions, LocalAttachmentItem, ChatInputHandle, LocalAttachmentStatus } from './chat-input-components/chat-input-types';
