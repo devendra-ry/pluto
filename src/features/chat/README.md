@@ -10,6 +10,7 @@ Current modules:
 - `components/chat-header.tsx`
 - `components/chat-message.tsx` (+ assistant/user/action subcomponents)
 - `components/chat-input.tsx` and `components/chat-input/*`
+- `components/model-selector.tsx`
 - `hooks/*` for stream, retry, scroll, and pending-generation orchestration.
 
 Guideline:

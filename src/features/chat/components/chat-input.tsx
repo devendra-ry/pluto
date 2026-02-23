@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ArrowUp, Square, Paperclip } from 'lucide-react';
 import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, SEARCH_ENABLED_MODELS, isImageGenerationModel } from '@/lib/constants';
 import { type Attachment, type ReasoningEffort } from '@/lib/types';
-import { ModelSelector } from '@/components/model-selector';
+import { ModelSelector } from '@/features/chat/components/model-selector';
 import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment, isPdfAttachment, isSupportedAttachmentMimeType, isTextAttachment } from '@/lib/attachments';
 import { startUploadFileForThread } from '@/features/uploads/lib/uploads';
 import { useToast } from '@/components/ui/toast';
