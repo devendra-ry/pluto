@@ -4,22 +4,22 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { type VirtuosoHandle } from 'react-virtuoso';
 import dynamic from 'next/dynamic';
 
-import { ChatDestructiveConfirmDialog } from '@/components/chat-destructive-confirm-dialog';
+import { ChatDestructiveConfirmDialog } from '@/features/chat/components/chat-destructive-confirm-dialog';
 import { ChatEmptyState } from '@/components/chat-empty-state';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatHeader } from '@/components/chat-header';
 import { ChatInput } from '@/components/chat-input';
 import { type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input-components/chat-input-types';
 import { useToast } from '@/components/ui/toast';
-import { useChatMessageState } from '@/hooks/use-chat-message-state';
-import { useChatScroll } from '@/hooks/use-chat-scroll';
-import { useChatStream } from '@/hooks/use-chat-stream';
-import { useDestructiveDeleteConfirm } from '@/hooks/use-destructive-delete-confirm';
+import { useChatMessageState } from '@/features/chat/hooks/use-chat-message-state';
+import { useChatScroll } from '@/features/chat/hooks/use-chat-scroll';
+import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
+import { useDestructiveDeleteConfirm } from '@/features/chat/hooks/use-destructive-delete-confirm';
 import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages } from '@/hooks/use-messages';
-import { usePendingGeneration } from '@/hooks/use-pending-generation';
-import { useRetryLogic } from '@/hooks/use-retry-logic';
+import { usePendingGeneration } from '@/features/chat/hooks/use-pending-generation';
+import { useRetryLogic } from '@/features/chat/hooks/use-retry-logic';
 import { useThread } from '@/hooks/use-threads';
-import { useThreadSettings } from '@/hooks/use-thread-settings';
+import { useThreadSettings } from '@/features/chat/hooks/use-thread-settings';
 import {
     IMAGE_GENERATION_MODEL,
     isImageGenerationModel,
@@ -35,7 +35,7 @@ interface ChatPageClientProps {
 }
 
 const ChatMessageList = dynamic(
-    () => import('@/components/chat-message-list').then((mod) => mod.ChatMessageList),
+    () => import('@/features/chat/components/chat-message-list').then((mod) => mod.ChatMessageList),
     { ssr: false }
 );
 

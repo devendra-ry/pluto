@@ -3,7 +3,7 @@
 import { useEffect, useRef, type MutableRefObject } from 'react';
 
 import { type ChatInputHandle } from '@/components/chat-input-components/chat-input-types';
-import { claimPendingGenerationJob, completeGenerationJob } from '@/hooks/use-generation-jobs';
+import { claimPendingGenerationJob, completeGenerationJob } from '@/features/chat/hooks/use-generation-jobs';
 import { isImageGenerationModel } from '@/lib/constants';
 import { type ChatViewMessage } from '@/lib/chat-view';
 import { type ReasoningEffort } from '@/lib/types';

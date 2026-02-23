@@ -1,6 +1,6 @@
 'use client';
 
-import { type DestructiveDeleteConfirm } from '@/hooks/use-destructive-delete-confirm';
+import { type DestructiveDeleteConfirm } from '@/features/chat/hooks/use-destructive-delete-confirm';
 
 interface ChatDestructiveConfirmDialogProps {
     confirm: DestructiveDeleteConfirm | null;
