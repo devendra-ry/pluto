@@ -1,5 +1,5 @@
-import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/lib/attachment-route-utils';
-import { createSignedAttachmentUrl } from '@/lib/attachment-signed-url';
+import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/features/attachments/lib/attachment-route-utils';
+import { createSignedAttachmentUrl } from '@/features/attachments/lib/attachment-signed-url';
 import { VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { VideoGenerateRequestSchema } from '@/lib/request-validation';
 import { type Attachment } from '@/lib/types';

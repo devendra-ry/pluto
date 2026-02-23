@@ -6,7 +6,7 @@ import {
     isPdfAttachment,
     isTextAttachment,
     SUPPORTED_ATTACHMENT_MIME_TYPES
-} from './attachments.ts';
+} from './attachments';
 
 test('isSupportedAttachmentMimeType', async (t) => {
     await t.test('returns true for all supported mime types', () => {

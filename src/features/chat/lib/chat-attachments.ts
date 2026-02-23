@@ -2,8 +2,8 @@ import type { ModelConfig } from '@/lib/constants';
 import type { ChatMessage } from '@/lib/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/utils/supabase/database.types';
-import { getAttachmentsBucketName } from '@/lib/attachment-route-utils';
-import { AttachmentCache } from '@/lib/attachment-cache';
+import { getAttachmentsBucketName } from '@/features/attachments/lib/attachment-route-utils';
+import { AttachmentCache } from '@/features/attachments/lib/attachment-cache';
 
 import {
     MAX_ATTACHMENTS_PER_MESSAGE,
@@ -11,7 +11,7 @@ import {
     isImageAttachment,
     isPdfAttachment,
     isTextAttachment,
-} from '@/lib/attachments';
+} from '@/features/attachments/lib/attachments';
 
 const MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL = MAX_ATTACHMENTS_PER_MESSAGE * MAX_ATTACHMENT_BYTES_FOR_MODEL;
 const ATTACHMENT_DOWNLOAD_CONCURRENCY = 4;

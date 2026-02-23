@@ -1,6 +1,6 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
-import { isImageAttachment } from '@/lib/attachments';
+import { isImageAttachment } from '@/features/attachments/lib/attachments';
 import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
 import { AVAILABLE_MODELS, type ModelConfig } from '@/lib/constants';
 import { serverEnv } from '@/lib/env/server';

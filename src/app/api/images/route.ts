@@ -1,5 +1,5 @@
-import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/lib/attachment-route-utils';
-import { createSignedAttachmentUrl } from '@/lib/attachment-signed-url';
+import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/features/attachments/lib/attachment-route-utils';
+import { createSignedAttachmentUrl } from '@/features/attachments/lib/attachment-signed-url';
 import { IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, isImageGenerationModel } from '@/lib/constants';
 import { ImageGenerateRequestSchema } from '@/lib/request-validation';
 import { type Attachment } from '@/lib/types';

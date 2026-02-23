@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { DEFAULT_ATTACHMENTS_BUCKET } from '@/lib/attachments';
+import { DEFAULT_ATTACHMENTS_BUCKET } from '@/features/attachments/lib/attachments';
 import { readFirstOptionalServerEnv } from '@/lib/env/server';
 
 export function getAttachmentsBucketName() {

@@ -2,9 +2,9 @@ import { createClient } from '@/utils/supabase/server';
 import {
     MAX_ATTACHMENT_BYTES,
     isSupportedAttachmentMimeType,
-} from '@/lib/attachments';
-import { createSignedAttachmentUrl } from '@/lib/attachment-signed-url';
-import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/lib/attachment-route-utils';
+} from '@/features/attachments/lib/attachments';
+import { createSignedAttachmentUrl } from '@/features/attachments/lib/attachment-signed-url';
+import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/features/attachments/lib/attachment-route-utils';
 import { UploadCleanupRequestSchema } from '@/lib/request-validation';
 import { assertThreadOwnership } from '@/features/threads/server/thread-ownership';
 import { type Attachment } from '@/lib/types';

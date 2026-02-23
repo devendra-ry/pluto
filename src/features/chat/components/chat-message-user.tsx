@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import { type Attachment } from '@/lib/types';
-import { isLegacyAttachmentProxyUrl } from '@/lib/attachment-url';
+import { isLegacyAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
 import { ActionIcon } from './chat-action-icon';
 
 interface UserMessageProps {
