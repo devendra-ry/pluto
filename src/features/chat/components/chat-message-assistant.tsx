@@ -12,7 +12,7 @@ import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import { type Attachment } from '@/lib/types';
 import { isLegacyAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
-import { preprocessLaTeX } from '@/lib/latex-utils';
+import { preprocessLaTeX } from '@/features/chat/lib/latex-utils';
 import { ActionIcon } from './chat-action-icon';
 
 const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex];

@@ -12,7 +12,7 @@ Current modules:
 - `components/chat-input.tsx` and `components/chat-input/*`
 - `components/model-selector.tsx`
 - `hooks/*` for stream, retry, scroll, and pending-generation orchestration.
-- `lib/chat-controller.ts`, `lib/chat-service.ts`, `lib/chat-view.ts`, `lib/chat-attachments.ts`, and `lib/context-budget.ts`.
+- `lib/chat-controller.ts`, `lib/chat-service.ts`, `lib/chat-view.ts`, `lib/chat-attachments.ts`, `lib/context-budget.ts`, `lib/stream-transform.ts`, and `lib/latex-utils.ts`.
 
 Guideline:
 

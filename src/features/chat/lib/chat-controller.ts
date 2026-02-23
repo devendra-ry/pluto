@@ -11,7 +11,7 @@ import {
 import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/lib/constants';
 import { resolveModelLimits } from '@/lib/providers/model-limits';
 import { resolveChatProvider } from '@/lib/providers/provider-registry';
-import { processAndTransformStream } from '@/lib/stream-transform';
+import { processAndTransformStream } from '@/features/chat/lib/stream-transform';
 import { ChatRequestSchema } from '@/lib/types';
 import type { AuthenticatedContext } from '@/utils/route-handler';
 
