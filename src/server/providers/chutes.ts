@@ -94,4 +94,3 @@ export function getChutesVideoApiUrlCandidates() {
 export function getChutesWanI2vNegativePrompt() {
     return serverEnv.CHUTES_WAN_I2V_NEGATIVE_PROMPT;
 }
-

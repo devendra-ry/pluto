@@ -291,5 +291,3 @@ export async function getOpenRouterStream(
 
     return response.body as ReadableStream;
 }
-
-

@@ -33,4 +33,3 @@ export const UploadCleanupRequestSchema = z.object({
 });
 
 export type UploadCleanupRequest = z.infer<typeof UploadCleanupRequestSchema>;
-

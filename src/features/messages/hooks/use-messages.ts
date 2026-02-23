@@ -322,5 +322,3 @@ export async function clearThreadMessages(threadId: string) {
         .filter((value): value is string => value !== null);
     await deleteMessagesByIds(ids, { reason: 'clear_thread', threadId });
 }
-
-

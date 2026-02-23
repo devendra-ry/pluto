@@ -26,4 +26,3 @@ export interface ChatInputHandle {
     getMode: () => ChatSubmitMode;
     getImageModelId: () => string;
 }
-

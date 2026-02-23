@@ -209,4 +209,3 @@ export async function fetchWithSsrfGuard(
 
     throw new Error('Remote media request failed due to redirect loop');
 }
-

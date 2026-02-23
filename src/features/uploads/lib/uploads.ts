@@ -140,4 +140,3 @@ export function startUploadFileForThread(
         cancel: () => cancelUpload(),
     };
 }
-

@@ -242,4 +242,3 @@ export async function prepareMessageAttachments(
 
     return prepared;
 }
-

@@ -117,4 +117,3 @@ export async function completeGenerationJob(
         console.warn('[generation_jobs] failed to mark job complete', { jobId, status, error: error.message });
     }
 }
-

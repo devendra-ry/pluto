@@ -477,8 +477,3 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         </div>
     );
 }
-
-
-
-
-

@@ -10,4 +10,3 @@ export interface ChatViewMessage {
 }
 
 export type RetryMode = 'chat' | 'search' | 'image' | 'video';
-

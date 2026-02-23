@@ -123,4 +123,3 @@ export function SystemPromptSelector({ systemPrompt, onSystemPromptChange }: Sys
         </DropdownMenu>
     );
 }
-

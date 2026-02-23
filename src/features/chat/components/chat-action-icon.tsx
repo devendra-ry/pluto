@@ -30,4 +30,3 @@ export function ActionIcon({ icon: Icon, title, onClick, className }: ActionIcon
         </div>
     );
 }
-

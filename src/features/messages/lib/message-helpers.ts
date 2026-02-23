@@ -107,4 +107,3 @@ export function mapMessageRowToMessage(row: MessageRow): Message {
         deleted_at: row.deleted_at ?? null,
     };
 }
-

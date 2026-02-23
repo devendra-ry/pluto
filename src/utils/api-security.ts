@@ -109,4 +109,3 @@ export function toJsonErrorResponse(error: unknown) {
     }
     return null;
 }
-

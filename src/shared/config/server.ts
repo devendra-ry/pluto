@@ -40,4 +40,3 @@ export const serverEnv = Object.freeze({
     CHUTES_MEDIA_FETCH_ALLOWED_HOSTS: optionalServerEnv(process.env.CHUTES_MEDIA_FETCH_ALLOWED_HOSTS),
     CHUTES_WAN_I2V_NEGATIVE_PROMPT: optionalServerEnv(process.env.CHUTES_WAN_I2V_NEGATIVE_PROMPT),
 });
-

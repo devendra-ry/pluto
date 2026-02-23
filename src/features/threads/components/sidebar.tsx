@@ -513,7 +513,3 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
 });
 
 export { Sidebar };
-
-
-
-

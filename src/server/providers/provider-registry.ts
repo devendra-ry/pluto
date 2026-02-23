@@ -19,5 +19,3 @@ function resolveProviderId(modelConfig: ModelConfig): keyof typeof PROVIDERS {
 export function resolveChatProvider(modelConfig: ModelConfig): ChatProvider {
     return PROVIDERS[resolveProviderId(modelConfig)];
 }
-
-

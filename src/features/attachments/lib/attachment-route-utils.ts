@@ -22,4 +22,3 @@ export function jsonResponse(payload: Record<string, unknown>, status: number = 
         headers: { 'Content-Type': 'application/json' },
     });
 }
-

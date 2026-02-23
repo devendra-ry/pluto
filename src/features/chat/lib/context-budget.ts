@@ -173,4 +173,3 @@ export function isContextOverflowError(error: unknown) {
 
     return patterns.some((pattern) => normalized.includes(pattern));
 }
-

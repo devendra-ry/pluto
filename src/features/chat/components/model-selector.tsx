@@ -366,4 +366,3 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
         </TooltipProvider>
     );
 });
-

@@ -27,4 +27,3 @@ export function logModelLimits(label: string, payload: Record<string, unknown>) 
         console.log(`[chat][limits] ${label}`);
     }
 }
-

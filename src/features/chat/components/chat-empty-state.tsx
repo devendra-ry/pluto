@@ -63,4 +63,3 @@ export function ChatEmptyState({ onPromptClick }: ChatEmptyStateProps) {
         </div>
     );
 }
-

@@ -494,5 +494,3 @@ export async function cleanupEmptyThreads(excludeId?: string) {
         triggerRefresh();
     }
 }
-
-

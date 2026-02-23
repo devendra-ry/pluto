@@ -67,4 +67,3 @@ export async function GET(request: Request) {
 
     return NextResponse.redirect(`${redirectOrigin}/login?error=auth_failed`)
 }
-

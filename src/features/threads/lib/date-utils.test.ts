@@ -156,4 +156,3 @@ test('formatThreadDate', async (t) => {
         assert.strictEqual(result, expected);
     });
 });
-

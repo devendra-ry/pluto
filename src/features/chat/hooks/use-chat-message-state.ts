@@ -117,5 +117,3 @@ export function useChatMessageState({
         messagesReady: storedMessages !== null,
     };
 }
-
-

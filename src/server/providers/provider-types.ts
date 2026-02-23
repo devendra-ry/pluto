@@ -43,5 +43,3 @@ export interface ChatProvider {
     getStream: (params: ProviderGetStreamParams) => Promise<ReadableStream>;
     resolveModelLimits: (params: ProviderResolveLimitsParams) => Promise<ResolvedModelLimits | null>;
 }
-
-

@@ -629,4 +629,3 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     );
 });
 ChatInput.displayName = 'ChatInput';
-

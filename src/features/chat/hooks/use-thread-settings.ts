@@ -120,5 +120,3 @@ export function useThreadSettings({ chatId, thread, showToast }: UseThreadSettin
         handleSystemPromptChange,
     };
 }
-
-

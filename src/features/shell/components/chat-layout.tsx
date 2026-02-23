@@ -55,5 +55,3 @@ export function ChatLayout({ children, initialUser }: { children: React.ReactNod
         </div>
     );
 }
-
-
