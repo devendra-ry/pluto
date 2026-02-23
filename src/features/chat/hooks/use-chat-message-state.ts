@@ -3,7 +3,7 @@
 import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 
 import { type Message } from '@/features/messages/hooks/use-messages';
-import { type ChatViewMessage } from '@/lib/chat-view';
+import { type ChatViewMessage } from '@/features/chat/lib/chat-view';
 import { type Attachment } from '@/lib/types';
 
 function areAttachmentListsEqual(left: Attachment[] | undefined, right: Attachment[] | undefined) {

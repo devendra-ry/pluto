@@ -26,7 +26,7 @@ import {
     VIDEO_GENERATION_MODEL,
 } from '@/lib/constants';
 import { isImageAttachment } from '@/lib/attachments';
-import { type ChatViewMessage, type RetryMode } from '@/lib/chat-view';
+import { type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
 import { type Attachment } from '@/lib/types';
 
 interface ChatPageClientProps {

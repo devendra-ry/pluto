@@ -5,7 +5,7 @@ import { useEffect, useRef, type MutableRefObject } from 'react';
 import { type ChatInputHandle } from '@/features/chat/components/chat-input';
 import { claimPendingGenerationJob, completeGenerationJob } from '@/features/chat/hooks/use-generation-jobs';
 import { isImageGenerationModel } from '@/lib/constants';
-import { type ChatViewMessage } from '@/lib/chat-view';
+import { type ChatViewMessage } from '@/features/chat/lib/chat-view';
 import { type ReasoningEffort } from '@/lib/types';
 
 interface UsePendingGenerationParams {

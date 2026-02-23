@@ -1,4 +1,4 @@
-import { prepareMessageAttachments } from '@/lib/chat-attachments';
+import { prepareMessageAttachments } from '@/features/chat/lib/chat-attachments';
 import {
     CONTEXT_RETRY_SCALE,
     estimatePreparedConversationTokens,
@@ -7,7 +7,7 @@ import {
     resolveOutputTokenPlan,
     trimMessagesToInputBudget,
     type TrimmedContext,
-} from '@/lib/context-budget';
+} from '@/features/chat/lib/context-budget';
 import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/lib/constants';
 import { resolveModelLimits } from '@/lib/providers/model-limits';
 import { resolveChatProvider } from '@/lib/providers/provider-registry';

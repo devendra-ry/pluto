@@ -1,4 +1,4 @@
-import { handleChatRequest } from '@/lib/chat-controller';
+import { handleChatRequest } from '@/features/chat/lib/chat-controller';
 import { withSecureContext } from '@/utils/route-handler';
 import { chatRateLimiter } from '@/utils/rate-limit';
 

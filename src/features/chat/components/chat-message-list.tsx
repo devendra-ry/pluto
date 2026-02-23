@@ -5,7 +5,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { ChatMessage } from '@/features/chat/components/chat-message';
 import { AVAILABLE_MODELS } from '@/lib/constants';
-import { type ChatViewMessage } from '@/lib/chat-view';
+import { type ChatViewMessage } from '@/features/chat/lib/chat-view';
 import { cn } from '@/lib/utils';
 
 interface ChatMessageListProps {

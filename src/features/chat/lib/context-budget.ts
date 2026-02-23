@@ -1,4 +1,4 @@
-import type { PreparedChatMessage } from '@/lib/chat-attachments';
+import type { PreparedChatMessage } from '@/features/chat/lib/chat-attachments';
 import type { ResolvedModelLimits } from '@/lib/providers/model-limits';
 import type { ChatMessage } from '@/lib/types';
 
