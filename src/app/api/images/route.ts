@@ -1,7 +1,7 @@
 import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/features/attachments/lib/attachment-route-utils';
 import { createSignedAttachmentUrl } from '@/features/attachments/lib/attachment-signed-url';
 import { IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, isImageGenerationModel } from '@/lib/constants';
-import { ImageGenerateRequestSchema } from '@/lib/request-validation';
+import { ImageGenerateRequestSchema } from '@/shared/validation/request-validation';
 import { type Attachment } from '@/lib/types';
 import {
     CHUTES_MISSING_API_KEY_MESSAGE,

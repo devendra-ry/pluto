@@ -1,7 +1,7 @@
 import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/features/attachments/lib/attachment-route-utils';
 import { createSignedAttachmentUrl } from '@/features/attachments/lib/attachment-signed-url';
 import { VIDEO_GENERATION_MODEL } from '@/lib/constants';
-import { VideoGenerateRequestSchema } from '@/lib/request-validation';
+import { VideoGenerateRequestSchema } from '@/shared/validation/request-validation';
 import { type Attachment } from '@/lib/types';
 import {
     CHUTES_MISSING_API_KEY_MESSAGE,

@@ -9,6 +9,7 @@ Current modules:
 - `providers/query-provider.tsx`
 - `lib/animation-frame.ts`
 - `lib/query-client.ts`
+- `validation/request-validation.ts`
 
 Guideline:
 
