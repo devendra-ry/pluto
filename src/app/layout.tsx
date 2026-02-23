@@ -9,7 +9,7 @@ import { ToastProvider } from "@/components/ui/toast";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 
-import { ChatLayout } from "@/features/shell/components/chat-layout";
+import { ChatLayout } from "@/features/shell";
 import { createClient } from "@/utils/supabase/server";
 
 const inter = Inter({
@@ -52,4 +52,5 @@ export default async function RootLayout({
     </html>
   );
 }
+
 

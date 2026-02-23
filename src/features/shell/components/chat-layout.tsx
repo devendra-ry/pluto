@@ -6,7 +6,7 @@ import { ErrorBoundary } from '@/shared/components/error-boundary';
 import { type User } from '@supabase/supabase-js';
 
 const SidebarClient = dynamic(
-    () => import('@/features/threads/components/sidebar').then((mod) => mod.Sidebar),
+    () => import('@/features/threads').then((mod) => mod.Sidebar),
     { ssr: false }
 );
 

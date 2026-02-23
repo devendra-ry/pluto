@@ -2,11 +2,11 @@ import { createClient } from '@/utils/supabase/server';
 import {
     MAX_ATTACHMENT_BYTES,
     isSupportedAttachmentMimeType,
-} from '@/features/attachments/lib/attachments';
-import { createSignedAttachmentUrl } from '@/features/attachments/lib/attachment-signed-url';
-import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/features/attachments/lib/attachment-route-utils';
+} from '@/features/attachments';
+import { createSignedAttachmentUrl } from '@/features/attachments/server';
+import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/features/attachments/server';
 import { UploadCleanupRequestSchema } from '@/shared/validation/request-validation';
-import { assertThreadOwnership } from '@/features/threads/server/thread-ownership';
+import { assertThreadOwnership } from '@/features/threads/server';
 import { type Attachment } from '@/shared/core/types';
 import {
     ApiRequestError,
@@ -352,5 +352,6 @@ export async function GET(req: Request) {
         return new Response(message, { status: 403 });
     }
 }
+
 
 

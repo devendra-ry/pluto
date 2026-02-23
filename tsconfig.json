@@ -23,6 +23,15 @@
       }
     ],
     "paths": {
+      "@/features/*": [
+        "./src/features/*"
+      ],
+      "@/shared/*": [
+        "./src/shared/*"
+      ],
+      "@/server/*": [
+        "./src/server/*"
+      ],
       "@/*": [
         "./src/*"
       ]

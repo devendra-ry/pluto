@@ -4,29 +4,29 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { type VirtuosoHandle } from 'react-virtuoso';
 import dynamic from 'next/dynamic';
 
-import { ChatDestructiveConfirmDialog } from '@/features/chat/components/chat-destructive-confirm-dialog';
-import { ChatEmptyState } from '@/features/chat/components/chat-empty-state';
+import { ChatDestructiveConfirmDialog } from '@/features/chat';
+import { ChatEmptyState } from '@/features/chat';
 import { ErrorBoundary } from '@/shared/components/error-boundary';
-import { ChatHeader } from '@/features/chat/components/chat-header';
-import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/features/chat/components/chat-input';
+import { ChatHeader } from '@/features/chat';
+import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/features/chat';
 import { useToast } from '@/components/ui/toast';
-import { useChatMessageState } from '@/features/chat/hooks/use-chat-message-state';
-import { useChatScroll } from '@/features/chat/hooks/use-chat-scroll';
-import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
-import { useDestructiveDeleteConfirm } from '@/features/chat/hooks/use-destructive-delete-confirm';
-import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages } from '@/features/messages/hooks/use-messages';
-import { usePendingGeneration } from '@/features/chat/hooks/use-pending-generation';
-import { useRetryLogic } from '@/features/chat/hooks/use-retry-logic';
-import { useThread } from '@/features/threads/hooks/use-threads';
-import { useThreadSettings } from '@/features/chat/hooks/use-thread-settings';
+import { useChatMessageState } from '@/features/chat';
+import { useChatScroll } from '@/features/chat';
+import { useChatStream } from '@/features/chat';
+import { useDestructiveDeleteConfirm } from '@/features/chat';
+import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages } from '@/features/messages';
+import { usePendingGeneration } from '@/features/chat';
+import { useRetryLogic } from '@/features/chat';
+import { useThread } from '@/features/threads';
+import { useThreadSettings } from '@/features/chat';
 import {
     IMAGE_GENERATION_MODEL,
     isImageGenerationModel,
     SEARCH_ENABLED_MODELS,
     VIDEO_GENERATION_MODEL,
 } from '@/shared/core/constants';
-import { isImageAttachment } from '@/features/attachments/lib/attachments';
-import { type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
+import { isImageAttachment } from '@/features/attachments';
+import { type ChatViewMessage, type RetryMode } from '@/features/chat';
 import { type Attachment } from '@/shared/core/types';
 
 interface ChatPageClientProps {
@@ -34,7 +34,7 @@ interface ChatPageClientProps {
 }
 
 const ChatMessageList = dynamic(
-    () => import('@/features/chat/components/chat-message-list').then((mod) => mod.ChatMessageList),
+    () => import('@/features/chat').then((mod) => mod.ChatMessageList),
     { ssr: false }
 );
 
@@ -477,6 +477,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         </div>
     );
 }
+
 
 
 

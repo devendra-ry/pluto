@@ -1,4 +1,4 @@
-import { handleChatRequest } from '@/features/chat/lib/chat-controller';
+import { handleChatRequest } from '@/features/chat/server';
 import { withSecureContext } from '@/utils/route-handler';
 import { chatRateLimiter } from '@/utils/rate-limit';
 
@@ -13,3 +13,4 @@ export async function POST(req: Request) {
         chatRateLimiter
     );
 }
+

@@ -11,3 +11,4 @@ Current modules:
 Guideline:
 
 - Keep server-only code here and out of `src/features/*` and client bundles.
+- Feature-specific server entrypoints should live at `src/features/<feature>/server.ts`.

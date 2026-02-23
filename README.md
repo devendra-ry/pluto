@@ -4,6 +4,8 @@ A fast, production-style AI workspace built on Next.js 16.
 
 Pluto gives you one chat surface for multiple providers, plus dedicated generation modes for image, image edit, and image-to-video. It is optimized for realtime sync, secure request handling, and low-friction model expansion.
 
+Architecture details: see `ARCHITECTURE.md`.
+
 ## What Makes It Good
 
 - One model selector, multiple providers: Google, Chutes, OpenRouter.
@@ -105,8 +107,8 @@ CHUTES_WAN_I2V_NEGATIVE_PROMPT=
 
 To add another Chutes image model, update three places:
 
-1. Add model to `src/lib/constants.ts` -> `IMAGE_GENERATION_MODELS`.
-2. Add endpoint candidates in `src/lib/chutes.ts`.
+1. Add model to `src/shared/core/constants.ts` -> `IMAGE_GENERATION_MODELS`.
+2. Add endpoint candidates in `src/server/providers/chutes.ts`.
 3. Add payload mapping in `src/app/api/images/route.ts` -> `getImageRequestAttempts(...)` if required.
 
 No extra settings panel is needed; the mode dropdown submenu picks it up automatically.

@@ -11,4 +11,6 @@ Rules:
 
 - Route files under `src/app` stay thin and import from feature modules.
 - `src/shared` or `src/components/ui` should contain domain-agnostic primitives only.
-- Cross-feature imports should go through stable APIs, not deep private internals.
+- Expose cross-feature APIs from `index.ts` at each feature root.
+- Expose feature-specific server APIs from `server.ts` when needed.
+- Outside feature internals, import via `@/features/<feature>` only.

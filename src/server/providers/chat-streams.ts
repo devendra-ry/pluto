@@ -1,10 +1,10 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
-import { isImageAttachment } from '@/features/attachments/lib/attachments';
+import { isImageAttachment } from '@/features/attachments';
 import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/server/providers/chutes';
 import { AVAILABLE_MODELS, type ModelConfig } from '@/shared/core/constants';
 import { serverEnv } from '@/shared/config/server';
-import type { PreparedChatMessage } from '@/features/chat/lib/chat-attachments';
+import type { PreparedChatMessage } from '@/features/chat/server';
 import { logModelLimits, resolveOutputTokenCap } from '@/server/providers/limits-utils';
 import type { RequestTokenEstimates } from '@/server/providers/provider-types';
 import type { ReasoningEffort } from '@/shared/core/types';
@@ -291,4 +291,5 @@ export async function getOpenRouterStream(
 
     return response.body as ReadableStream;
 }
+
 

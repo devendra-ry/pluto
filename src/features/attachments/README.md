@@ -12,4 +12,4 @@ Current modules:
 
 Guideline:
 
-- Keep attachment-domain logic here instead of generic `src/lib`.
+- Keep attachment-domain logic here instead of generic shared/core folders.

@@ -1,5 +1,5 @@
-import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/features/attachments/lib/attachment-route-utils';
-import { createSignedAttachmentUrl } from '@/features/attachments/lib/attachment-signed-url';
+import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/features/attachments/server';
+import { createSignedAttachmentUrl } from '@/features/attachments/server';
 import { IMAGE_GENERATION_MODEL, IMAGE_GENERATION_MODELS, isImageGenerationModel } from '@/shared/core/constants';
 import { ImageGenerateRequestSchema } from '@/shared/validation/request-validation';
 import { type Attachment } from '@/shared/core/types';
@@ -10,7 +10,7 @@ import {
     getChutesImageApiUrlEnvKey,
     getChutesImageEditApiUrlCandidates,
 } from '@/server/providers/chutes';
-import { assertThreadOwnership } from '@/features/threads/server/thread-ownership';
+import { assertThreadOwnership } from '@/features/threads/server';
 import { fetchWithSsrfGuard } from '@/server/security/ssrf-guard';
 import { assertJsonRequest, assertValidPostOrigin, parseJsonObjectRequest, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { assertRateLimit, imageRateLimiter } from '@/utils/rate-limit';
@@ -654,5 +654,6 @@ export async function POST(req: Request) {
         return jsonResponse({ error: message }, 500);
     }
 }
+
 
 

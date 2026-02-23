@@ -1,4 +1,4 @@
-import type { PreparedChatMessage } from '@/features/chat/lib/chat-attachments';
+import type { PreparedChatMessage } from '@/features/chat/server';
 import type { ModelConfig } from '@/shared/core/constants';
 import type { ReasoningEffort } from '@/shared/core/types';
 
@@ -43,4 +43,5 @@ export interface ChatProvider {
     getStream: (params: ProviderGetStreamParams) => Promise<ReadableStream>;
     resolveModelLimits: (params: ProviderResolveLimitsParams) => Promise<ResolvedModelLimits | null>;
 }
+
 

@@ -2,11 +2,11 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/features/threads/hooks/use-threads';
-import { addMessage } from '@/features/messages/hooks/use-messages';
-import { enqueueGenerationJob } from '@/features/chat/hooks/use-generation-jobs';
+import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/features/threads';
+import { addMessage } from '@/features/messages';
+import { enqueueGenerationJob } from '@/features/chat';
 import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
-import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/features/chat/components/chat-input';
+import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/features/chat';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -262,6 +262,7 @@ export default function HomePage() {
     </div>
   );
 }
+
 
 
 
