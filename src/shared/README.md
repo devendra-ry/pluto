@@ -8,6 +8,7 @@ Current modules:
 - `hooks/use-debounce.ts`
 - `providers/query-provider.tsx`
 - `lib/animation-frame.ts`
+- `lib/query-client.ts`
 
 Guideline:
 

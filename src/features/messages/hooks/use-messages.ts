@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { DEFAULT_ATTACHMENTS_BUCKET } from '@/features/attachments/lib/attachments';
 import { isLegacyAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
-import { getMessagesQueryKey, getQueryClient, MESSAGE_QUERY_KEY_PREFIX } from '@/lib/query-client';
+import { getMessagesQueryKey, getQueryClient, MESSAGE_QUERY_KEY_PREFIX } from '@/shared/lib/query-client';
 import { type Attachment } from '@/lib/types';
 import { createClient } from '@/utils/supabase/client';
 import type { Json } from '@/utils/supabase/database.types';
