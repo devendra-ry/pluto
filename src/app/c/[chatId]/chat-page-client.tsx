@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 
 import { ChatDestructiveConfirmDialog } from '@/features/chat/components/chat-destructive-confirm-dialog';
 import { ChatEmptyState } from '@/components/chat-empty-state';
-import { ErrorBoundary } from '@/components/error-boundary';
+import { ErrorBoundary } from '@/shared/components/error-boundary';
 import { ChatHeader } from '@/components/chat-header';
 import { ChatInput } from '@/components/chat-input';
 import { type ChatInputHandle, type ChatSubmitOptions } from '@/components/chat-input-components/chat-input-types';
@@ -478,5 +478,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         </div>
     );
 }
+
 
 

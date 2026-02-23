@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
-import { ErrorBoundary } from '@/components/error-boundary';
+import { ErrorBoundary } from '@/shared/components/error-boundary';
 import { type User } from '@supabase/supabase-js';
 
 const SidebarClient = dynamic(
@@ -55,4 +55,5 @@ export function ChatLayout({ children, initialUser }: { children: React.ReactNod
         </div>
     );
 }
+
 
