@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { DEFAULT_ATTACHMENTS_BUCKET } from '@/features/attachments/lib/attachments';
 import { isLegacyAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
 import { getMessagesQueryKey, getQueryClient, MESSAGE_QUERY_KEY_PREFIX } from '@/shared/lib/query-client';
-import { type Attachment } from '@/lib/types';
+import { type Attachment } from '@/shared/core/types';
 import { createClient } from '@/utils/supabase/client';
 import type { Json } from '@/utils/supabase/database.types';
 
@@ -322,4 +322,5 @@ export async function clearThreadMessages(threadId: string) {
         .filter((value): value is string => value !== null);
     await deleteMessagesByIds(ids, { reason: 'clear_thread', threadId });
 }
+
 

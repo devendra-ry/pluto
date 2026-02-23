@@ -1,6 +1,6 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { publicEnv } from "@/lib/env/public";
+import { publicEnv } from "@/shared/config/public";
 import type { Database } from "@/utils/supabase/database.types";
 
 let browserClient: SupabaseClient<Database> | undefined;
@@ -22,3 +22,4 @@ export const createClient = () => {
 
     return browserClient;
 };
+

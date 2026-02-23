@@ -1,6 +1,6 @@
 'use client';
 
-import { type Attachment } from '@/lib/types';
+import { type Attachment } from '@/shared/core/types';
 
 function extractErrorMessage(payload: unknown, fallback: string) {
     if (!payload || typeof payload !== 'object') return fallback;
@@ -140,3 +140,4 @@ export function startUploadFileForThread(
         cancel: () => cancelUpload(),
     };
 }
+

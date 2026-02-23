@@ -1,8 +1,8 @@
-import type { ModelConfig } from '@/lib/constants';
-import { chutesProvider } from '@/lib/providers/chutes-provider';
-import { googleProvider } from '@/lib/providers/google-provider';
-import { openRouterProvider } from '@/lib/providers/openrouter-provider';
-import type { ChatProvider } from '@/lib/providers/provider-types';
+import type { ModelConfig } from '@/shared/core/constants';
+import { chutesProvider } from '@/server/providers/chutes-provider';
+import { googleProvider } from '@/server/providers/google-provider';
+import { openRouterProvider } from '@/server/providers/openrouter-provider';
+import type { ChatProvider } from '@/server/providers/provider-types';
 
 const PROVIDERS: Record<'google' | 'openrouter' | 'chutes', ChatProvider> = {
     google: googleProvider,
@@ -19,4 +19,5 @@ function resolveProviderId(modelConfig: ModelConfig): keyof typeof PROVIDERS {
 export function resolveChatProvider(modelConfig: ModelConfig): ChatProvider {
     return PROVIDERS[resolveProviderId(modelConfig)];
 }
+
 

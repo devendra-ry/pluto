@@ -4,6 +4,12 @@ Use this layer for domain-agnostic building blocks reused across features.
 
 Current modules:
 
+- `core/constants.ts`
+- `core/types.ts`
+- `core/utils.ts`
+- `core/models.json`
+- `config/public.ts`
+- `config/server.ts`
 - `components/error-boundary.tsx`
 - `hooks/use-debounce.ts`
 - `providers/query-provider.tsx`

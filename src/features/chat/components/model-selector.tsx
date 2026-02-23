@@ -34,8 +34,8 @@ import {
     Check,
     Sparkles,
 } from 'lucide-react';
-import { AVAILABLE_MODELS, PROVIDERS, CAPABILITY_INFO, type Capability } from '@/lib/constants';
-import { cn } from '@/lib/utils';
+import { AVAILABLE_MODELS, PROVIDERS, CAPABILITY_INFO, type Capability } from '@/shared/core/constants';
+import { cn } from '@/shared/core/utils';
 
 interface ModelSelectorProps {
     currentModel: string;
@@ -366,3 +366,4 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
         </TooltipProvider>
     );
 });
+

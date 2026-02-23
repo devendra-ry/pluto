@@ -1,7 +1,7 @@
-import { getChutesApiKey } from '@/lib/chutes';
-import { buildOpenAICompatibleMessages, getChutesStream } from '@/lib/providers/chat-streams';
-import { logModelLimits, toPositiveInt } from '@/lib/providers/limits-utils';
-import type { ChatProvider } from '@/lib/providers/provider-types';
+import { getChutesApiKey } from '@/server/providers/chutes';
+import { buildOpenAICompatibleMessages, getChutesStream } from '@/server/providers/chat-streams';
+import { logModelLimits, toPositiveInt } from '@/server/providers/limits-utils';
+import type { ChatProvider } from '@/server/providers/provider-types';
 
 export const chutesProvider: ChatProvider = {
     id: 'chutes',
@@ -87,3 +87,4 @@ export const chutesProvider: ChatProvider = {
         };
     },
 };
+

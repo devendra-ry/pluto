@@ -3,7 +3,7 @@
 import { type ChatSubmitMode } from '@/features/chat/components/chat-input';
 import { createClient } from '@/utils/supabase/client';
 
-import { type ReasoningEffort } from '@/lib/types';
+import { type ReasoningEffort } from '@/shared/core/types';
 
 type JobStatus = 'completed' | 'failed';
 
@@ -117,3 +117,4 @@ export async function completeGenerationJob(
         console.warn('[generation_jobs] failed to mark job complete', { jobId, status, error: error.message });
     }
 }
+

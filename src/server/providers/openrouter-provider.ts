@@ -1,7 +1,7 @@
-import { buildOpenAICompatibleMessages, getOpenRouterStream } from '@/lib/providers/chat-streams';
-import { serverEnv } from '@/lib/env/server';
-import { logModelLimits, toPositiveInt } from '@/lib/providers/limits-utils';
-import type { ChatProvider } from '@/lib/providers/provider-types';
+import { buildOpenAICompatibleMessages, getOpenRouterStream } from '@/server/providers/chat-streams';
+import { serverEnv } from '@/shared/config/server';
+import { logModelLimits, toPositiveInt } from '@/server/providers/limits-utils';
+import type { ChatProvider } from '@/server/providers/provider-types';
 
 export const openRouterProvider: ChatProvider = {
     id: 'openrouter',
@@ -85,3 +85,4 @@ export const openRouterProvider: ChatProvider = {
         };
     },
 };
+

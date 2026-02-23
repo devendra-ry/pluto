@@ -1,5 +1,5 @@
 import type { Database } from '@/utils/supabase/database.types';
-import type { Attachment } from '@/lib/types';
+import type { Attachment } from '@/shared/core/types';
 
 export interface Message {
     id: string;
@@ -107,3 +107,4 @@ export function mapMessageRowToMessage(row: MessageRow): Message {
         deleted_at: row.deleted_at ?? null,
     };
 }
+

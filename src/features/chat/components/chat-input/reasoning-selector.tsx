@@ -8,8 +8,8 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
-import { type ReasoningEffort } from '@/lib/types';
+import { cn } from '@/shared/core/utils';
+import { type ReasoningEffort } from '@/shared/core/types';
 
 const REASONING_OPTIONS: { value: ReasoningEffort; label: string; pro?: boolean }[] = [
     { value: 'low', label: 'Low' },
@@ -69,3 +69,4 @@ export function ReasoningSelector({ reasoningEffort, onReasoningEffortChange }: 
         </div>
     );
 }
+

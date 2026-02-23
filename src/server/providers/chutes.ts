@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { readOptionalServerEnv, serverEnv } from '@/lib/env/server';
+import { readOptionalServerEnv, serverEnv } from '@/shared/config/server';
 
 export const CHUTES_MISSING_API_KEY_MESSAGE = 'Chutes API key missing (set CHUTES_API_KEY or CHUTES_API_TOKEN)';
 
@@ -94,3 +94,4 @@ export function getChutesVideoApiUrlCandidates() {
 export function getChutesWanI2vNegativePrompt() {
     return serverEnv.CHUTES_WAN_I2V_NEGATIVE_PROMPT;
 }
+

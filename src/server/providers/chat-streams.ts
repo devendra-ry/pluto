@@ -1,13 +1,13 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 import { isImageAttachment } from '@/features/attachments/lib/attachments';
-import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/lib/chutes';
-import { AVAILABLE_MODELS, type ModelConfig } from '@/lib/constants';
-import { serverEnv } from '@/lib/env/server';
+import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/server/providers/chutes';
+import { AVAILABLE_MODELS, type ModelConfig } from '@/shared/core/constants';
+import { serverEnv } from '@/shared/config/server';
 import type { PreparedChatMessage } from '@/features/chat/lib/chat-attachments';
-import { logModelLimits, resolveOutputTokenCap } from '@/lib/providers/limits-utils';
-import type { RequestTokenEstimates } from '@/lib/providers/provider-types';
-import type { ReasoningEffort } from '@/lib/types';
+import { logModelLimits, resolveOutputTokenCap } from '@/server/providers/limits-utils';
+import type { RequestTokenEstimates } from '@/server/providers/provider-types';
+import type { ReasoningEffort } from '@/shared/core/types';
 
 export function buildGoogleContents(messages: PreparedChatMessage[]) {
     return messages.map((message) => {
@@ -291,3 +291,4 @@ export async function getOpenRouterStream(
 
     return response.body as ReadableStream;
 }
+

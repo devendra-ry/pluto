@@ -1,4 +1,4 @@
-import { Attachment } from '@/lib/types';
+import { Attachment } from '@/shared/core/types';
 
 export type ChatSubmitMode = 'chat' | 'image' | 'image-edit' | 'video' | 'search';
 
@@ -26,3 +26,4 @@ export interface ChatInputHandle {
     getMode: () => ChatSubmitMode;
     getImageModelId: () => string;
 }
+

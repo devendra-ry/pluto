@@ -8,7 +8,7 @@ import {
     DropdownMenuContent,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/core/utils';
 import { useToast } from '@/components/ui/toast';
 
 interface SystemPromptSelectorProps {
@@ -123,3 +123,4 @@ export function SystemPromptSelector({ systemPrompt, onSystemPromptChange }: Sys
         </DropdownMenu>
     );
 }
+

@@ -10,8 +10,20 @@ process.env.CHUTES_MEDIA_FETCH_ALLOWED_HOSTS = 'example.com';
 // Import the function under test and the setter
 const { fetchWithSsrfGuard, _setFetchImplementation } = await import('./ssrf-guard');
 
+function createMockResponse(status: number, location: string | null = null): Response {
+    return {
+        status,
+        headers: {
+            get: (key: string) => (key === 'location' ? location : null),
+        },
+        text: async () => (status >= 300 && status < 400 ? 'redirecting' : 'ok'),
+    } as unknown as Response;
+}
+
 // Mock fetch
-const mockFetch = mock.fn();
+const mockFetch = mock.fn<
+    (url: URL | RequestInfo | string, init?: RequestInit) => Promise<Response>
+>(async () => createMockResponse(200));
 
 test('fetchWithSsrfGuard', async (t) => {
     t.beforeEach(() => {
@@ -21,11 +33,7 @@ test('fetchWithSsrfGuard', async (t) => {
     });
 
     await t.test('fetches successfully for allowed host', async () => {
-        mockFetch.mock.mockImplementation(async () => ({
-            status: 200,
-            headers: { get: () => null },
-            text: async () => 'ok',
-        }));
+        mockFetch.mock.mockImplementation(async () => createMockResponse(200));
 
         const response = await fetchWithSsrfGuard('https://chutes.ai/image.png');
         assert.strictEqual(response.status, 200);
@@ -59,11 +67,7 @@ test('fetchWithSsrfGuard', async (t) => {
     });
 
     await t.test('fetches successfully for allowed extra host', async () => {
-        mockFetch.mock.mockImplementation(async () => ({
-            status: 200,
-            headers: { get: () => null },
-            text: async () => 'ok',
-        }));
+        mockFetch.mock.mockImplementation(async () => createMockResponse(200));
 
         // 'example.com' is allowed via env var CHUTES_MEDIA_FETCH_ALLOWED_HOSTS
         const response = await fetchWithSsrfGuard('https://example.com/image.png');
@@ -76,17 +80,9 @@ test('fetchWithSsrfGuard', async (t) => {
         mockFetch.mock.mockImplementation(async (url: any) => {
             callCount++;
             if (url.toString().includes('redirect')) {
-                return {
-                    status: 302,
-                    headers: { get: (key: string) => key === 'location' ? 'https://chutes.ai/target' : null },
-                    text: async () => 'redirecting',
-                };
+                return createMockResponse(302, 'https://chutes.ai/target');
             }
-            return {
-                status: 200,
-                headers: { get: () => null },
-                text: async () => 'ok',
-            };
+            return createMockResponse(200);
         });
 
         const response = await fetchWithSsrfGuard('https://chutes.ai/redirect');
@@ -98,11 +94,7 @@ test('fetchWithSsrfGuard', async (t) => {
     });
 
     await t.test('throws for redirect to disallowed host', async () => {
-        mockFetch.mock.mockImplementation(async () => ({
-            status: 302,
-            headers: { get: (key: string) => key === 'location' ? 'https://evil.com/target' : null },
-            text: async () => 'redirecting',
-        }));
+        mockFetch.mock.mockImplementation(async () => createMockResponse(302, 'https://evil.com/target'));
 
         await assert.rejects(
             fetchWithSsrfGuard('https://chutes.ai/redirect'),
@@ -113,11 +105,7 @@ test('fetchWithSsrfGuard', async (t) => {
     });
 
     await t.test('throws for redirect loop', async () => {
-        mockFetch.mock.mockImplementation(async () => ({
-            status: 302,
-            headers: { get: (key: string) => key === 'location' ? 'https://chutes.ai/redirect' : null },
-            text: async () => 'redirecting',
-        }));
+        mockFetch.mock.mockImplementation(async () => createMockResponse(302, 'https://chutes.ai/redirect'));
 
         await assert.rejects(
             fetchWithSsrfGuard('https://chutes.ai/redirect', { maxRedirects: 2 }),
@@ -128,11 +116,7 @@ test('fetchWithSsrfGuard', async (t) => {
     });
 
     await t.test('throws if redirect missing location header', async () => {
-        mockFetch.mock.mockImplementation(async () => ({
-            status: 302,
-            headers: { get: () => null }, // No location
-            text: async () => 'redirecting',
-        }));
+        mockFetch.mock.mockImplementation(async () => createMockResponse(302, null));
 
         await assert.rejects(
             fetchWithSsrfGuard('https://chutes.ai/redirect'),

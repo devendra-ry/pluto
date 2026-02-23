@@ -1,4 +1,4 @@
-import { serverEnv } from '@/lib/env/server'
+import { serverEnv } from '@/shared/config/server'
 import { createClient } from '@/utils/supabase/server'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
@@ -67,3 +67,4 @@ export async function GET(request: Request) {
 
     return NextResponse.redirect(`${redirectOrigin}/login?error=auth_failed`)
 }
+

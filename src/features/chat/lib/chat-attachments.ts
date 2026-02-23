@@ -1,5 +1,5 @@
-import type { ModelConfig } from '@/lib/constants';
-import type { ChatMessage } from '@/lib/types';
+import type { ModelConfig } from '@/shared/core/constants';
+import type { ChatMessage } from '@/shared/core/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/utils/supabase/database.types';
 import { getAttachmentsBucketName } from '@/features/attachments/lib/attachment-route-utils';
@@ -243,3 +243,4 @@ export async function prepareMessageAttachments(
 
     return prepared;
 }
+

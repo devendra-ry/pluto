@@ -8,8 +8,8 @@ import {
     updateThreadSystemPrompt,
     type Thread,
 } from '@/features/threads/hooks/use-threads';
-import { AVAILABLE_MODELS, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT } from '@/lib/constants';
-import { type ReasoningEffort } from '@/lib/types';
+import { AVAILABLE_MODELS, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT } from '@/shared/core/constants';
+import { type ReasoningEffort } from '@/shared/core/types';
 
 type ToastType = 'success' | 'error' | 'info';
 
@@ -120,4 +120,5 @@ export function useThreadSettings({ chatId, thread, showToast }: UseThreadSettin
         handleSystemPromptChange,
     };
 }
+
 

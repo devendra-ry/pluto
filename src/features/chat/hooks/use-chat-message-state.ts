@@ -4,7 +4,7 @@ import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetS
 
 import { type Message } from '@/features/messages/hooks/use-messages';
 import { type ChatViewMessage } from '@/features/chat/lib/chat-view';
-import { type Attachment } from '@/lib/types';
+import { type Attachment } from '@/shared/core/types';
 
 function areAttachmentListsEqual(left: Attachment[] | undefined, right: Attachment[] | undefined) {
     const a = left ?? [];
@@ -117,4 +117,5 @@ export function useChatMessageState({
         messagesReady: storedMessages !== null,
     };
 }
+
 

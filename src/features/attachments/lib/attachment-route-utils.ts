@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { DEFAULT_ATTACHMENTS_BUCKET } from '@/features/attachments/lib/attachments';
-import { readFirstOptionalServerEnv } from '@/lib/env/server';
+import { readFirstOptionalServerEnv } from '@/shared/config/server';
 
 export function getAttachmentsBucketName() {
     return readFirstOptionalServerEnv(
@@ -22,3 +22,4 @@ export function jsonResponse(payload: Record<string, unknown>, status: number = 
         headers: { 'Content-Type': 'application/json' },
     });
 }
+

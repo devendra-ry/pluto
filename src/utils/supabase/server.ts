@@ -1,5 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
-import { publicEnv } from "@/lib/env/public";
+import { publicEnv } from "@/shared/config/public";
 import { cookies } from "next/headers";
 import type { Database } from "@/utils/supabase/database.types";
 
@@ -25,3 +25,4 @@ export const createClient = (cookieStore: Awaited<ReturnType<typeof cookies>>) =
         },
     );
 };
+

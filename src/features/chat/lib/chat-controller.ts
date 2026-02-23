@@ -8,11 +8,11 @@ import {
     trimMessagesToInputBudget,
     type TrimmedContext,
 } from '@/features/chat/lib/context-budget';
-import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/lib/constants';
-import { resolveModelLimits } from '@/lib/providers/model-limits';
-import { resolveChatProvider } from '@/lib/providers/provider-registry';
+import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/shared/core/constants';
+import { resolveModelLimits } from '@/server/providers/model-limits';
+import { resolveChatProvider } from '@/server/providers/provider-registry';
 import { processAndTransformStream } from '@/features/chat/lib/stream-transform';
-import { ChatRequestSchema } from '@/lib/types';
+import { ChatRequestSchema } from '@/shared/core/types';
 import type { AuthenticatedContext } from '@/utils/route-handler';
 
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
@@ -193,3 +193,4 @@ export async function handleChatRequest(
         },
     });
 }
+

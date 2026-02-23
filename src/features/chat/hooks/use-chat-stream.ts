@@ -14,10 +14,10 @@ import { addMessage } from '@/features/messages/hooks/use-messages';
 import { touchThread, updateThreadTitleIfNewChat } from '@/features/threads/hooks/use-threads';
 import { cancelScheduledFrame, scheduleFrame, type ScheduledFrame } from '@/shared/lib/animation-frame';
 import { chatService } from '@/features/chat/lib/chat-service';
-import { AVAILABLE_MODELS, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/lib/constants';
+import { AVAILABLE_MODELS, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
 import { type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
 import { sanitizeThreadTitle } from '@/features/threads/lib/sanitize-thread-title';
-import { type Attachment, type ReasoningEffort } from '@/lib/types';
+import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
 
 type ToastType = 'success' | 'error' | 'info';
 type StreamPhase = 'idle' | 'preparing' | 'requesting' | 'streaming' | 'persisting';
@@ -426,5 +426,6 @@ export function useChatStream({
         resetStreamState,
     };
 }
+
 
 

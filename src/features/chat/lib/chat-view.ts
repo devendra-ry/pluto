@@ -1,4 +1,4 @@
-import { type Attachment } from '@/lib/types';
+import { type Attachment } from '@/shared/core/types';
 
 export interface ChatViewMessage {
     id: string;
@@ -10,3 +10,4 @@ export interface ChatViewMessage {
 }
 
 export type RetryMode = 'chat' | 'search' | 'image' | 'video';
+

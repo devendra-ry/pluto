@@ -1,9 +1,9 @@
-import type { ModelConfig } from '@/lib/constants';
-import { logModelLimits } from '@/lib/providers/limits-utils';
-import { resolveChatProvider } from '@/lib/providers/provider-registry';
-import type { ResolvedModelLimits } from '@/lib/providers/provider-types';
-export type { ResolvedModelLimits } from '@/lib/providers/provider-types';
-export { logModelLimits, resolveOutputTokenCap } from '@/lib/providers/limits-utils';
+import type { ModelConfig } from '@/shared/core/constants';
+import { logModelLimits } from '@/server/providers/limits-utils';
+import { resolveChatProvider } from '@/server/providers/provider-registry';
+import type { ResolvedModelLimits } from '@/server/providers/provider-types';
+export type { ResolvedModelLimits } from '@/server/providers/provider-types';
+export { logModelLimits, resolveOutputTokenCap } from '@/server/providers/limits-utils';
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000;
 const DEFAULT_LIMITS_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -74,3 +74,4 @@ export async function resolveModelLimits(model: string, modelConfig: ModelConfig
     setCachedLimits(cacheKey, finalLimits);
     return finalLimits;
 }
+

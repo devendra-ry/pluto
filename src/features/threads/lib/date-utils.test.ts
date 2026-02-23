@@ -20,7 +20,7 @@ test('groupThreadsByDate', async (t) => {
     // Set "Now" to Wednesday, October 11, 2023 12:00:00 UTC
     // Week (Sunday start): Oct 8 - Oct 14
     const NOW = new Date('2023-10-11T12:00:00Z').getTime();
-    t.mock.timers.enable({ now: NOW });
+    t.mock.timers.enable({ apis: ['Date'], now: NOW });
 
     await t.test('should return empty array for empty input', () => {
         const result = groupThreadsByDate([]);
@@ -120,7 +120,7 @@ test('formatThreadDate', async (t) => {
     // Set "Now" to Wednesday, October 11, 2023 12:00:00 UTC
     // Week (Sunday start): Oct 8 - Oct 14
     const NOW = new Date('2023-10-11T12:00:00Z').getTime();
-    t.mock.timers.enable({ now: NOW });
+    t.mock.timers.enable({ apis: ['Date'], now: NOW });
 
     await t.test('should format today as time', () => {
         // Today at 10:30 UTC

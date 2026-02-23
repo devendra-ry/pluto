@@ -24,7 +24,7 @@ import { useThreads, deleteThread, toggleThreadPin } from '@/features/threads/ho
 import { type Thread } from '@/features/threads/hooks/use-threads';
 import { groupThreadsByDate } from '@/features/threads/lib/date-utils';
 import { useDebouncedValue } from '@/shared/hooks/use-debounce';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/core/utils';
 import { useToast } from '@/components/ui/toast';
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
@@ -513,6 +513,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
 });
 
 export { Sidebar };
+
 
 
 

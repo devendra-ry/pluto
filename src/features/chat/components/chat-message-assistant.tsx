@@ -9,8 +9,8 @@ import Image from 'next/image';
 import { Copy, RefreshCcw, GitBranch, ChevronDown, Check, Brain, Loader2 } from 'lucide-react';
 import { useState, type ComponentProps } from 'react';
 import { useToast } from '@/components/ui/toast';
-import { cn } from '@/lib/utils';
-import { type Attachment } from '@/lib/types';
+import { cn } from '@/shared/core/utils';
+import { type Attachment } from '@/shared/core/types';
 import { isLegacyAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
 import { preprocessLaTeX } from '@/features/chat/lib/latex-utils';
 import { ActionIcon } from './chat-action-icon';
@@ -261,3 +261,4 @@ export function AssistantMessage({
         </div>
     );
 }
+

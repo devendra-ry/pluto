@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { AttachmentSchema } from '@/lib/types';
+import { AttachmentSchema } from '@/shared/core/types';
 
 export const ImageGenerateRequestSchema = z.object({
     threadId: z.string().trim().min(1, 'threadId is required'),
@@ -33,3 +33,4 @@ export const UploadCleanupRequestSchema = z.object({
 });
 
 export type UploadCleanupRequest = z.infer<typeof UploadCleanupRequestSchema>;
+

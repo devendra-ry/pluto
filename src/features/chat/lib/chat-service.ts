@@ -1,4 +1,4 @@
-import { type Attachment, type ChatMessage, type ReasoningEffort } from '@/lib/types';
+import { type Attachment, type ChatMessage, type ReasoningEffort } from '@/shared/core/types';
 
 export interface ChatStreamParams {
     messages: ChatMessage[];
@@ -204,3 +204,4 @@ export class ChatService {
 }
 
 export const chatService = new ChatService();
+

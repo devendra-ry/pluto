@@ -1,5 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
-import { publicEnv } from "@/lib/env/public";
+import { publicEnv } from "@/shared/config/public";
 import { type NextRequest, NextResponse } from "next/server";
 import type { Database } from "@/utils/supabase/database.types";
 
@@ -68,3 +68,4 @@ export const updateSession = async (request: NextRequest) => {
 
     return supabaseResponse
 };
+

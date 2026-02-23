@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { type Attachment } from '@/lib/types';
+import { type Attachment } from '@/shared/core/types';
 import { UserMessage } from './chat-message-user';
 import { AssistantMessage } from './chat-message-assistant';
 
@@ -57,3 +57,4 @@ export const ChatMessage = memo(function ChatMessage({
         />
     );
 });
+

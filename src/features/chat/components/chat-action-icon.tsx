@@ -1,7 +1,7 @@
 'use client';
 
 import { type LucideIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/core/utils';
 
 export interface ActionIconProps {
     icon: LucideIcon;
@@ -30,3 +30,4 @@ export function ActionIcon({ icon: Icon, title, onClick, className }: ActionIcon
         </div>
     );
 }
+

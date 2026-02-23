@@ -1,14 +1,19 @@
 import 'server-only';
 
-import { lookup } from 'node:dns';
+import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { Agent, fetch as undiciFetch } from 'undici';
 
-import { serverEnv } from '@/lib/env/server';
+import { serverEnv } from '@/shared/config/server';
 
-let fetchImplementation = undiciFetch;
+type FetchImplementation = (
+    input: URL | RequestInfo | string,
+    init?: RequestInit,
+) => Promise<Response>;
 
-export function _setFetchImplementation(fn: typeof undiciFetch) {
+let fetchImplementation: FetchImplementation = (input, init) =>
+    fetch(input as RequestInfo | URL, init);
+
+export function _setFetchImplementation(fn: FetchImplementation) {
     fetchImplementation = fn;
 }
 
@@ -120,43 +125,24 @@ function isHostAllowed(hostname: string, allowedHostPatterns: string[]) {
     });
 }
 
-// Create a safe agent with custom lookup that blocks private IPs
-const safeAgent = new Agent({
-    connect: {
-        lookup: (hostname, options, callback) => {
-            let cb = callback;
-            let opts = options;
-            if (typeof options === 'function') {
-                cb = options;
-                opts = {};
-            }
+async function assertHostnameResolvesPublicIp(hostname: string) {
+    let records: Array<{ address: string; family: number }>;
+    try {
+        records = await lookup(hostname, { all: true, verbatim: true });
+    } catch {
+        throw new Error(`Failed to resolve remote host: ${hostname}`);
+    }
 
-            lookup(hostname, opts, (err, addresses, family) => {
-                if (err) return cb(err, addresses, family);
+    if (!records.length) {
+        throw new Error(`Failed to resolve remote host: ${hostname}`);
+    }
 
-                const checkAddress = (addr: string) => {
-                    if (isPrivateIpAddress(addr)) {
-                        return new Error(`Remote host resolves to a private network address: ${hostname}`);
-                    }
-                    return null;
-                };
-
-                if (Array.isArray(addresses)) {
-                    for (const addr of addresses) {
-                        const ip = typeof addr === 'string' ? addr : addr.address;
-                        const error = checkAddress(ip);
-                        if (error) return cb(error, addresses, family);
-                    }
-                } else {
-                    const error = checkAddress(addresses as string);
-                    if (error) return cb(error, addresses, family);
-                }
-
-                cb(null, addresses, family);
-            });
-        },
-    },
-});
+    for (const record of records) {
+        if (isPrivateIpAddress(record.address)) {
+            throw new Error(`Remote host resolves to a private network address: ${hostname}`);
+        }
+    }
+}
 
 export async function assertSafeRemoteUrl(rawUrl: string, allowedHostPatterns: string[]) {
     let parsed: URL;
@@ -178,7 +164,8 @@ export async function assertSafeRemoteUrl(rawUrl: string, allowedHostPatterns: s
         throw new Error(`Remote host is not allowed: ${hostname}`);
     }
 
-    // DNS resolution is now handled by the custom Agent lookup
+    // Resolve hostnames before each request/redirect hop and block private IPs.
+    await assertHostnameResolvesPublicIp(hostname);
 
     return parsed;
 }
@@ -199,13 +186,11 @@ export async function fetchWithSsrfGuard(
     let currentUrl = rawUrl;
     for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
         const safeUrl = await assertSafeRemoteUrl(currentUrl, allowedHostPatterns);
-        // Use undiciFetch with the safeAgent
-        const response = (await fetchImplementation(safeUrl, {
+        const response = await fetchImplementation(safeUrl, {
             method: 'GET',
             signal: options.signal,
             redirect: 'manual',
-            dispatcher: safeAgent,
-        })) as unknown as Response;
+        });
 
         if (response.status >= 300 && response.status < 400) {
             if (redirectCount === maxRedirects) {
@@ -224,3 +209,4 @@ export async function fetchWithSsrfGuard(
 
     throw new Error('Remote media request failed due to redirect loop');
 }
+

@@ -3,8 +3,8 @@
 import { useRef, useEffect, forwardRef, useState, useImperativeHandle, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ArrowUp, Square, Paperclip } from 'lucide-react';
-import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, SEARCH_ENABLED_MODELS, isImageGenerationModel } from '@/lib/constants';
-import { type Attachment, type ReasoningEffort } from '@/lib/types';
+import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, SEARCH_ENABLED_MODELS, isImageGenerationModel } from '@/shared/core/constants';
+import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
 import { ModelSelector } from '@/features/chat/components/model-selector';
 import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment, isPdfAttachment, isSupportedAttachmentMimeType, isTextAttachment } from '@/features/attachments/lib/attachments';
 import { startUploadFileForThread } from '@/features/uploads/lib/uploads';
@@ -629,3 +629,4 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     );
 });
 ChatInput.displayName = 'ChatInput';
+

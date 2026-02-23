@@ -12,8 +12,8 @@ import {
     DropdownMenuSubTrigger,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { IMAGE_GENERATION_MODELS } from '@/lib/constants';
-import { cn } from '@/lib/utils';
+import { IMAGE_GENERATION_MODELS } from '@/shared/core/constants';
+import { cn } from '@/shared/core/utils';
 import { ChatSubmitMode } from './chat-input-types';
 
 const MODE_OPTIONS: Array<{
@@ -119,3 +119,4 @@ export function ModeSelector({
         </DropdownMenu>
     );
 }
+

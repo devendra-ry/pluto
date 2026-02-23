@@ -4,9 +4,9 @@ import { useEffect, useRef, type MutableRefObject } from 'react';
 
 import { type ChatInputHandle } from '@/features/chat/components/chat-input';
 import { claimPendingGenerationJob, completeGenerationJob } from '@/features/chat/hooks/use-generation-jobs';
-import { isImageGenerationModel } from '@/lib/constants';
+import { isImageGenerationModel } from '@/shared/core/constants';
 import { type ChatViewMessage } from '@/features/chat/lib/chat-view';
-import { type ReasoningEffort } from '@/lib/types';
+import { type ReasoningEffort } from '@/shared/core/types';
 
 interface UsePendingGenerationParams {
     chatId: string;
@@ -129,3 +129,4 @@ export function usePendingGeneration({
         applyPendingReasoningEffort,
     ]);
 }
+

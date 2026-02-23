@@ -3,7 +3,7 @@
 import { BookOpen, Code, GraduationCap, Wand2, type LucideIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { CATEGORIES, SUGGESTED_PROMPTS } from '@/lib/constants';
+import { CATEGORIES, SUGGESTED_PROMPTS } from '@/shared/core/constants';
 
 interface ChatEmptyStateProps {
     onPromptClick: (prompt: string) => void;
@@ -63,3 +63,4 @@ export function ChatEmptyState({ onPromptClick }: ChatEmptyStateProps) {
         </div>
     );
 }
+

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, createContext, useContext, useCallback } from 'react';
-import { cn } from '@/lib/utils';
+import { cn } from '@/shared/core/utils';
 import { X, AlertCircle, CheckCircle, Info } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'info';
@@ -91,3 +91,4 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
         </div>
     );
 }
+

@@ -1,6 +1,6 @@
 import type { PreparedChatMessage } from '@/features/chat/lib/chat-attachments';
-import type { ModelConfig } from '@/lib/constants';
-import type { ReasoningEffort } from '@/lib/types';
+import type { ModelConfig } from '@/shared/core/constants';
+import type { ReasoningEffort } from '@/shared/core/types';
 
 export type LimitsSource = 'google' | 'openrouter' | 'chutes' | 'fallback';
 
@@ -43,3 +43,4 @@ export interface ChatProvider {
     getStream: (params: ProviderGetStreamParams) => Promise<ReadableStream>;
     resolveModelLimits: (params: ProviderResolveLimitsParams) => Promise<ResolvedModelLimits | null>;
 }
+

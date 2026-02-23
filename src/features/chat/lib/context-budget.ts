@@ -1,8 +1,8 @@
 import type { PreparedChatMessage } from '@/features/chat/lib/chat-attachments';
-import type { ResolvedModelLimits } from '@/lib/providers/model-limits';
-import type { ChatMessage } from '@/lib/types';
+import type { ResolvedModelLimits } from '@/server/providers/model-limits';
+import type { ChatMessage } from '@/shared/core/types';
 
-import { resolveOutputTokenCap } from '@/lib/providers/model-limits';
+import { resolveOutputTokenCap } from '@/server/providers/model-limits';
 
 const DEFAULT_SAFETY_MARGIN_TOKENS = 2048;
 const MIN_INPUT_BUDGET_TOKENS = 2048;
@@ -173,3 +173,4 @@ export function isContextOverflowError(error: unknown) {
 
     return patterns.some((pattern) => normalized.includes(pattern));
 }
+

@@ -24,10 +24,10 @@ import {
     isImageGenerationModel,
     SEARCH_ENABLED_MODELS,
     VIDEO_GENERATION_MODEL,
-} from '@/lib/constants';
+} from '@/shared/core/constants';
 import { isImageAttachment } from '@/features/attachments/lib/attachments';
 import { type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
-import { type Attachment } from '@/lib/types';
+import { type Attachment } from '@/shared/core/types';
 
 interface ChatPageClientProps {
     chatId: string;
@@ -477,6 +477,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         </div>
     );
 }
+
 
 
 

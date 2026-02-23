@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 
-import { serverEnv } from '@/lib/env/server';
+import { serverEnv } from '@/shared/config/server';
 import { createClient } from '@/utils/supabase/server';
 
 export class ApiRequestError extends Error {
@@ -109,3 +109,4 @@ export function toJsonErrorResponse(error: unknown) {
     }
     return null;
 }
+

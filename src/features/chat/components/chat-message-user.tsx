@@ -5,8 +5,8 @@ import Image from 'next/image';
 import { Copy, RefreshCcw, SquarePen, GitBranch, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
-import { cn } from '@/lib/utils';
-import { type Attachment } from '@/lib/types';
+import { cn } from '@/shared/core/utils';
+import { type Attachment } from '@/shared/core/types';
 import { isLegacyAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
 import { ActionIcon } from './chat-action-icon';
 
@@ -168,3 +168,4 @@ export function UserMessage({
         </div>
     );
 }
+

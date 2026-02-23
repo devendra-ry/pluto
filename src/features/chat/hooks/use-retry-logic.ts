@@ -4,7 +4,7 @@ import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction 
 
 import { type ChatSubmitMode } from '@/features/chat/components/chat-input';
 import { deleteMessagesByIds, getThreadMessages, type RefreshMessagesResult } from '@/features/messages/hooks/use-messages';
-import { IMAGE_GENERATION_MODEL, isImageGenerationModel, SEARCH_ENABLED_MODELS, VIDEO_GENERATION_MODEL } from '@/lib/constants';
+import { IMAGE_GENERATION_MODEL, isImageGenerationModel, SEARCH_ENABLED_MODELS, VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
 import { type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
 
 type ToastType = 'success' | 'error' | 'info';
@@ -283,4 +283,5 @@ export function useRetryLogic({
         persistRetryModeHint,
     };
 }
+
 

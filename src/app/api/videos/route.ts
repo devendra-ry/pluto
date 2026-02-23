@@ -1,16 +1,16 @@
 import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/features/attachments/lib/attachment-route-utils';
 import { createSignedAttachmentUrl } from '@/features/attachments/lib/attachment-signed-url';
-import { VIDEO_GENERATION_MODEL } from '@/lib/constants';
+import { VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
 import { VideoGenerateRequestSchema } from '@/shared/validation/request-validation';
-import { type Attachment } from '@/lib/types';
+import { type Attachment } from '@/shared/core/types';
 import {
     CHUTES_MISSING_API_KEY_MESSAGE,
     getChutesApiKey,
     getChutesVideoApiUrlCandidates,
     getChutesWanI2vNegativePrompt,
-} from '@/lib/chutes';
+} from '@/server/providers/chutes';
 import { assertThreadOwnership } from '@/features/threads/server/thread-ownership';
-import { fetchWithSsrfGuard } from '@/lib/ssrf-guard';
+import { fetchWithSsrfGuard } from '@/server/security/ssrf-guard';
 import { assertJsonRequest, assertValidPostOrigin, parseJsonObjectRequest, requireUser, toJsonErrorResponse } from '@/utils/api-security';
 import { assertRateLimit, videoRateLimiter } from '@/utils/rate-limit';
 import { createClient } from '@/utils/supabase/server';
@@ -358,4 +358,5 @@ export async function POST(req: Request) {
         return jsonResponse({ error: message }, 500);
     }
 }
+
 
