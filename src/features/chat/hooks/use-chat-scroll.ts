@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { type VirtuosoHandle } from 'react-virtuoso';
 
-import { scheduleFrame } from '@/lib/animation-frame';
+import { scheduleFrame } from '@/shared/lib/animation-frame';
 
 interface UseChatScrollParams {
     chatId: string;

@@ -9,7 +9,7 @@ import { ModelSelector } from '@/features/chat/components/model-selector';
 import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment, isPdfAttachment, isSupportedAttachmentMimeType, isTextAttachment } from '@/features/attachments/lib/attachments';
 import { startUploadFileForThread } from '@/features/uploads/lib/uploads';
 import { useToast } from '@/components/ui/toast';
-import { scheduleFrame } from '@/lib/animation-frame';
+import { scheduleFrame } from '@/shared/lib/animation-frame';
 import { ChatSubmitMode, ChatSubmitOptions, LocalAttachmentItem, ChatInputHandle, LocalAttachmentStatus } from './chat-input/chat-input-types';
 import { AttachmentList } from './chat-input/attachment-list';
 import { ModeSelector } from './chat-input/mode-selector';

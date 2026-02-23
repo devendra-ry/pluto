@@ -12,7 +12,7 @@ import {
 
 import { addMessage } from '@/features/messages/hooks/use-messages';
 import { touchThread, updateThreadTitleIfNewChat } from '@/features/threads/hooks/use-threads';
-import { cancelScheduledFrame, scheduleFrame, type ScheduledFrame } from '@/lib/animation-frame';
+import { cancelScheduledFrame, scheduleFrame, type ScheduledFrame } from '@/shared/lib/animation-frame';
 import { chatService } from '@/features/chat/lib/chat-service';
 import { AVAILABLE_MODELS, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/lib/constants';
 import { type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
