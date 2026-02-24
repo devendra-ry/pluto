@@ -25,6 +25,9 @@ export const ChatResponseStatsSchema = z.object({
     seconds: z.number().nonnegative(),
     tokensPerSecond: z.number().nonnegative(),
     ttfbSeconds: z.number().nonnegative().optional(),
+    inputTokens: z.number().int().nonnegative().optional(),
+    totalTokens: z.number().int().nonnegative().optional(),
+    source: z.enum(['estimated', 'provider']).optional(),
 });
 export type ChatResponseStats = z.infer<typeof ChatResponseStatsSchema>;
 

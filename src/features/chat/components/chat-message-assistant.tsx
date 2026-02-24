@@ -81,6 +81,7 @@ export function AssistantMessage({
             seconds: Number(stats.seconds.toFixed(1)),
             tokensPerSecond: Number(stats.tokensPerSecond.toFixed(1)),
             ttfbSeconds: typeof stats.ttfbSeconds === 'number' ? Number(stats.ttfbSeconds.toFixed(1)) : null,
+            source: stats.source ?? 'estimated',
         }
         : null;
 
@@ -231,6 +232,7 @@ export function AssistantMessage({
 
                 {formattedStats && (
                     <div className="mt-2 text-xs text-zinc-500/90">
+                        {formattedStats.source === 'estimated' ? '~' : ''}
                         {formattedStats.outputTokens} tok
                         {' • '}
                         {formattedStats.seconds}s

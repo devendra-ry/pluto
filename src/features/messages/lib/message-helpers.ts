@@ -76,6 +76,9 @@ export function chatResponseStatsFromUnknown(value: unknown): ChatResponseStats 
     const seconds = record.seconds;
     const tokensPerSecond = record.tokensPerSecond;
     const ttfbSeconds = record.ttfbSeconds;
+    const inputTokens = record.inputTokens;
+    const totalTokens = record.totalTokens;
+    const source = record.source;
 
     if (
         typeof outputTokens !== 'number'
@@ -100,11 +103,36 @@ export function chatResponseStatsFromUnknown(value: unknown): ChatResponseStats 
         return undefined;
     }
 
+    if (inputTokens !== undefined && (
+        typeof inputTokens !== 'number'
+        || !Number.isFinite(inputTokens)
+        || inputTokens < 0
+        || !Number.isInteger(inputTokens)
+    )) {
+        return undefined;
+    }
+
+    if (totalTokens !== undefined && (
+        typeof totalTokens !== 'number'
+        || !Number.isFinite(totalTokens)
+        || totalTokens < 0
+        || !Number.isInteger(totalTokens)
+    )) {
+        return undefined;
+    }
+
+    if (source !== undefined && source !== 'estimated' && source !== 'provider') {
+        return undefined;
+    }
+
     return {
         outputTokens,
         seconds,
         tokensPerSecond,
         ttfbSeconds: typeof ttfbSeconds === 'number' ? ttfbSeconds : undefined,
+        inputTokens: typeof inputTokens === 'number' ? inputTokens : undefined,
+        totalTokens: typeof totalTokens === 'number' ? totalTokens : undefined,
+        source: source === 'provider' ? 'provider' : (source === 'estimated' ? 'estimated' : undefined),
     };
 }
 

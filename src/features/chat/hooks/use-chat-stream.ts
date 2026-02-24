@@ -60,6 +60,9 @@ function areStatsEqual(left: ChatResponseStats | undefined, right: ChatResponseS
         && left.seconds === right.seconds
         && left.tokensPerSecond === right.tokensPerSecond
         && left.ttfbSeconds === right.ttfbSeconds
+        && left.inputTokens === right.inputTokens
+        && left.totalTokens === right.totalTokens
+        && left.source === right.source
     );
 }
 
@@ -254,6 +257,7 @@ export function useChatStream({
         let firstTokenAt: number | null = null;
         let fullContent = '';
         let fullReasoning = '';
+        let providerUsage: { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' } | null = null;
         let lastFlushedContent = '';
         let lastFlushedReasoning = '';
         let lastFlushedStats: ChatResponseStats | undefined;
@@ -264,10 +268,18 @@ export function useChatStream({
         const buildReplyStats = (): ChatResponseStats | undefined => {
             if (firstTokenAt === null) return undefined;
             const seconds = Math.max((performance.now() - firstTokenAt) / 1000, 0.001);
-            const outputTokens = estimateOutputTokens(fullContent, fullReasoning);
+            const outputTokens = providerUsage?.outputTokens ?? estimateOutputTokens(fullContent, fullReasoning);
             const tokensPerSecond = outputTokens / seconds;
             const ttfbSeconds = Math.max((firstTokenAt - requestStartedAt) / 1000, 0);
-            return { outputTokens, seconds, tokensPerSecond, ttfbSeconds };
+            return {
+                outputTokens,
+                seconds,
+                tokensPerSecond,
+                ttfbSeconds,
+                inputTokens: providerUsage?.inputTokens,
+                totalTokens: providerUsage?.totalTokens,
+                source: providerUsage?.source ?? 'estimated',
+            };
         };
 
         const flushAssistantUpdate = () => {
@@ -441,6 +453,10 @@ export function useChatStream({
                     }
                     dispatch({ type: 'SET_THINKING', thinking: false });
                     fullContent += chunk.value;
+                    hasPendingAssistantUpdate = true;
+                    await waitForFrameFlush();
+                } else if (chunk.type === 'usage') {
+                    providerUsage = chunk.value;
                     hasPendingAssistantUpdate = true;
                     await waitForFrameFlush();
                 }

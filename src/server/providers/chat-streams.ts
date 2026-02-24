@@ -10,6 +10,11 @@ import type { RequestTokenEstimates } from '@/server/providers/provider-types';
 import type { ReasoningEffort } from '@/shared/core/types';
 import { sharedTextEncoder } from '@/shared/lib/text-encoder';
 
+function toNonNegativeInt(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
+    return Math.floor(value);
+}
+
 export function buildGoogleContents(messages: PreparedChatMessage[]) {
     return messages.map((message) => {
         const parts: Array<Record<string, unknown>> = [];
@@ -112,6 +117,7 @@ export async function getChutesStream(
         model,
         messages: buildOpenAICompatibleMessages(messages, systemPrompt),
         stream: true,
+        stream_options: { include_usage: true },
         temperature: 1.0,
         top_p: 0.95,
         max_tokens: resolveOutputTokenCap(maxOutputTokens),
@@ -211,8 +217,20 @@ export async function getGoogleStream(
     return new ReadableStream({
         async start(controller) {
             try {
+                let usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | null = null;
                 for await (const chunk of response) {
                     if (signal?.aborted) break;
+
+                    const usageMetadata = (chunk as { usageMetadata?: unknown }).usageMetadata;
+                    if (usageMetadata && typeof usageMetadata === 'object') {
+                        const usageRecord = usageMetadata as Record<string, unknown>;
+                        const inputTokens = toNonNegativeInt(usageRecord.promptTokenCount);
+                        const outputTokens = toNonNegativeInt(usageRecord.candidatesTokenCount);
+                        const totalTokens = toNonNegativeInt(usageRecord.totalTokenCount);
+                        if (inputTokens !== undefined || outputTokens !== undefined || totalTokens !== undefined) {
+                            usage = { inputTokens, outputTokens, totalTokens };
+                        }
+                    }
 
                     const candidate = chunk.candidates?.[0];
                     if (!candidate?.content?.parts) continue;
@@ -223,6 +241,18 @@ export async function getGoogleStream(
                     }
                 }
                 if (!signal?.aborted) {
+                    if (usage) {
+                        const usageEvent = JSON.stringify({
+                            meta: 'usage',
+                            usage: {
+                                source: 'provider',
+                                inputTokens: usage.inputTokens,
+                                outputTokens: usage.outputTokens,
+                                totalTokens: usage.totalTokens,
+                            }
+                        });
+                        controller.enqueue(sharedTextEncoder.encode(`data: ${usageEvent}\n\n`));
+                    }
                     controller.enqueue(sharedTextEncoder.encode('data: [DONE]\n\n'));
                     controller.close();
                 }
@@ -270,6 +300,7 @@ export async function getOpenRouterStream(
             stream: true,
             max_tokens: requestMaxTokens,
             reasoning: { effort: reasoningEffort },
+            stream_options: { include_usage: true },
         }),
         signal,
     });

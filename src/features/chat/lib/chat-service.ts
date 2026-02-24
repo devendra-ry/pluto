@@ -61,6 +61,7 @@ export interface ImageVideoGenerationParams {
 export type StreamChunk =
     | { type: 'content'; value: string }
     | { type: 'reasoning'; value: string }
+    | { type: 'usage'; value: { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' } }
     | { type: 'error'; value: string }
     | { type: 'done' };
 
@@ -87,6 +88,67 @@ function isAttachment(value: unknown): value is Attachment {
         typeof record.path === 'string' &&
         typeof record.url === 'string'
     );
+}
+
+function readNonNegativeInt(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
+    return Math.floor(value);
+}
+
+function parseUsageEvent(data: string): { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' } | null {
+    if (
+        !data.includes('"usage"')
+        && !data.includes('"usageMetadata"')
+        && !data.includes('"outputTokens"')
+        && !data.includes('"completion_tokens"')
+        && !data.includes('"tokens_completion"')
+        && !data.includes('"tokens_prompt"')
+    ) {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(data) as Record<string, unknown>;
+        const normalizedUsage = (
+            parsed.meta === 'usage'
+            && parsed.usage
+            && typeof parsed.usage === 'object'
+        ) ? parsed.usage as Record<string, unknown> : null;
+
+        const usage = normalizedUsage
+            ?? ((parsed.usage && typeof parsed.usage === 'object') ? parsed.usage as Record<string, unknown> : null)
+            ?? ((parsed.usageMetadata && typeof parsed.usageMetadata === 'object') ? parsed.usageMetadata as Record<string, unknown> : null)
+            // OpenRouter may emit usage fields at top level.
+            ?? parsed;
+        if (!usage) return null;
+
+        const inputTokens =
+            readNonNegativeInt(usage.inputTokens) ??
+            readNonNegativeInt(usage.prompt_tokens) ??
+            readNonNegativeInt(usage.promptTokenCount) ??
+            readNonNegativeInt(usage.tokens_prompt) ??
+            readNonNegativeInt(usage.native_tokens_prompt);
+        let outputTokens =
+            readNonNegativeInt(usage.outputTokens) ??
+            readNonNegativeInt(usage.completion_tokens) ??
+            readNonNegativeInt(usage.candidatesTokenCount) ??
+            readNonNegativeInt(usage.tokens_completion) ??
+            readNonNegativeInt(usage.native_tokens_completion);
+        const totalTokens =
+            readNonNegativeInt(usage.totalTokens) ??
+            readNonNegativeInt(usage.total_tokens) ??
+            readNonNegativeInt(usage.totalTokenCount);
+
+        if (outputTokens === undefined && inputTokens !== undefined && totalTokens !== undefined) {
+            const inferred = totalTokens - inputTokens;
+            if (inferred >= 0) outputTokens = inferred;
+        }
+        if (outputTokens === undefined) return null;
+
+        return { outputTokens, inputTokens, totalTokens, source: 'provider' };
+    } catch {
+        return null;
+    }
 }
 
 export class ChatService {
@@ -251,6 +313,11 @@ export class ChatService {
                                     const normalizedStreamError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
                                     throw new Error(`STREAM_ERROR:${normalizedStreamError}`);
                                 }
+                            }
+
+                            const usage = parseUsageEvent(data);
+                            if (usage) {
+                                yield { type: 'usage', value: usage };
                             }
 
                             // Hot path: extract delta fields directly via indexOf

@@ -33,6 +33,9 @@ function areReplyStatsEqual(left: ChatResponseStats | undefined, right: ChatResp
         && left.seconds === right.seconds
         && left.tokensPerSecond === right.tokensPerSecond
         && left.ttfbSeconds === right.ttfbSeconds
+        && left.inputTokens === right.inputTokens
+        && left.totalTokens === right.totalTokens
+        && left.source === right.source
     );
 }
 

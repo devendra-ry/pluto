@@ -83,6 +83,127 @@ describe('ChatService', () => {
         assert.deepStrictEqual(chunks[1], { type: 'reasoning', value: 'Thinking' });
     });
 
+    test('streamChat yields provider usage chunks when present', async () => {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+            start(controller) {
+                const chunks = [
+                    'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n',
+                    'data: {"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}}\n\n',
+                    'data: [DONE]\n\n'
+                ];
+                for (const chunk of chunks) {
+                    controller.enqueue(encoder.encode(chunk));
+                }
+                controller.close();
+            }
+        });
+
+        fetchMock.mock.mockImplementation(async () => ({ ok: true, body: stream }));
+
+        const chunks: any[] = [];
+        for await (const chunk of chatService.streamChat({
+            messages: [],
+            model: 'm1',
+            reasoningEffort: 'low',
+            search: false
+        })) {
+            chunks.push(chunk);
+        }
+
+        assert.strictEqual(chunks.length, 2);
+        assert.deepStrictEqual(chunks[0], { type: 'content', value: 'Hello' });
+        assert.deepStrictEqual(chunks[1], {
+            type: 'usage',
+            value: {
+                outputTokens: 8,
+                inputTokens: 12,
+                totalTokens: 20,
+                source: 'provider'
+            }
+        });
+    });
+
+    test('streamChat infers output tokens for Chutes usage when completion_tokens is null', async () => {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+            start(controller) {
+                const chunks = [
+                    'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n',
+                    'data: {"usage":{"prompt_tokens":18,"completion_tokens":null,"total_tokens":31}}\n\n',
+                    'data: [DONE]\n\n'
+                ];
+                for (const chunk of chunks) {
+                    controller.enqueue(encoder.encode(chunk));
+                }
+                controller.close();
+            }
+        });
+
+        fetchMock.mock.mockImplementation(async () => ({ ok: true, body: stream }));
+
+        const chunks: any[] = [];
+        for await (const chunk of chatService.streamChat({
+            messages: [],
+            model: 'm1',
+            reasoningEffort: 'low',
+            search: false
+        })) {
+            chunks.push(chunk);
+        }
+
+        assert.strictEqual(chunks.length, 2);
+        assert.deepStrictEqual(chunks[0], { type: 'content', value: 'Hello' });
+        assert.deepStrictEqual(chunks[1], {
+            type: 'usage',
+            value: {
+                outputTokens: 13,
+                inputTokens: 18,
+                totalTokens: 31,
+                source: 'provider'
+            }
+        });
+    });
+
+    test('streamChat parses OpenRouter top-level usage payload fields', async () => {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+            start(controller) {
+                const chunks = [
+                    'data: {"id":0,"generation_id":"gen-1","provider_name":"Arcee AI","tokens_prompt":19,"tokens_completion":1649,"native_tokens_prompt":25,"native_tokens_completion":1617,"native_tokens_reasoning":696}\n\n',
+                    'data: [DONE]\n\n'
+                ];
+                for (const chunk of chunks) {
+                    controller.enqueue(encoder.encode(chunk));
+                }
+                controller.close();
+            }
+        });
+
+        fetchMock.mock.mockImplementation(async () => ({ ok: true, body: stream }));
+
+        const chunks: any[] = [];
+        for await (const chunk of chatService.streamChat({
+            messages: [],
+            model: 'm1',
+            reasoningEffort: 'low',
+            search: false
+        })) {
+            chunks.push(chunk);
+        }
+
+        assert.strictEqual(chunks.length, 1);
+        assert.deepStrictEqual(chunks[0], {
+            type: 'usage',
+            value: {
+                outputTokens: 1649,
+                inputTokens: 19,
+                totalTokens: undefined,
+                source: 'provider'
+            }
+        });
+    });
+
     test('streamChat handles errors', async () => {
         const mockResponse = {
             ok: false,
@@ -93,7 +214,6 @@ describe('ChatService', () => {
         fetchMock.mock.mockImplementation(async () => mockResponse);
 
         try {
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             for await (const _ of chatService.streamChat({
                 messages: [],
                 model: 'm1',
