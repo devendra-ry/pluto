@@ -209,7 +209,12 @@ export function useChatStream({
             reasoning: '',
             model_id: activeModelId,
         };
-        setMessages(prev => [...prev, assistantMsg]);
+        // Store the index once — the assistant message is always appended at the end.
+        let assistantMsgIdx = -1;
+        setMessages(prev => {
+            assistantMsgIdx = prev.length;
+            return [...prev, assistantMsg];
+        });
 
         const updateTitleIfNeeded = async () => {
             if (currentMessages.length > 0) {
@@ -230,6 +235,8 @@ export function useChatStream({
 
         let fullContent = '';
         let fullReasoning = '';
+        let lastFlushedContent = '';
+        let lastFlushedReasoning = '';
         let hasPendingAssistantUpdate = false;
         let streamFlushFrame: ScheduledFrame | null = null;
         let requestFailed = false;
@@ -237,18 +244,38 @@ export function useChatStream({
 
         const flushAssistantUpdate = () => {
             if (!hasPendingAssistantUpdate) return;
+            // Guard: skip if content hasn't actually changed since last flush.
+            if (fullContent === lastFlushedContent && fullReasoning === lastFlushedReasoning) {
+                hasPendingAssistantUpdate = false;
+                return;
+            }
             hasPendingAssistantUpdate = false;
+            lastFlushedContent = fullContent;
+            lastFlushedReasoning = fullReasoning;
             setMessages((prev) => {
-                const updated = [...prev];
-                const msgIdx = updated.findIndex(m => m.id === assistantMsgId);
-                if (msgIdx !== -1) {
-                    updated[msgIdx] = {
-                        ...updated[msgIdx],
-                        content: fullContent,
-                        reasoning: fullReasoning,
-                        model_id: activeModelId,
-                    };
+                // Use the stored index for O(1) lookup.
+                // Fallback to search only if the index is stale (e.g. messages were deleted).
+                let idx = assistantMsgIdx;
+                if (idx < 0 || idx >= prev.length || prev[idx].id !== assistantMsgId) {
+                    idx = prev.findIndex(m => m.id === assistantMsgId);
+                    if (idx !== -1) assistantMsgIdx = idx;
                 }
+                if (idx === -1) return prev;
+
+                const existing = prev[idx];
+                // Skip if somehow the values are already identical (defensive).
+                if (existing.content === fullContent && existing.reasoning === fullReasoning && existing.model_id === activeModelId) {
+                    return prev;
+                }
+
+                // Reuse the array — only replace the single element that changed.
+                const updated = prev.slice();
+                updated[idx] = {
+                    ...existing,
+                    content: fullContent,
+                    reasoning: fullReasoning,
+                    model_id: activeModelId,
+                };
                 return updated;
             });
         };
