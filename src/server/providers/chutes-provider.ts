@@ -1,12 +1,11 @@
 import { getChutesApiKey } from '@/server/providers/chutes';
-import { buildOpenAICompatibleMessages, getChutesStream } from '@/server/providers/chat-streams';
+import { getChutesStream } from '@/server/providers/chat-streams';
 import { logModelLimits, toPositiveInt } from '@/server/providers/limits-utils';
 import type { ChatProvider } from '@/server/providers/provider-types';
 
 export const chutesProvider: ChatProvider = {
     id: 'chutes',
     needsThinkTagTransform: true,
-    buildMessages: ({ messages, systemPrompt }) => buildOpenAICompatibleMessages(messages, systemPrompt),
     getStream: async ({
         model,
         messages,

@@ -3,16 +3,11 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 
 import { getRedisClient, redisKey } from '@/server/redis/client';
+import { readPositiveInt } from '@/shared/lib/read-positive-int';
 
 export interface RedisLockHandle {
     slot: number;
     release: () => Promise<void>;
-}
-
-function readPositiveInt(value: string | undefined, fallback: number) {
-    const parsed = Number.parseInt(value ?? '', 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-    return parsed;
 }
 
 function getDefaultLockTtlMs() {

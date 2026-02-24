@@ -24,14 +24,12 @@ import {
     type ChatStreamEventWriter,
 } from '@/server/redis/chat-stream-cache';
 import { recordAbuseSignal } from '@/server/security/abuse-protection';
+import { sharedTextEncoder } from '@/shared/lib/text-encoder';
 import type { AuthenticatedContext } from '@/utils/route-handler';
 
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
 const GENERIC_CHAT_ERROR_MESSAGE = 'Unable to complete request right now. Please try again.';
 const IS_DEV = process.env.NODE_ENV !== 'production';
-
-/** Module-level singleton — TextEncoder is stateless. */
-const sharedEncoder = new TextEncoder();
 
 export async function handleChatRequest(
     req: Request,
@@ -70,7 +68,7 @@ export async function handleChatRequest(
     const safeEnqueue = (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
         try {
             if (signal.aborted) return;
-            const encoded = typeof chunk === 'string' ? sharedEncoder.encode(chunk) : chunk;
+            const encoded = typeof chunk === 'string' ? sharedTextEncoder.encode(chunk) : chunk;
             controller.enqueue(encoded);
         } catch (error) {
             if (IS_DEV) {

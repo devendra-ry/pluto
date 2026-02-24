@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { Redis } from '@upstash/redis';
 
 import { getRedisClient, redisKey } from '@/server/redis/client';
+import { readPositiveInt } from '@/shared/lib/read-positive-int';
 
 const DEFAULT_IDEMPOTENCY_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_IDEMPOTENCY_LOCK_TTL_MS = 2 * 60 * 1000;
@@ -31,12 +32,6 @@ interface ExecuteIdempotentRequestOptions {
     userId: string;
     inProgressStatus?: number;
     inProgressMessage?: string;
-}
-
-function readPositiveInt(value: string | undefined, fallback: number) {
-    const parsed = Number.parseInt(value ?? '', 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-    return parsed;
 }
 
 function getIdempotencyTtlMs() {

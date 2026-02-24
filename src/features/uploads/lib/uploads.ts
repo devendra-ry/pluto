@@ -1,14 +1,7 @@
 'use client';
 
 import { type Attachment } from '@/shared/core/types';
-
-function createIdempotencyKey(prefix: string) {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-        return `${prefix}-${crypto.randomUUID()}`;
-    }
-
-    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-}
+import { createIdempotencyKey } from '@/shared/lib/idempotency';
 
 function extractErrorMessage(payload: unknown, fallback: string) {
     if (!payload || typeof payload !== 'object') return fallback;

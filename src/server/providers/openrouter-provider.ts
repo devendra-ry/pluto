@@ -1,4 +1,4 @@
-import { buildOpenAICompatibleMessages, getOpenRouterStream } from '@/server/providers/chat-streams';
+import { getOpenRouterStream } from '@/server/providers/chat-streams';
 import { serverEnv } from '@/shared/config/server';
 import { logModelLimits, toPositiveInt } from '@/server/providers/limits-utils';
 import type { ChatProvider } from '@/server/providers/provider-types';
@@ -6,7 +6,6 @@ import type { ChatProvider } from '@/server/providers/provider-types';
 export const openRouterProvider: ChatProvider = {
     id: 'openrouter',
     needsThinkTagTransform: true,
-    buildMessages: ({ messages, systemPrompt }) => buildOpenAICompatibleMessages(messages, systemPrompt),
     getStream: async ({
         model,
         messages,

@@ -2,12 +2,7 @@ import 'server-only';
 
 import { ApiRequestError } from '@/utils/api-security';
 import { getRedisClient, redisKey } from '@/server/redis/client';
-
-function readPositiveInt(value: string | undefined, fallback: number) {
-    const parsed = Number.parseInt(value ?? '', 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-    return parsed;
-}
+import { readPositiveInt } from '@/shared/lib/read-positive-int';
 
 const ABUSE_WINDOW_MS = readPositiveInt(process.env.ABUSE_SIGNAL_WINDOW_MS, 10 * 60 * 1000);
 const ABUSE_BLOCK_MS = readPositiveInt(process.env.ABUSE_BLOCK_MS, 15 * 60 * 1000);

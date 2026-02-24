@@ -15,11 +15,6 @@ export interface RequestTokenEstimates {
     estimatedInputTokensWithSystemPrompt?: number;
 }
 
-export interface ProviderBuildMessagesParams {
-    messages: PreparedChatMessage[];
-    systemPrompt?: string;
-}
-
 export interface ProviderGetStreamParams {
     model: string;
     messages: PreparedChatMessage[];
@@ -47,7 +42,6 @@ export interface ChatProvider {
      * JSON parse/stringify round-trip.
      */
     needsThinkTagTransform: boolean;
-    buildMessages: (params: ProviderBuildMessagesParams) => unknown;
     getStream: (params: ProviderGetStreamParams) => Promise<ReadableStream>;
     resolveModelLimits: (params: ProviderResolveLimitsParams) => Promise<ResolvedModelLimits | null>;
 }

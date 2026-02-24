@@ -70,8 +70,6 @@ export const IMAGE_GENERATION_MODEL = IMAGE_GENERATION_MODELS[0]?.id ?? 'zai-org
 export const VIDEO_GENERATION_MODEL = 'Qwen/WAN-2.2-I2V-14B-Fast';
 export const SEARCH_ENABLED_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'] as const;
 
-export type ModelId = string;
-
 // Suggested prompts for new chat
 export const SUGGESTED_PROMPTS = [
     "How does AI work?",

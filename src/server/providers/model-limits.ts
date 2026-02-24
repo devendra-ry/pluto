@@ -3,6 +3,7 @@ import { logModelLimits } from '@/server/providers/limits-utils';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
 import { getRedisClient, redisKey } from '@/server/redis/client';
 import type { ResolvedModelLimits } from '@/server/providers/provider-types';
+import { readPositiveInt } from '@/shared/lib/read-positive-int';
 export type { ResolvedModelLimits } from '@/server/providers/provider-types';
 export { logModelLimits, resolveOutputTokenCap } from '@/server/providers/limits-utils';
 
@@ -16,15 +17,6 @@ interface CachedLimitsEntry {
 
 const LIMITS_CACHE_TTL_MS = readPositiveInt(process.env.CHAT_LIMITS_CACHE_TTL_MS, DEFAULT_LIMITS_CACHE_TTL_MS);
 const limitsCache = new Map<string, CachedLimitsEntry>();
-
-function readPositiveInt(value: string | undefined, fallback: number) {
-    if (!value) return fallback;
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-        return fallback;
-    }
-    return parsed;
-}
 
 function isResolvedModelLimits(value: unknown): value is ResolvedModelLimits {
     if (!value || typeof value !== 'object') return false;

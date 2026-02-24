@@ -1,4 +1,4 @@
-import { buildGoogleContents, getGoogleStream } from '@/server/providers/chat-streams';
+import { getGoogleStream } from '@/server/providers/chat-streams';
 import { serverEnv } from '@/shared/config/server';
 import { logModelLimits, toPositiveInt } from '@/server/providers/limits-utils';
 import type { ChatProvider } from '@/server/providers/provider-types';
@@ -6,7 +6,6 @@ import type { ChatProvider } from '@/server/providers/provider-types';
 export const googleProvider: ChatProvider = {
     id: 'google',
     needsThinkTagTransform: false,
-    buildMessages: ({ messages }) => buildGoogleContents(messages),
     getStream: async ({
         model,
         messages,

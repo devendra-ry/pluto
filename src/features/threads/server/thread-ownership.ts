@@ -1,13 +1,8 @@
 import { createClient } from '@/utils/supabase/server';
 import { getRedisClient, redisKey } from '@/server/redis/client';
+import { readPositiveInt } from '@/shared/lib/read-positive-int';
 
 type ServerSupabaseClient = ReturnType<typeof createClient>;
-
-function readPositiveInt(value: string | undefined, fallback: number) {
-    const parsed = Number.parseInt(value ?? '', 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-    return parsed;
-}
 
 const THREAD_OWNERSHIP_CACHE_TTL_MS = readPositiveInt(process.env.THREAD_OWNERSHIP_CACHE_TTL_MS, 5 * 60 * 1000);
 

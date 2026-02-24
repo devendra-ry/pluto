@@ -1,4 +1,5 @@
 import { type Attachment, type ChatMessage, type ReasoningEffort } from '@/shared/core/types';
+import { createIdempotencyKey } from '@/shared/lib/idempotency';
 
 /**
  * Extract a string-typed field value from a JSON string using indexOf,
@@ -70,14 +71,6 @@ export interface GenerationResult {
 }
 
 const MAX_STREAM_RESUME_ATTEMPTS = 2;
-
-function createIdempotencyKey(prefix: string) {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-        return `${prefix}-${crypto.randomUUID()}`;
-    }
-
-    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-}
 
 function isAttachment(value: unknown): value is Attachment {
     if (!value || typeof value !== 'object') return false;

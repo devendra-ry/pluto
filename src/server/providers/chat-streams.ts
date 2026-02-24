@@ -8,9 +8,7 @@ import type { PreparedChatMessage } from '@/features/chat/server';
 import { logModelLimits, resolveOutputTokenCap } from '@/server/providers/limits-utils';
 import type { RequestTokenEstimates } from '@/server/providers/provider-types';
 import type { ReasoningEffort } from '@/shared/core/types';
-
-/** Module-level singleton — TextEncoder is stateless. */
-const sharedEncoder = new TextEncoder();
+import { sharedTextEncoder } from '@/shared/lib/text-encoder';
 
 export function buildGoogleContents(messages: PreparedChatMessage[]) {
     return messages.map((message) => {
@@ -230,11 +228,11 @@ export async function getGoogleStream(
                                 finish_reason: null
                             }]
                         });
-                        controller.enqueue(sharedEncoder.encode(`data: ${data}\n\n`));
+                        controller.enqueue(sharedTextEncoder.encode(`data: ${data}\n\n`));
                     }
                 }
                 if (!signal?.aborted) {
-                    controller.enqueue(sharedEncoder.encode('data: [DONE]\n\n'));
+                    controller.enqueue(sharedTextEncoder.encode('data: [DONE]\n\n'));
                     controller.close();
                 }
             } catch (e) {

@@ -3,8 +3,7 @@
  * and transforms <think> tags into reasoning_content.
  */
 
-/** Module-level singleton — TextEncoder is stateless. */
-const sharedEncoder = new TextEncoder();
+import { sharedTextEncoder } from '@/shared/lib/text-encoder';
 
 export async function processAndTransformStream(
     sourceStream: ReadableStream,
@@ -25,7 +24,7 @@ export async function processAndTransformStream(
     const safeEnqueue = (chunk: string | Uint8Array) => {
         try {
             if (signal?.aborted) return;
-            const encoded = typeof chunk === 'string' ? sharedEncoder.encode(chunk) : chunk;
+            const encoded = typeof chunk === 'string' ? sharedTextEncoder.encode(chunk) : chunk;
             controller.enqueue(encoded);
         } catch (error) {
             if (isDev) {
