@@ -84,7 +84,7 @@ describe('ChatService', () => {
     });
 
     test('streamChat handles errors', async () => {
-         const mockResponse = {
+        const mockResponse = {
             ok: false,
             status: 500,
             json: async () => ({ error: 'Internal Server Error' })
@@ -106,5 +106,61 @@ describe('ChatService', () => {
         } catch (error: any) {
             assert.strictEqual(error.message, 'Internal Server Error');
         }
+    });
+
+    test('streamChat sends byte-offset (not line count) on resume', async () => {
+        const encoder = new TextEncoder();
+        const firstChunkText = 'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n';
+        const firstChunkBytes = encoder.encode(firstChunkText);
+
+        // First fetch: deliver one chunk then throw a read error.
+        let callCount = 0;
+        const failingStream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(firstChunkBytes);
+                // Next read will throw (simulates a connection drop).
+            },
+            pull() {
+                throw new Error('network failure');
+            }
+        });
+
+        const secondChunkText = 'data: {"choices":[{"delta":{"content":" World"}}]}\n\ndata: [DONE]\n\n';
+        const resumeStream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(encoder.encode(secondChunkText));
+                controller.close();
+            }
+        });
+
+        fetchMock.mock.mockImplementation(async (_url: string, init: any) => {
+            callCount++;
+            if (callCount === 1) {
+                return { ok: true, body: failingStream };
+            }
+            // Second call: verify the byte-offset header.
+            const resumeHeader = init?.headers?.['X-Chat-Resume-Offset'];
+            assert.strictEqual(
+                resumeHeader,
+                String(firstChunkBytes.byteLength),
+                `Expected byte offset ${firstChunkBytes.byteLength} but got ${resumeHeader}`
+            );
+            return { ok: true, body: resumeStream };
+        });
+
+        const chunks: any[] = [];
+        for await (const chunk of chatService.streamChat({
+            messages: [],
+            model: 'm1',
+            reasoningEffort: 'low',
+            search: false
+        })) {
+            chunks.push(chunk);
+        }
+
+        assert.strictEqual(callCount, 2, 'Should have made exactly 2 fetch calls');
+        assert.strictEqual(chunks.length, 2);
+        assert.deepStrictEqual(chunks[0], { type: 'content', value: 'Hello' });
+        assert.deepStrictEqual(chunks[1], { type: 'content', value: ' World' });
     });
 });

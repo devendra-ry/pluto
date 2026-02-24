@@ -167,7 +167,7 @@ export class ChatService {
     }: ChatStreamParams): AsyncGenerator<StreamChunk, void, unknown> {
         const streamId = createIdempotencyKey('chat');
         let attempts = 0;
-        let resumeOffset = 0;
+        let resumeByteOffset = 0;
 
         while (true) {
             const response = await fetch('/api/chat', {
@@ -175,7 +175,7 @@ export class ChatService {
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Idempotency-Key': streamId,
-                    ...(resumeOffset > 0 ? { 'X-Chat-Resume-Offset': String(resumeOffset) } : {}),
+                    ...(resumeByteOffset > 0 ? { 'X-Chat-Resume-Offset': String(resumeByteOffset) } : {}),
                 },
                 body: JSON.stringify({
                     messages,
@@ -223,6 +223,7 @@ export class ChatService {
                         return;
                     }
 
+                    resumeByteOffset += value.byteLength;
                     buffer += decoder.decode(value, { stream: true });
 
                     // indexOf-based line scanner — avoids split() array allocation.
@@ -236,7 +237,7 @@ export class ChatService {
 
                         if (!line.startsWith('data: ')) continue;
                         const data = line.substring(6);
-                        resumeOffset += 1;
+
                         if (data === '[DONE]') continue;
 
                         try {

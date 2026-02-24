@@ -171,8 +171,24 @@ export async function releaseChatStreamLock(userId: string, streamId: string, to
 /** Module-level singleton — TextEncoder is stateless. */
 const sharedEncoder = new TextEncoder();
 
-export function buildSseReplayResponse(events: string[], offset: number = 0) {
-    const startIndex = Math.max(0, Math.min(offset, events.length));
+export function buildSseReplayResponse(events: string[], byteOffset: number = 0) {
+    // Each cached event was originally sent as `data: ${event}\n\n`.
+    // Reconstruct cumulative byte lengths to find the first un-acked event.
+    let accumulated = 0;
+    let startIndex = 0;
+
+    if (byteOffset > 0) {
+        for (let i = 0; i < events.length; i++) {
+            const eventBytes = sharedEncoder.encode(`data: ${events[i]}\n\n`).byteLength;
+            if (accumulated + eventBytes <= byteOffset) {
+                accumulated += eventBytes;
+                startIndex = i + 1;
+            } else {
+                break;
+            }
+        }
+    }
+
     const replayEvents = events.slice(startIndex);
 
     const stream = new ReadableStream({
