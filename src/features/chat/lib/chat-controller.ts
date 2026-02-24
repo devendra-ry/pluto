@@ -160,10 +160,6 @@ export async function handleChatRequest(
                     );
                 }
 
-                heartbeatInterval = setInterval(() => {
-                    safeEnqueue(controller, ': keep-alive\n\n');
-                }, 15000);
-
                 const getSourceStream = async (context: TrimmedContext) => {
                     const outputPlan = resolveOutputTokenPlan(
                         limits,
@@ -225,7 +221,10 @@ export async function handleChatRequest(
                     sourceStream = await getSourceStream(trimmedContext);
                 }
 
-                if (heartbeatInterval) clearInterval(heartbeatInterval);
+                // Start heartbeat now that provider connection is established.
+                heartbeatInterval = setInterval(() => {
+                    safeEnqueue(controller, ': keep-alive\n\n');
+                }, 15000);
                 if (chatProvider.needsThinkTagTransform) {
                     // Chutes/OpenRouter: SSE content may embed <think> tags that need
                     // to be parsed and mapped to reasoning_content fields.
@@ -246,6 +245,7 @@ export async function handleChatRequest(
                     }
                 }
 
+                if (heartbeatInterval) clearInterval(heartbeatInterval);
                 if (!signal.aborted) {
                     controller.close();
                 }
