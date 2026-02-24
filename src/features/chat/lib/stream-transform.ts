@@ -2,6 +2,10 @@
  * Processes a source SSE stream, handles chunk buffering to ensure lines aren't broken,
  * and transforms <think> tags into reasoning_content.
  */
+
+/** Module-level singleton — TextEncoder is stateless. */
+const sharedEncoder = new TextEncoder();
+
 export async function processAndTransformStream(
     sourceStream: ReadableStream,
     controller: ReadableStreamDefaultController,
@@ -9,7 +13,6 @@ export async function processAndTransformStream(
 ) {
     const reader = sourceStream.getReader();
     const decoder = new TextDecoder();
-    const encoder = new TextEncoder();
     const isDev = process.env.NODE_ENV !== 'production';
     let isThinking = false;
     let buffer = '';
@@ -21,7 +24,7 @@ export async function processAndTransformStream(
     const safeEnqueue = (chunk: string | Uint8Array) => {
         try {
             if (signal?.aborted) return;
-            const encoded = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
+            const encoded = typeof chunk === 'string' ? sharedEncoder.encode(chunk) : chunk;
             controller.enqueue(encoded);
         } catch (error) {
             if (isDev) {

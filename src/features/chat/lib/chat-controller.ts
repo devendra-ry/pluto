@@ -30,11 +30,13 @@ const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
 const GENERIC_CHAT_ERROR_MESSAGE = 'Unable to complete request right now. Please try again.';
 const IS_DEV = process.env.NODE_ENV !== 'production';
 
+/** Module-level singleton — TextEncoder is stateless. */
+const sharedEncoder = new TextEncoder();
+
 export async function handleChatRequest(
     req: Request,
     { user, supabase }: AuthenticatedContext
 ): Promise<Response> {
-    const encoder = new TextEncoder();
     const signal = req.signal;
     const streamId = readChatStreamId(req);
     const resumeOffset = readChatResumeOffset(req);
@@ -72,7 +74,7 @@ export async function handleChatRequest(
         try {
             if (signal.aborted) return;
             if (captureToRedis) captureToRedis(chunk);
-            const encoded = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
+            const encoded = typeof chunk === 'string' ? sharedEncoder.encode(chunk) : chunk;
             controller.enqueue(encoded);
         } catch (error) {
             if (IS_DEV) {

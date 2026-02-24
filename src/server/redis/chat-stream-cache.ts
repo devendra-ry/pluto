@@ -170,18 +170,20 @@ export async function releaseChatStreamLock(userId: string, streamId: string, to
 // SSE replay response builder
 // ---------------------------------------------------------------------------
 
+/** Module-level singleton — TextEncoder is stateless. */
+const sharedEncoder = new TextEncoder();
+
 export function buildSseReplayResponse(events: string[], offset: number = 0) {
-    const encoder = new TextEncoder();
     const startIndex = Math.max(0, Math.min(offset, events.length));
     const replayEvents = events.slice(startIndex);
 
     const stream = new ReadableStream({
         start(controller) {
             for (const event of replayEvents) {
-                controller.enqueue(encoder.encode(`data: ${event}\n\n`));
+                controller.enqueue(sharedEncoder.encode(`data: ${event}\n\n`));
             }
             if (replayEvents.length === 0 || replayEvents[replayEvents.length - 1] !== '[DONE]') {
-                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                controller.enqueue(sharedEncoder.encode('data: [DONE]\n\n'));
             }
             controller.close();
         }

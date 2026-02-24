@@ -9,6 +9,9 @@ import { logModelLimits, resolveOutputTokenCap } from '@/server/providers/limits
 import type { RequestTokenEstimates } from '@/server/providers/provider-types';
 import type { ReasoningEffort } from '@/shared/core/types';
 
+/** Module-level singleton — TextEncoder is stateless. */
+const sharedEncoder = new TextEncoder();
+
 export function buildGoogleContents(messages: PreparedChatMessage[]) {
     return messages.map((message) => {
         const parts: Array<Record<string, unknown>> = [];
@@ -207,8 +210,6 @@ export async function getGoogleStream(
     }
 
     const response = await ai.models.generateContentStream({ model, config, contents });
-
-    const encoder = new TextEncoder();
     return new ReadableStream({
         async start(controller) {
             try {
@@ -229,11 +230,11 @@ export async function getGoogleStream(
                                 finish_reason: null
                             }]
                         });
-                        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+                        controller.enqueue(sharedEncoder.encode(`data: ${data}\n\n`));
                     }
                 }
                 if (!signal?.aborted) {
-                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                    controller.enqueue(sharedEncoder.encode('data: [DONE]\n\n'));
                     controller.close();
                 }
             } catch (e) {
