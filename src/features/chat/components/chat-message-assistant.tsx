@@ -1,22 +1,15 @@
 'use client';
 
-import ReactMarkdown from 'react-markdown';
-import rehypeHighlight from 'rehype-highlight';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
 import Image from 'next/image';
 import { Copy, RefreshCcw, GitBranch, ChevronDown, Check, Brain, Loader2 } from 'lucide-react';
 import { useState, type ComponentProps } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/shared/core/utils';
 import { type Attachment } from '@/shared/core/types';
 import { isLegacyAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
-import { preprocessLaTeX } from '@/features/chat/lib/latex-utils';
 import { ActionIcon } from './chat-action-icon';
-
-const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex];
-const REMARK_PLUGINS = [remarkGfm, remarkMath];
+import { StreamingMarkdown } from './streaming-markdown';
 
 const MARKDOWN_COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = {
     pre: ({ children }) => (
@@ -126,26 +119,23 @@ export function AssistantMessage({
                                 className={cn(
                                     "grid transition-all duration-300 ease-in-out",
                                     reasoningExpanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-                                    )}
-                                >
+                                )}
+                            >
                                 <div className="overflow-hidden">
                                     <div className="p-4 pt-1">
                                         {reasoning ? (
-                                            <div className="prose prose-invert prose-base max-w-none
-                                                prose-p:text-zinc-400 prose-p:leading-relaxed prose-p:text-[15px] prose-p:my-3
-                                                prose-li:text-[15px] prose-li:text-zinc-400
-                                                prose-headings:text-zinc-200 prose-headings:font-semibold
-                                                prose-strong:text-zinc-200
-                                                prose-blockquote:text-zinc-500 prose-blockquote:border-l-zinc-700
-                                                [&_.katex]:text-[15px]
-                                            ">
-                                                <ReactMarkdown
-                                                    rehypePlugins={REHYPE_PLUGINS}
-                                                    remarkPlugins={REMARK_PLUGINS}
-                                                >
-                                                    {preprocessLaTeX(reasoning)}
-                                                </ReactMarkdown>
-                                            </div>
+                                            <StreamingMarkdown
+                                                content={reasoning}
+                                                isStreaming={isStreaming}
+                                                className="prose prose-invert prose-base max-w-none
+                                                    prose-p:text-zinc-400 prose-p:leading-relaxed prose-p:text-[15px] prose-p:my-3
+                                                    prose-li:text-[15px] prose-li:text-zinc-400
+                                                    prose-headings:text-zinc-200 prose-headings:font-semibold
+                                                    prose-strong:text-zinc-200
+                                                    prose-blockquote:text-zinc-500 prose-blockquote:border-l-zinc-700
+                                                    [&_.katex]:text-[15px]
+                                                "
+                                            />
                                         ) : (
                                             <div className="flex items-center gap-1.5 h-6 opacity-40 py-4">
                                                 <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce [animation-delay:-0.3s]" />
@@ -162,28 +152,25 @@ export function AssistantMessage({
 
                 {/* Main content */}
                 {content && (
-                    <div className="prose prose-invert prose-base max-w-none
-                        prose-p:text-zinc-200 prose-p:leading-relaxed prose-p:text-base prose-p:my-1.5
-                        prose-headings:text-zinc-100 prose-headings:font-bold
-                        prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
-                        prose-li:text-base prose-li:text-zinc-200
-                        prose-strong:text-zinc-100 prose-a:text-pink-400
-                        hover:prose-a:text-pink-300 prose-a:no-underline
-                        prose-code:text-pink-300/90 prose-pre:bg-[#2a2035]/60
-                        prose-pre:border prose-pre:border-white/5
-                        prose-blockquote:text-zinc-400 prose-blockquote:border-l-pink-500/50
-                        prose-table:text-base prose-th:text-zinc-100 prose-td:text-zinc-300
-                        [&_.katex]:text-base [&_.katex-display]:text-lg
-                        [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden
-                    ">
-                        <ReactMarkdown
-                            rehypePlugins={REHYPE_PLUGINS}
-                            remarkPlugins={REMARK_PLUGINS}
-                            components={MARKDOWN_COMPONENTS}
-                        >
-                            {preprocessLaTeX(content)}
-                        </ReactMarkdown>
-                    </div>
+                    <StreamingMarkdown
+                        content={content}
+                        isStreaming={isStreaming}
+                        components={MARKDOWN_COMPONENTS}
+                        className="prose prose-invert prose-base max-w-none
+                            prose-p:text-zinc-200 prose-p:leading-relaxed prose-p:text-base prose-p:my-1.5
+                            prose-headings:text-zinc-100 prose-headings:font-bold
+                            prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
+                            prose-li:text-base prose-li:text-zinc-200
+                            prose-strong:text-zinc-100 prose-a:text-pink-400
+                            hover:prose-a:text-pink-300 prose-a:no-underline
+                            prose-code:text-pink-300/90 prose-pre:bg-[#2a2035]/60
+                            prose-pre:border prose-pre:border-white/5
+                            prose-blockquote:text-zinc-400 prose-blockquote:border-l-pink-500/50
+                            prose-table:text-base prose-th:text-zinc-100 prose-td:text-zinc-300
+                            [&_.katex]:text-base [&_.katex-display]:text-lg
+                            [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden
+                        "
+                    />
                 )}
 
                 {attachments.length > 0 && (
