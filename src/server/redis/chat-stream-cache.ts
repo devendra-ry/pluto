@@ -4,18 +4,16 @@ import { randomUUID } from 'node:crypto';
 
 import { getRedisClient, redisKey } from '@/server/redis/client';
 
-interface CachedChatStream {
-    events: string[];
-    createdAt: number;
-}
-
 function readPositiveInt(value: string | undefined, fallback: number) {
     const parsed = Number.parseInt(value ?? '', 10);
     if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
     return parsed;
 }
 
-const CHAT_STREAM_CACHE_TTL_MS = readPositiveInt(process.env.CHAT_STREAM_CACHE_TTL_MS, 15 * 60 * 1000);
+const CHAT_STREAM_CACHE_TTL_SECONDS = readPositiveInt(
+    process.env.CHAT_STREAM_CACHE_TTL_MS,
+    15 * 60 * 1000
+) / 1000;
 const CHAT_STREAM_MAX_EVENTS = readPositiveInt(process.env.CHAT_STREAM_MAX_EVENTS, 12000);
 const CHAT_STREAM_LOCK_TTL_MS = readPositiveInt(process.env.CHAT_STREAM_LOCK_TTL_MS, 5 * 60 * 1000);
 
@@ -46,55 +44,95 @@ export function readChatResumeOffset(req: Request) {
     return parsed;
 }
 
-function parseCached(value: unknown): CachedChatStream | null {
-    if (typeof value !== 'string') return null;
+// ---------------------------------------------------------------------------
+// Redis Stream-backed event storage
+// ---------------------------------------------------------------------------
+
+/**
+ * Append a single SSE event to the Redis Stream for this chat stream.
+ * Uses XADD with approximate MAXLEN trimming to cap memory usage.
+ * Callers should fire-and-forget (await is optional but recommended for backpressure).
+ */
+export async function appendChatStreamEvent(userId: string, streamId: string, event: string) {
+    const redis = getRedisClient();
+    if (!redis) return;
+
+    const key = streamKey(userId, streamId);
     try {
-        const parsed = JSON.parse(value) as Record<string, unknown>;
-        if (!parsed || typeof parsed !== 'object') return null;
-        if (!Array.isArray(parsed.events)) return null;
-        const events = parsed.events.filter((event): event is string => typeof event === 'string');
-        if (events.length === 0) return null;
-        return {
-            events,
-            createdAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : Date.now(),
-        };
-    } catch {
-        return null;
+        await redis.xadd(key, '*', { e: event }, {
+            trim: { type: 'MAXLEN', threshold: CHAT_STREAM_MAX_EVENTS, comparison: '~' },
+        });
+    } catch (error) {
+        console.warn(`[chat-stream-cache] XADD failed key=${key}`, error);
     }
 }
 
-export async function getCachedChatStreamEvents(userId: string, streamId: string) {
+/**
+ * Set a TTL on the stream key so it auto-expires after the configured duration.
+ * Call once after the stream is complete (or on error) — Redis Streams don't
+ * have a built-in TTL, so we apply EXPIRE explicitly.
+ */
+export async function expireChatStream(userId: string, streamId: string) {
+    const redis = getRedisClient();
+    if (!redis) return;
+
+    const key = streamKey(userId, streamId);
+    try {
+        await redis.expire(key, Math.ceil(CHAT_STREAM_CACHE_TTL_SECONDS));
+    } catch (error) {
+        console.warn(`[chat-stream-cache] EXPIRE failed key=${key}`, error);
+    }
+}
+
+interface CachedStreamResult {
+    events: string[];
+}
+
+/**
+ * Read cached SSE events from the Redis Stream. Returns null if the stream
+ * doesn't exist or has no entries.
+ */
+export async function getCachedChatStreamEvents(
+    userId: string,
+    streamId: string
+): Promise<CachedStreamResult | null> {
     const redis = getRedisClient();
     if (!redis) return null;
 
+    const key = streamKey(userId, streamId);
     try {
-        const raw = await redis.get<unknown>(streamKey(userId, streamId));
-        if (!raw) return null;
-        return parseCached(raw);
+        // XLEN first — fast O(1) existence check before XRANGE.
+        const length = await redis.xlen(key);
+        if (!length || length === 0) return null;
+
+        // Read all entries. XRANGE with '-' to '+' fetches the full stream.
+        // Upstash returns Record<streamId, Record<field, value>>.
+        const entries = await redis.xrange(key, '-', '+');
+        if (!entries || typeof entries !== 'object') return null;
+
+        const events: string[] = [];
+        // entries is a Record<string, Record<string, unknown>> keyed by stream IDs.
+        for (const streamEntryId of Object.keys(entries)) {
+            const fields = (entries as Record<string, Record<string, unknown>>)[streamEntryId];
+            if (fields && typeof fields === 'object') {
+                const eventValue = fields.e;
+                if (typeof eventValue === 'string') {
+                    events.push(eventValue);
+                }
+            }
+        }
+
+        if (events.length === 0) return null;
+        return { events };
     } catch (error) {
-        console.warn(`[chat-stream-cache] failed to read key user=${userId} stream=${streamId}`, error);
+        console.warn(`[chat-stream-cache] XRANGE failed key=${key}`, error);
         return null;
     }
 }
 
-export async function setCachedChatStreamEvents(userId: string, streamId: string, events: string[]) {
-    const redis = getRedisClient();
-    if (!redis) return;
-    if (events.length === 0) return;
-
-    const payload: CachedChatStream = {
-        events: events.slice(-CHAT_STREAM_MAX_EVENTS),
-        createdAt: Date.now(),
-    };
-
-    try {
-        await redis.set(streamKey(userId, streamId), JSON.stringify(payload), {
-            px: CHAT_STREAM_CACHE_TTL_MS,
-        });
-    } catch (error) {
-        console.warn(`[chat-stream-cache] failed to write key user=${userId} stream=${streamId}`, error);
-    }
-}
+// ---------------------------------------------------------------------------
+// Distributed lock (unchanged — uses simple SET NX)
+// ---------------------------------------------------------------------------
 
 export async function reserveChatStreamLock(userId: string, streamId: string) {
     const redis = getRedisClient();
@@ -127,6 +165,10 @@ export async function releaseChatStreamLock(userId: string, streamId: string, to
         console.warn(`[chat-stream-cache] failed to release lock key=${key}`, error);
     }
 }
+
+// ---------------------------------------------------------------------------
+// SSE replay response builder
+// ---------------------------------------------------------------------------
 
 export function buildSseReplayResponse(events: string[], offset: number = 0) {
     const encoder = new TextEncoder();

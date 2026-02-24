@@ -20,7 +20,8 @@ import {
     readChatResumeOffset,
     readChatStreamId,
     reserveChatStreamLock,
-    setCachedChatStreamEvents,
+    appendChatStreamEvent,
+    expireChatStream,
 } from '@/server/redis/chat-stream-cache';
 import { recordAbuseSignal } from '@/server/security/abuse-protection';
 import type { AuthenticatedContext } from '@/utils/route-handler';
@@ -64,12 +65,13 @@ export async function handleChatRequest(
         }
     }
 
-    let captureChunk: ((chunk: string | Uint8Array) => void) | null = null;
+    // Incremental capture: extract SSE events from chunks and append to Redis Stream.
+    let captureToRedis: ((chunk: string | Uint8Array) => void) | null = null;
 
     const safeEnqueue = (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
         try {
             if (signal.aborted) return;
-            if (captureChunk) captureChunk(chunk);
+            if (captureToRedis) captureToRedis(chunk);
             const encoded = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
             controller.enqueue(encoded);
         } catch (error) {
@@ -83,21 +85,23 @@ export async function handleChatRequest(
     const stream = new ReadableStream({
         async start(controller) {
             let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
-            const capturedEvents: string[] = [];
             const captureDecoder = new TextDecoder();
             let captureBuffer = '';
-            captureChunk = (chunk) => {
-                const text = typeof chunk === 'string'
-                    ? chunk
-                    : captureDecoder.decode(chunk, { stream: true });
-                captureBuffer += text;
-                const lines = captureBuffer.split('\n');
-                captureBuffer = lines.pop() || '';
-                for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue;
-                    capturedEvents.push(line.slice(6));
-                }
-            };
+            if (streamId) {
+                captureToRedis = (chunk) => {
+                    const text = typeof chunk === 'string'
+                        ? chunk
+                        : captureDecoder.decode(chunk, { stream: true });
+                    captureBuffer += text;
+                    const lines = captureBuffer.split('\n');
+                    captureBuffer = lines.pop() || '';
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        // Fire-and-forget: append each event to Redis Stream incrementally.
+                        void appendChatStreamEvent(user.id, streamId, line.slice(6));
+                    }
+                };
+            }
 
             if (signal.aborted) return;
 
@@ -243,8 +247,8 @@ export async function handleChatRequest(
                 if (!signal.aborted) {
                     controller.close();
                 }
-                if (streamId && capturedEvents.length > 0) {
-                    await setCachedChatStreamEvents(user.id, streamId, capturedEvents);
+                if (streamId) {
+                    await expireChatStream(user.id, streamId);
                 }
             } catch (error) {
                 if (heartbeatInterval) clearInterval(heartbeatInterval);
@@ -259,11 +263,11 @@ export async function handleChatRequest(
                     }
                     await recordAbuseSignal(user.id, 'chat', 'stream-failure');
                 }
-                if (streamId && capturedEvents.length > 0) {
-                    await setCachedChatStreamEvents(user.id, streamId, capturedEvents);
+                if (streamId) {
+                    await expireChatStream(user.id, streamId);
                 }
             } finally {
-                captureChunk = null;
+                captureToRedis = null;
                 if (streamId) {
                     await releaseChatStreamLock(user.id, streamId, streamLockToken);
                 }
