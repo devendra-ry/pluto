@@ -220,7 +220,25 @@ export async function handleChatRequest(
                 }
 
                 if (heartbeatInterval) clearInterval(heartbeatInterval);
-                await processAndTransformStream(sourceStream, controller, signal);
+                if (chatProvider.needsThinkTagTransform) {
+                    // Chutes/OpenRouter: SSE content may embed <think> tags that need
+                    // to be parsed and mapped to reasoning_content fields.
+                    await processAndTransformStream(sourceStream, controller, signal);
+                } else {
+                    // Google: stream is already in final SSE format with content/reasoning_content
+                    // properly separated. Pipe bytes directly — no JSON round-trip needed.
+                    const reader = sourceStream.getReader();
+                    try {
+                        while (true) {
+                            if (signal.aborted) break;
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            safeEnqueue(controller, value);
+                        }
+                    } finally {
+                        reader.releaseLock();
+                    }
+                }
 
                 if (!signal.aborted) {
                     controller.close();

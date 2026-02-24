@@ -5,6 +5,7 @@ import type { ChatProvider } from '@/server/providers/provider-types';
 
 export const openRouterProvider: ChatProvider = {
     id: 'openrouter',
+    needsThinkTagTransform: true,
     buildMessages: ({ messages, systemPrompt }) => buildOpenAICompatibleMessages(messages, systemPrompt),
     getStream: async ({
         model,

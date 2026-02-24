@@ -39,6 +39,14 @@ export interface ProviderResolveLimitsParams {
 
 export interface ChatProvider {
     id: 'google' | 'openrouter' | 'chutes';
+    /**
+     * Whether the provider's stream may contain `<think>` tags that need to be
+     * parsed and transformed into `reasoning_content` fields. Providers that
+     * natively separate thoughts from content (e.g. Google) can set this to
+     * `false` to skip the transform layer entirely, avoiding a redundant
+     * JSON parse/stringify round-trip.
+     */
+    needsThinkTagTransform: boolean;
     buildMessages: (params: ProviderBuildMessagesParams) => unknown;
     getStream: (params: ProviderGetStreamParams) => Promise<ReadableStream>;
     resolveModelLimits: (params: ProviderResolveLimitsParams) => Promise<ResolvedModelLimits | null>;

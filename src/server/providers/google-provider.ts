@@ -5,6 +5,7 @@ import type { ChatProvider } from '@/server/providers/provider-types';
 
 export const googleProvider: ChatProvider = {
     id: 'google',
+    needsThinkTagTransform: false,
     buildMessages: ({ messages }) => buildGoogleContents(messages),
     getStream: async ({
         model,
