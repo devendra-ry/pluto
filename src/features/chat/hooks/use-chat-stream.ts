@@ -12,7 +12,7 @@ import {
 
 import { addMessage } from '@/features/messages/hooks/use-messages';
 import { touchThread, updateThreadTitleIfNewChat } from '@/features/threads/hooks/use-threads';
-import { cancelScheduledFrame, scheduleFrame, type ScheduledFrame } from '@/shared/lib/animation-frame';
+import { scheduleFrame } from '@/shared/lib/animation-frame';
 import { chatService } from '@/features/chat/lib/chat-service';
 import { AVAILABLE_MODELS, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
 import { type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
@@ -238,7 +238,6 @@ export function useChatStream({
         let lastFlushedContent = '';
         let lastFlushedReasoning = '';
         let hasPendingAssistantUpdate = false;
-        let streamFlushFrame: ScheduledFrame | null = null;
         let requestFailed = false;
         let requestSucceeded = false;
 
@@ -280,18 +279,22 @@ export function useChatStream({
             });
         };
 
-        const cancelScheduledAssistantFrame = () => {
-            if (streamFlushFrame !== null) {
-                cancelScheduledFrame(streamFlushFrame);
-                streamFlushFrame = null;
-            }
-        };
-
-        const scheduleAssistantUpdate = () => {
-            if (streamFlushFrame !== null) return;
-            streamFlushFrame = scheduleFrame(() => {
-                streamFlushFrame = null;
-                flushAssistantUpdate();
+        /**
+         * Backpressure gate: returns a promise that resolves on the next
+         * animation frame *after* flushing the pending UI update.
+         * When the consumer `await`s this inside `for await…of`, the
+         * AsyncGenerator suspends → reader.read() pauses → TCP/HTTP
+         * backpressure propagates naturally to the server.
+         * If there's nothing to flush, resolves immediately so we don't
+         * add unnecessary latency for no-op chunks.
+         */
+        const waitForFrameFlush = (): Promise<void> => {
+            if (!hasPendingAssistantUpdate) return Promise.resolve();
+            return new Promise<void>((resolve) => {
+                scheduleFrame(() => {
+                    flushAssistantUpdate();
+                    resolve();
+                });
             });
         };
 
@@ -384,18 +387,17 @@ export function useChatStream({
                     if (supportsReasoning) {
                         fullReasoning += chunk.value;
                         hasPendingAssistantUpdate = true;
-                        scheduleAssistantUpdate();
+                        await waitForFrameFlush();
                         dispatch({ type: 'SET_THINKING', thinking: true });
                     }
                 } else if (chunk.type === 'content') {
                     dispatch({ type: 'SET_THINKING', thinking: false });
                     fullContent += chunk.value;
                     hasPendingAssistantUpdate = true;
-                    scheduleAssistantUpdate();
+                    await waitForFrameFlush();
                 }
             }
 
-            cancelScheduledAssistantFrame();
             flushAssistantUpdate();
             const persisted = await persistAssistantMessage(fullContent, fullReasoning);
             if (!persisted) {
@@ -407,7 +409,7 @@ export function useChatStream({
             }
             requestSucceeded = true;
         } catch (error) {
-            cancelScheduledAssistantFrame();
+
             if (error instanceof Error && error.name === 'AbortError') {
                 if (isMediaGenModel) {
                     hasPendingAssistantUpdate = false;
@@ -435,7 +437,6 @@ export function useChatStream({
                 return false;
             }
         } finally {
-            cancelScheduledAssistantFrame();
             abortControllerRef.current = null;
             dispatch({ type: 'COMPLETE', failed: requestFailed });
         }
