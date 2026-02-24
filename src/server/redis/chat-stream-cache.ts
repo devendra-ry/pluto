@@ -12,8 +12,16 @@ const CHAT_STREAM_CACHE_TTL_SECONDS = readPositiveInt(
     process.env.CHAT_STREAM_CACHE_TTL_MS,
     15 * 60 * 1000
 ) / 1000;
-const CHAT_STREAM_MAX_EVENTS = readPositiveInt(process.env.CHAT_STREAM_MAX_EVENTS, 12000);
+// Each stream entry now packs multiple events, so fewer entries are needed.
+const CHAT_STREAM_MAX_ENTRIES = readPositiveInt(process.env.CHAT_STREAM_MAX_ENTRIES, 500);
 const CHAT_STREAM_LOCK_TTL_MS = readPositiveInt(process.env.CHAT_STREAM_LOCK_TTL_MS, 5 * 60 * 1000);
+
+/**
+ * Record separator used to pack multiple SSE events into a single Redis
+ * Stream entry. U+001E is a non-printable ASCII control character that
+ * will never appear in SSE JSON payloads.
+ */
+const EVENT_PACK_SEPARATOR = '\x1e';
 
 function streamKey(userId: string, streamId: string) {
     return redisKey('chat-stream', userId, streamId);
@@ -43,13 +51,12 @@ export function readChatResumeOffset(req: Request) {
 }
 
 // ---------------------------------------------------------------------------
-// Redis Stream-backed event storage
+// Redis Stream-backed event storage (legacy single-event helpers)
 // ---------------------------------------------------------------------------
 
 /**
  * Append a single SSE event to the Redis Stream for this chat stream.
- * Uses XADD with approximate MAXLEN trimming to cap memory usage.
- * Callers should fire-and-forget (await is optional but recommended for backpressure).
+ * @deprecated Use `createChatStreamWriter()` for batched writes instead.
  */
 export async function appendChatStreamEvent(userId: string, streamId: string, event: string) {
     const redis = getRedisClient();
@@ -58,7 +65,7 @@ export async function appendChatStreamEvent(userId: string, streamId: string, ev
     const key = streamKey(userId, streamId);
     try {
         await redis.xadd(key, '*', { e: event }, {
-            trim: { type: 'MAXLEN', threshold: CHAT_STREAM_MAX_EVENTS, comparison: '~' },
+            trim: { type: 'MAXLEN', threshold: CHAT_STREAM_MAX_ENTRIES, comparison: '~' },
         });
     } catch (error) {
         console.warn(`[chat-stream-cache] XADD failed key=${key}`, error);
@@ -82,13 +89,128 @@ export async function expireChatStream(userId: string, streamId: string) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Batched event writer — packs multiple events into single XADD entries
+// ---------------------------------------------------------------------------
+
+const BATCH_FLUSH_INTERVAL_MS = 1000;
+const BATCH_FLUSH_THRESHOLD = 100;
+
+/**
+ * Buffers SSE events in memory and flushes them to a Redis Stream as
+ * **packed entries** — all buffered events are joined with a record
+ * separator (U+001E) and written in a single XADD per flush.
+ *
+ * This reduces Redis commands from ~500/response to ~10/response:
+ * - 1 XADD per flush (instead of 1 per event)
+ * - 1 flush per second (instead of per 500ms)
+ * - 1 EXPIRE on close
+ *
+ * Usage:
+ *   const writer = createChatStreamWriter(userId, streamId);
+ *   writer.push(event);   // synchronous, non-throwing
+ *   await writer.close(); // final flush + EXPIRE
+ */
+export class ChatStreamEventWriter {
+    private buffer: string[] = [];
+    private timer: ReturnType<typeof setInterval> | null = null;
+    private closed = false;
+    private flushPromise: Promise<void> | null = null;
+
+    constructor(
+        private readonly key: string,
+        private readonly redis: NonNullable<ReturnType<typeof getRedisClient>>,
+    ) {
+        this.timer = setInterval(() => {
+            void this.flush();
+        }, BATCH_FLUSH_INTERVAL_MS);
+    }
+
+    /** Queue an event for batched writing. Synchronous, never throws. */
+    push(event: string): void {
+        if (this.closed) return;
+        this.buffer.push(event);
+        if (this.buffer.length >= BATCH_FLUSH_THRESHOLD) {
+            void this.flush();
+        }
+    }
+
+    /** Flush remaining events, set EXPIRE, and stop the timer. */
+    async close(): Promise<void> {
+        if (this.closed) return;
+        this.closed = true;
+        if (this.timer !== null) {
+            clearInterval(this.timer);
+            this.timer = null;
+        }
+        // Wait for any in-flight flush to finish before the final one.
+        if (this.flushPromise) {
+            await this.flushPromise;
+        }
+        await this.flushWithExpire();
+    }
+
+    private async flush(): Promise<void> {
+        if (this.buffer.length === 0) return;
+        const batch = this.buffer;
+        this.buffer = [];
+        this.flushPromise = this.executePipeline(batch, false);
+        try {
+            await this.flushPromise;
+        } finally {
+            this.flushPromise = null;
+        }
+    }
+
+    private async flushWithExpire(): Promise<void> {
+        const batch = this.buffer;
+        this.buffer = [];
+        await this.executePipeline(batch, true);
+    }
+
+    private async executePipeline(batch: string[], expire: boolean): Promise<void> {
+        if (batch.length === 0 && !expire) return;
+
+        try {
+            const pipeline = this.redis.pipeline();
+
+            if (batch.length > 0) {
+                // Pack all events into a single XADD entry.
+                const packed = batch.join(EVENT_PACK_SEPARATOR);
+                pipeline.xadd(this.key, '*', { e: packed }, {
+                    trim: { type: 'MAXLEN', threshold: CHAT_STREAM_MAX_ENTRIES, comparison: '~' },
+                });
+            }
+
+            if (expire) {
+                pipeline.expire(this.key, Math.ceil(CHAT_STREAM_CACHE_TTL_SECONDS));
+            }
+
+            await pipeline.exec();
+        } catch (error) {
+            console.warn(`[chat-stream-cache] pipeline flush failed key=${this.key} events=${batch.length}`, error);
+        }
+    }
+}
+
+/**
+ * Create a batched event writer for the given chat stream.
+ * Returns null if Redis is not configured.
+ */
+export function createChatStreamWriter(userId: string, streamId: string): ChatStreamEventWriter | null {
+    const redis = getRedisClient();
+    if (!redis) return null;
+    return new ChatStreamEventWriter(streamKey(userId, streamId), redis);
+}
+
 interface CachedStreamResult {
     events: string[];
 }
 
 /**
  * Read cached SSE events from the Redis Stream. Returns null if the stream
- * doesn't exist or has no entries.
+ * doesn't exist or has no entries. Handles both packed entries (separated
+ * by U+001E) and legacy single-event entries.
  */
 export async function getCachedChatStreamEvents(
     userId: string,
@@ -115,7 +237,12 @@ export async function getCachedChatStreamEvents(
             if (fields && typeof fields === 'object') {
                 const eventValue = fields.e;
                 if (typeof eventValue === 'string') {
-                    events.push(eventValue);
+                    // Unpack: split on record separator. If the entry is a
+                    // legacy single event (no separator), split returns [event].
+                    const unpacked = eventValue.split(EVENT_PACK_SEPARATOR);
+                    for (const ev of unpacked) {
+                        if (ev) events.push(ev);
+                    }
                 }
             }
         }

@@ -20,8 +20,8 @@ import {
     readChatResumeOffset,
     readChatStreamId,
     reserveChatStreamLock,
-    appendChatStreamEvent,
-    expireChatStream,
+    createChatStreamWriter,
+    type ChatStreamEventWriter,
 } from '@/server/redis/chat-stream-cache';
 import { recordAbuseSignal } from '@/server/security/abuse-protection';
 import type { AuthenticatedContext } from '@/utils/route-handler';
@@ -83,6 +83,7 @@ export async function handleChatRequest(
     const stream = new ReadableStream({
         async start(controller) {
             let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
+            let writer: ChatStreamEventWriter | null = null;
 
             if (signal.aborted) return;
 
@@ -204,9 +205,10 @@ export async function handleChatRequest(
                 heartbeatInterval = setInterval(() => {
                     safeEnqueue(controller, ': keep-alive\n\n');
                 }, 15000);
-                // Capture events for Redis directly from strings — no decode round-trip.
-                const captureEvent = streamId
-                    ? (event: string) => { void appendChatStreamEvent(user.id, streamId, event); }
+                // Batched event writer — buffers events and flushes via pipeline.
+                writer = streamId ? createChatStreamWriter(user.id, streamId) : null;
+                const captureEvent = writer
+                    ? (event: string) => { writer!.push(event); }
                     : undefined;
 
                 if (chatProvider.needsThinkTagTransform) {
@@ -252,8 +254,8 @@ export async function handleChatRequest(
                 if (!signal.aborted) {
                     controller.close();
                 }
-                if (streamId) {
-                    await expireChatStream(user.id, streamId);
+                if (writer) {
+                    await writer.close();
                 }
             } catch (error) {
                 if (heartbeatInterval) clearInterval(heartbeatInterval);
@@ -268,8 +270,8 @@ export async function handleChatRequest(
                     }
                     await recordAbuseSignal(user.id, 'chat', 'stream-failure');
                 }
-                if (streamId) {
-                    await expireChatStream(user.id, streamId);
+                if (writer) {
+                    await writer.close();
                 }
             } finally {
                 if (streamId) {
