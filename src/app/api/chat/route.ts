@@ -2,7 +2,7 @@ import { handleChatRequest } from '@/features/chat/server';
 import { withSecureContext } from '@/utils/route-handler';
 import { chatRateLimiter } from '@/utils/rate-limit';
 
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 
 export async function POST(req: Request) {
     return withSecureContext(

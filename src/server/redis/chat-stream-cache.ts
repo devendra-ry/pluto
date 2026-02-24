@@ -1,7 +1,5 @@
 import 'server-only';
 
-import { randomUUID } from 'node:crypto';
-
 import { getRedisClient, redisKey } from '@/server/redis/client';
 
 function readPositiveInt(value: string | undefined, fallback: number) {
@@ -139,7 +137,7 @@ export async function reserveChatStreamLock(userId: string, streamId: string) {
     if (!redis) return 'local-no-redis';
 
     const key = streamLockKey(userId, streamId);
-    const token = randomUUID();
+    const token = crypto.randomUUID();
     try {
         const reserved = await redis.set(key, token, { nx: true, px: CHAT_STREAM_LOCK_TTL_MS });
         if (reserved !== 'OK') return null;
