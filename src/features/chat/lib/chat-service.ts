@@ -1,5 +1,43 @@
 import { type Attachment, type ChatMessage, type ReasoningEffort } from '@/shared/core/types';
 
+/**
+ * Extract a string-typed field value from a JSON string using indexOf,
+ * avoiding a full JSON.parse. Handles standard JSON escape sequences.
+ * Returns '' if the field is absent, null, or not a string.
+ */
+function extractJsonStringField(json: string, field: string): string {
+    // Look for "field":" pattern — the field must be a string value.
+    const needle = `"${field}":"`;
+    const start = json.indexOf(needle);
+    if (start === -1) return '';
+
+    const valueStart = start + needle.length;
+    // Walk forward to find the unescaped closing quote.
+    let i = valueStart;
+    while (i < json.length) {
+        if (json.charCodeAt(i) === 92 /* backslash */) {
+            i += 2; // skip escaped character
+            continue;
+        }
+        if (json.charCodeAt(i) === 34 /* quote */) {
+            break;
+        }
+        i++;
+    }
+
+    if (i >= json.length) return '';
+
+    const raw = json.substring(valueStart, i);
+    // Fast path: no escapes → return as-is (most SSE chunks are plain text).
+    if (raw.indexOf('\\') === -1) return raw;
+    // Slow path: unescape JSON string escapes.
+    try {
+        return JSON.parse(`"${raw}"`) as string;
+    } catch {
+        return raw;
+    }
+}
+
 export interface ChatStreamParams {
     messages: ChatMessage[];
     model: string;
@@ -186,44 +224,49 @@ export class ChatService {
                     }
 
                     buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
 
-                    for (const line of lines) {
+                    // indexOf-based line scanner — avoids split() array allocation.
+                    let searchFrom = 0;
+                    while (true) {
+                        const nlIdx = buffer.indexOf('\n', searchFrom);
+                        if (nlIdx === -1) break;
+
+                        const line = buffer.substring(searchFrom, nlIdx);
+                        searchFrom = nlIdx + 1;
+
                         if (!line.startsWith('data: ')) continue;
-                        const data = line.slice(6);
+                        const data = line.substring(6);
                         resumeOffset += 1;
                         if (data === '[DONE]') continue;
 
                         try {
-                            const parsed = JSON.parse(data) as Record<string, unknown>;
-                            const streamError = typeof parsed.error === 'string' ? parsed.error.trim() : '';
-
-                            if (streamError) {
-                                const streamDetails = typeof parsed.details === 'string' ? parsed.details.trim() : '';
-                                const normalizedStreamError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
-                                throw new Error(`STREAM_ERROR:${normalizedStreamError}`);
+                            // Fast path: check for error responses first (rare).
+                            if (data.includes('"error"')) {
+                                const parsed = JSON.parse(data) as Record<string, unknown>;
+                                const streamError = typeof parsed.error === 'string' ? parsed.error.trim() : '';
+                                if (streamError) {
+                                    const streamDetails = typeof parsed.details === 'string' ? parsed.details.trim() : '';
+                                    const normalizedStreamError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
+                                    throw new Error(`STREAM_ERROR:${normalizedStreamError}`);
+                                }
                             }
 
-                            const choices = Array.isArray(parsed.choices)
-                                ? parsed.choices as Array<Record<string, unknown>>
-                                : [];
-                            const delta = (choices[0]?.delta ?? {}) as Record<string, unknown>;
-
+                            // Hot path: extract delta fields directly via indexOf
+                            // instead of JSON.parse to avoid allocating a full object.
                             const reasoningContent =
-                                (typeof delta.reasoning_content === 'string' ? delta.reasoning_content : '') ||
-                                (typeof delta.thinking === 'string' ? delta.thinking : '');
+                                extractJsonStringField(data, 'reasoning_content') ||
+                                extractJsonStringField(data, 'thinking');
 
                             if (reasoningContent) {
                                 yield { type: 'reasoning', value: reasoningContent };
                             }
 
-                            const content = typeof delta.content === 'string' ? delta.content : '';
+                            const content = extractJsonStringField(data, 'content');
                             if (content) {
                                 yield { type: 'content', value: content };
                             }
                         } catch (streamChunkError) {
-                             if (
+                            if (
                                 streamChunkError instanceof Error
                                 && streamChunkError.message.startsWith('STREAM_ERROR:')
                             ) {
@@ -232,6 +275,9 @@ export class ChatService {
                             // Skip malformed JSON
                         }
                     }
+
+                    // Keep only the unconsumed remainder in the buffer.
+                    buffer = searchFrom > 0 ? buffer.substring(searchFrom) : buffer;
                 }
             } catch (error) {
                 const isResumeableReadError =
