@@ -9,7 +9,8 @@ const sharedEncoder = new TextEncoder();
 export async function processAndTransformStream(
     sourceStream: ReadableStream,
     controller: ReadableStreamDefaultController,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onEvent?: (event: string) => void,
 ) {
     const reader = sourceStream.getReader();
     const decoder = new TextDecoder();
@@ -44,6 +45,7 @@ export async function processAndTransformStream(
             }]
         });
         safeEnqueue(`data: ${tailData}\n\n`);
+        onEvent?.(tailData);
         pendingTagFragment = '';
     };
 
@@ -87,6 +89,7 @@ export async function processAndTransformStream(
                 if (dataStr === '[DONE]') {
                     flushPendingTagFragment();
                     safeEnqueue('data: [DONE]\n\n');
+                    onEvent?.('[DONE]');
                     continue;
                 }
 
@@ -143,9 +146,11 @@ export async function processAndTransformStream(
                             }]
                         });
                         safeEnqueue(`data: ${transformedData}\n\n`);
+                        onEvent?.(transformedData);
                     } else {
                         // Pass through non-content chunks (reasoning, metadata)
                         safeEnqueue(`data: ${dataStr}\n\n`);
+                        onEvent?.(dataStr);
                     }
                 } catch (error) {
                     if (isDev) {

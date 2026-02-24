@@ -67,13 +67,9 @@ export async function handleChatRequest(
         }
     }
 
-    // Incremental capture: extract SSE events from chunks and append to Redis Stream.
-    let captureToRedis: ((chunk: string | Uint8Array) => void) | null = null;
-
     const safeEnqueue = (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
         try {
             if (signal.aborted) return;
-            if (captureToRedis) captureToRedis(chunk);
             const encoded = typeof chunk === 'string' ? sharedEncoder.encode(chunk) : chunk;
             controller.enqueue(encoded);
         } catch (error) {
@@ -87,23 +83,6 @@ export async function handleChatRequest(
     const stream = new ReadableStream({
         async start(controller) {
             let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
-            const captureDecoder = new TextDecoder();
-            let captureBuffer = '';
-            if (streamId) {
-                captureToRedis = (chunk) => {
-                    const text = typeof chunk === 'string'
-                        ? chunk
-                        : captureDecoder.decode(chunk, { stream: true });
-                    captureBuffer += text;
-                    const lines = captureBuffer.split('\n');
-                    captureBuffer = lines.pop() || '';
-                    for (const line of lines) {
-                        if (!line.startsWith('data: ')) continue;
-                        // Fire-and-forget: append each event to Redis Stream incrementally.
-                        void appendChatStreamEvent(user.id, streamId, line.slice(6));
-                    }
-                };
-            }
 
             if (signal.aborted) return;
 
@@ -225,19 +204,43 @@ export async function handleChatRequest(
                 heartbeatInterval = setInterval(() => {
                     safeEnqueue(controller, ': keep-alive\n\n');
                 }, 15000);
+                // Capture events for Redis directly from strings — no decode round-trip.
+                const captureEvent = streamId
+                    ? (event: string) => { void appendChatStreamEvent(user.id, streamId, event); }
+                    : undefined;
+
                 if (chatProvider.needsThinkTagTransform) {
                     // Chutes/OpenRouter: SSE content may embed <think> tags that need
                     // to be parsed and mapped to reasoning_content fields.
-                    await processAndTransformStream(sourceStream, controller, signal);
+                    await processAndTransformStream(sourceStream, controller, signal, captureEvent);
                 } else {
                     // Google: stream is already in final SSE format with content/reasoning_content
                     // properly separated. Pipe bytes directly — no JSON round-trip needed.
+                    const pipeDecoder = new TextDecoder();
                     const reader = sourceStream.getReader();
+                    let pipeBuffer = '';
                     try {
                         while (true) {
                             if (signal.aborted) break;
                             const { done, value } = await reader.read();
                             if (done) break;
+
+                            // Decode once for event capture (only when caching is active).
+                            if (captureEvent) {
+                                pipeBuffer += pipeDecoder.decode(value, { stream: true });
+                                let nlIdx: number;
+                                let searchFrom = 0;
+                                while ((nlIdx = pipeBuffer.indexOf('\n', searchFrom)) !== -1) {
+                                    const line = pipeBuffer.substring(searchFrom, nlIdx);
+                                    searchFrom = nlIdx + 1;
+                                    if (line.startsWith('data: ')) {
+                                        captureEvent(line.substring(6));
+                                    }
+                                }
+                                pipeBuffer = searchFrom > 0 ? pipeBuffer.substring(searchFrom) : pipeBuffer;
+                            }
+
+                            // Enqueue the original bytes directly — no re-encode.
                             safeEnqueue(controller, value);
                         }
                     } finally {
@@ -269,7 +272,6 @@ export async function handleChatRequest(
                     await expireChatStream(user.id, streamId);
                 }
             } finally {
-                captureToRedis = null;
                 if (streamId) {
                     await releaseChatStreamLock(user.id, streamId, streamLockToken);
                 }
