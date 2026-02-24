@@ -71,6 +71,9 @@ export interface GenerationResult {
 }
 
 const MAX_STREAM_RESUME_ATTEMPTS = 2;
+const STREAM_BUFFER_WARN_CHARS = 256 * 1024;
+const STREAM_BUFFER_MAX_CHARS = 2 * 1024 * 1024;
+const IS_DEV = process.env.NODE_ENV !== 'production';
 
 function isAttachment(value: unknown): value is Attachment {
     if (!value || typeof value !== 'object') return false;
@@ -200,6 +203,7 @@ export class ChatService {
 
             const decoder = new TextDecoder();
             let buffer = '';
+            let warnedLargeBuffer = false;
 
             try {
                 while (true) {
@@ -248,6 +252,7 @@ export class ChatService {
                             // Hot path: extract delta fields directly via indexOf
                             // instead of JSON.parse to avoid allocating a full object.
                             const reasoningContent =
+                                extractJsonStringField(data, 'r') ||
                                 extractJsonStringField(data, 'reasoning_content') ||
                                 extractJsonStringField(data, 'thinking');
 
@@ -255,7 +260,9 @@ export class ChatService {
                                 yield { type: 'reasoning', value: reasoningContent };
                             }
 
-                            const content = extractJsonStringField(data, 'content');
+                            const content =
+                                extractJsonStringField(data, 'c') ||
+                                extractJsonStringField(data, 'content');
                             if (content) {
                                 yield { type: 'content', value: content };
                             }
@@ -272,6 +279,15 @@ export class ChatService {
 
                     // Keep only the unconsumed remainder in the buffer.
                     buffer = searchFrom > 0 ? buffer.substring(searchFrom) : buffer;
+                    if (!warnedLargeBuffer && buffer.length > STREAM_BUFFER_WARN_CHARS) {
+                        warnedLargeBuffer = true;
+                        if (IS_DEV) {
+                            console.warn(`[chat-service] Large pending SSE buffer (${buffer.length} chars)`);
+                        }
+                    }
+                    if (buffer.length > STREAM_BUFFER_MAX_CHARS) {
+                        throw new Error('Stream buffer overflow while parsing SSE response');
+                    }
                 }
             } catch (error) {
                 const isResumeableReadError =

@@ -69,11 +69,11 @@ export async function processAndTransformStream(
             if (done) break;
 
             buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            // Keep the last partial line in the buffer
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
+            let lineStart = 0;
+            let nlIdx: number;
+            while ((nlIdx = buffer.indexOf('\n', lineStart)) !== -1) {
+                const line = buffer.substring(lineStart, nlIdx);
+                lineStart = nlIdx + 1;
                 if (signal?.aborted) break;
 
                 const trimmedLine = line.trim();
@@ -89,6 +89,16 @@ export async function processAndTransformStream(
                     flushPendingTagFragment();
                     safeEnqueue('data: [DONE]\n\n');
                     onEvent?.('[DONE]');
+                    continue;
+                }
+
+                const requiresTransform = isThinking
+                    || pendingTagFragment.length > 0
+                    || dataStr.includes(THINK_START_TAG)
+                    || dataStr.includes(THINK_END_TAG);
+                if (!requiresTransform) {
+                    safeEnqueue(`data: ${dataStr}\n\n`);
+                    onEvent?.(dataStr);
                     continue;
                 }
 
@@ -158,6 +168,9 @@ export async function processAndTransformStream(
                     safeEnqueue(line + '\n');
                 }
             }
+
+            // Keep the last partial line in the buffer.
+            buffer = lineStart > 0 ? buffer.substring(lineStart) : buffer;
         }
 
         // Flush any unresolved trailing fragment so no model text is dropped at stream end.

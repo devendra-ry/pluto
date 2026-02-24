@@ -285,6 +285,7 @@ export function buildSseReplayResponse(events: string[], byteOffset: number = 0)
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
         },
     });
 }

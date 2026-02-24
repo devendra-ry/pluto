@@ -218,16 +218,7 @@ export async function getGoogleStream(
                     if (!candidate?.content?.parts) continue;
                     for (const part of candidate.content.parts) {
                         if (!part.text) continue;
-                        const data = JSON.stringify({
-                            choices: [{
-                                delta: {
-                                    content: part.thought ? undefined : part.text,
-                                    reasoning_content: part.thought ? part.text : undefined
-                                },
-                                index: 0,
-                                finish_reason: null
-                            }]
-                        });
+                        const data = JSON.stringify(part.thought ? { r: part.text } : { c: part.text });
                         controller.enqueue(sharedTextEncoder.encode(`data: ${data}\n\n`));
                     }
                 }
