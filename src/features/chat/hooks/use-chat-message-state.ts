@@ -3,7 +3,7 @@
 import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 
 import { type Message } from '@/features/messages/hooks/use-messages';
-import { type ChatViewMessage } from '@/features/chat/lib/chat-view';
+import { type ChatResponseStats, type ChatViewMessage } from '@/features/chat/lib/chat-view';
 import { type Attachment } from '@/shared/core/types';
 
 function areAttachmentListsEqual(left: Attachment[] | undefined, right: Attachment[] | undefined) {
@@ -25,7 +25,16 @@ function areAttachmentListsEqual(left: Attachment[] | undefined, right: Attachme
     return true;
 }
 
-function mapStoredMessageToViewMessage(message: Message): ChatViewMessage {
+function shouldPreserveStats(previous: ChatViewMessage | undefined, message: Message): previous is ChatViewMessage {
+    if (!previous || previous.role !== 'assistant') return false;
+    return (
+        previous.content === message.content
+        && (previous.reasoning ?? undefined) === (message.reasoning ?? undefined)
+        && (previous.model_id ?? undefined) === (message.model_id ?? undefined)
+    );
+}
+
+function mapStoredMessageToViewMessage(message: Message, previousStats?: ChatResponseStats): ChatViewMessage {
     return {
         id: message.id,
         role: message.role,
@@ -33,6 +42,7 @@ function mapStoredMessageToViewMessage(message: Message): ChatViewMessage {
         attachments: message.attachments ?? [],
         reasoning: message.reasoning,
         model_id: message.model_id,
+        stats: previousStats,
     };
 }
 
@@ -75,7 +85,12 @@ export function useChatMessageState({
                 }
             }
 
-            return nextStoredMessages.map(mapStoredMessageToViewMessage);
+            const previousById = new Map(prev.map((message) => [message.id, message]));
+            return nextStoredMessages.map((storedMessage) => {
+                const previous = previousById.get(storedMessage.id);
+                const stats = shouldPreserveStats(previous, storedMessage) ? previous.stats : undefined;
+                return mapStoredMessageToViewMessage(storedMessage, stats);
+            });
         });
     }, [setMessages]);
 

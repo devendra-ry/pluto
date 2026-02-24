@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/shared/core/utils';
 import { type Attachment } from '@/shared/core/types';
+import { type ChatResponseStats } from '@/features/chat/lib/chat-view';
 import { isLegacyAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
 import { ActionIcon } from './chat-action-icon';
 import { StreamingMarkdown } from './streaming-markdown';
@@ -42,6 +43,7 @@ interface AssistantMessageProps {
     isThinking?: boolean;
     modelName?: string;
     reasoning?: string;
+    stats?: ChatResponseStats;
     onRetry?: (id: string) => void;
 }
 
@@ -53,6 +55,7 @@ export function AssistantMessage({
     isThinking,
     modelName,
     reasoning,
+    stats,
     onRetry,
 }: AssistantMessageProps) {
     // Collapsed by default
@@ -72,6 +75,14 @@ export function AssistantMessage({
 
     // Show loading indicator for non-thinking models when streaming but no content yet
     const showLoadingDots = isStreaming && !content && !reasoning && attachments.length === 0 && !isThinking;
+    const formattedStats = stats
+        ? {
+            outputTokens: Math.max(0, Math.round(stats.outputTokens)),
+            seconds: Number(stats.seconds.toFixed(1)),
+            tokensPerSecond: Number(stats.tokensPerSecond.toFixed(1)),
+            ttfbSeconds: typeof stats.ttfbSeconds === 'number' ? Number(stats.ttfbSeconds.toFixed(1)) : null,
+        }
+        : null;
 
     return (
         <div className="py-1 px-4 group">
@@ -215,6 +226,17 @@ export function AssistantMessage({
                                 </a>
                             );
                         })}
+                    </div>
+                )}
+
+                {formattedStats && (
+                    <div className="mt-2 text-xs text-zinc-500/90">
+                        {formattedStats.outputTokens} tok
+                        {' • '}
+                        {formattedStats.seconds}s
+                        {' • '}
+                        {formattedStats.tokensPerSecond} tok/s
+                        {formattedStats.ttfbSeconds !== null ? ` • TTFB ${formattedStats.ttfbSeconds}s` : ''}
                     </div>
                 )}
 

@@ -15,7 +15,7 @@ import { touchThread, updateThreadTitleIfNewChat } from '@/features/threads/hook
 import { scheduleFrame } from '@/shared/lib/animation-frame';
 import { chatService } from '@/features/chat/lib/chat-service';
 import { AVAILABLE_MODELS, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
-import { type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
+import { type ChatResponseStats, type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
 import { sanitizeThreadTitle } from '@/features/threads/lib/sanitize-thread-title';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
 
@@ -45,6 +45,23 @@ const INITIAL_STATE: StreamState = {
     activeUserMessageId: null,
     lastRequestFailed: false,
 };
+
+function estimateOutputTokens(content: string, reasoning: string): number {
+    const totalChars = content.length + reasoning.length;
+    if (totalChars <= 0) return 0;
+    return Math.ceil(totalChars / 3.5);
+}
+
+function areStatsEqual(left: ChatResponseStats | undefined, right: ChatResponseStats | undefined): boolean {
+    if (!left && !right) return true;
+    if (!left || !right) return false;
+    return (
+        left.outputTokens === right.outputTokens
+        && left.seconds === right.seconds
+        && left.tokensPerSecond === right.tokensPerSecond
+        && left.ttfbSeconds === right.ttfbSeconds
+    );
+}
 
 function streamReducer(state: StreamState, action: StreamAction): StreamState {
     switch (action.type) {
@@ -233,24 +250,42 @@ export function useChatStream({
         };
         void updateTitleIfNeeded();
 
+        const requestStartedAt = performance.now();
+        let firstTokenAt: number | null = null;
         let fullContent = '';
         let fullReasoning = '';
         let lastFlushedContent = '';
         let lastFlushedReasoning = '';
+        let lastFlushedStats: ChatResponseStats | undefined;
         let hasPendingAssistantUpdate = false;
         let requestFailed = false;
         let requestSucceeded = false;
 
+        const buildReplyStats = (): ChatResponseStats | undefined => {
+            if (firstTokenAt === null) return undefined;
+            const seconds = Math.max((performance.now() - firstTokenAt) / 1000, 0.001);
+            const outputTokens = estimateOutputTokens(fullContent, fullReasoning);
+            const tokensPerSecond = outputTokens / seconds;
+            const ttfbSeconds = Math.max((firstTokenAt - requestStartedAt) / 1000, 0);
+            return { outputTokens, seconds, tokensPerSecond, ttfbSeconds };
+        };
+
         const flushAssistantUpdate = () => {
             if (!hasPendingAssistantUpdate) return;
+            const nextStats = buildReplyStats();
             // Guard: skip if content hasn't actually changed since last flush.
-            if (fullContent === lastFlushedContent && fullReasoning === lastFlushedReasoning) {
+            if (
+                fullContent === lastFlushedContent
+                && fullReasoning === lastFlushedReasoning
+                && areStatsEqual(lastFlushedStats, nextStats)
+            ) {
                 hasPendingAssistantUpdate = false;
                 return;
             }
             hasPendingAssistantUpdate = false;
             lastFlushedContent = fullContent;
             lastFlushedReasoning = fullReasoning;
+            lastFlushedStats = nextStats;
             setMessages((prev) => {
                 // Use the stored index for O(1) lookup.
                 // Fallback to search only if the index is stale (e.g. messages were deleted).
@@ -263,7 +298,12 @@ export function useChatStream({
 
                 const existing = prev[idx];
                 // Skip if somehow the values are already identical (defensive).
-                if (existing.content === fullContent && existing.reasoning === fullReasoning && existing.model_id === activeModelId) {
+                if (
+                    existing.content === fullContent
+                    && existing.reasoning === fullReasoning
+                    && existing.model_id === activeModelId
+                    && areStatsEqual(existing.stats, nextStats)
+                ) {
                     return prev;
                 }
 
@@ -274,6 +314,7 @@ export function useChatStream({
                     content: fullContent,
                     reasoning: fullReasoning,
                     model_id: activeModelId,
+                    stats: nextStats,
                 };
                 return updated;
             });
@@ -327,7 +368,7 @@ export function useChatStream({
                     attachment.mimeType.startsWith('image/')
                 );
 
-                const { content, attachment, operation, revisedPrompt } = await chatService.generateImageOrVideo({
+                const { content, attachment, operation } = await chatService.generateImageOrVideo({
                     threadId: chatId,
                     model: activeModelId,
                     prompt: lastMsg.content,
@@ -385,12 +426,18 @@ export function useChatStream({
             for await (const chunk of stream) {
                 if (chunk.type === 'reasoning') {
                     if (supportsReasoning) {
+                        if (chunk.value && firstTokenAt === null) {
+                            firstTokenAt = performance.now();
+                        }
                         fullReasoning += chunk.value;
                         hasPendingAssistantUpdate = true;
                         await waitForFrameFlush();
                         dispatch({ type: 'SET_THINKING', thinking: true });
                     }
                 } else if (chunk.type === 'content') {
+                    if (chunk.value && firstTokenAt === null) {
+                        firstTokenAt = performance.now();
+                    }
                     dispatch({ type: 'SET_THINKING', thinking: false });
                     fullContent += chunk.value;
                     hasPendingAssistantUpdate = true;

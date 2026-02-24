@@ -2,6 +2,7 @@
 
 import { memo } from 'react';
 import { type Attachment } from '@/shared/core/types';
+import { type ChatResponseStats } from '@/features/chat/lib/chat-view';
 import { UserMessage } from './chat-message-user';
 import { AssistantMessage } from './chat-message-assistant';
 
@@ -14,6 +15,7 @@ interface ChatMessageProps {
     isThinking?: boolean;
     modelName?: string;
     reasoning?: string;
+    stats?: ChatResponseStats;
     onEdit?: (id: string, newContent: string) => void;
     onRetry?: (id: string) => void;
 }
@@ -27,6 +29,7 @@ export const ChatMessage = memo(function ChatMessage({
     isThinking,
     modelName,
     reasoning,
+    stats,
     onEdit,
     onRetry,
 }: ChatMessageProps) {
@@ -53,6 +56,7 @@ export const ChatMessage = memo(function ChatMessage({
             isThinking={isThinking}
             modelName={modelName}
             reasoning={reasoning}
+            stats={stats}
             onRetry={onRetry}
         />
     );

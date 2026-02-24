@@ -61,6 +61,7 @@ export function ChatMessageList({
                         content={message.content.replace(HEADING_FIX_REGEX, '$1 $2')}
                         attachments={message.attachments}
                         reasoning={message.reasoning}
+                        stats={message.stats}
                         isStreaming={isLoading && index === messages.length - 1 && message.role === 'assistant'}
                         isThinking={isThinking && index === messages.length - 1 && message.role === 'assistant'}
                         modelName={message.role === 'assistant' ? selectedModel?.name : undefined}
