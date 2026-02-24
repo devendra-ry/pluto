@@ -92,6 +92,7 @@ export type Database = {
           deleted_by: string | null
           id: string
           model_id: string | null
+          reply_stats: Json | null
           reasoning: string | null
           role: string
           thread_id: string
@@ -105,6 +106,7 @@ export type Database = {
           deleted_by?: string | null
           id?: string
           model_id?: string | null
+          reply_stats?: Json | null
           reasoning?: string | null
           role: string
           thread_id: string
@@ -118,6 +120,7 @@ export type Database = {
           deleted_by?: string | null
           id?: string
           model_id?: string | null
+          reply_stats?: Json | null
           reasoning?: string | null
           role?: string
           thread_id?: string

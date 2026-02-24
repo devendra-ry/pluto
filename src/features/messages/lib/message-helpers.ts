@@ -1,5 +1,5 @@
 import type { Database } from '@/utils/supabase/database.types';
-import type { Attachment } from '@/shared/core/types';
+import type { Attachment, ChatResponseStats } from '@/shared/core/types';
 
 export interface Message {
     id: string;
@@ -9,14 +9,15 @@ export interface Message {
     attachments?: Attachment[];
     reasoning?: string;
     model_id?: string;
+    reply_stats?: ChatResponseStats;
     created_at: string;
     deleted_at?: string | null;
 }
 
-export const MESSAGE_SELECT_COLUMNS = 'id,thread_id,role,content,attachments,reasoning,model_id,created_at,deleted_at';
+export const MESSAGE_SELECT_COLUMNS = 'id,thread_id,role,content,attachments,reasoning,model_id,reply_stats,created_at,deleted_at';
 export type MessageRow = Pick<
     Database['public']['Tables']['messages']['Row'],
-    'id' | 'thread_id' | 'role' | 'content' | 'attachments' | 'reasoning' | 'model_id' | 'created_at' | 'deleted_at'
+    'id' | 'thread_id' | 'role' | 'content' | 'attachments' | 'reasoning' | 'model_id' | 'reply_stats' | 'created_at' | 'deleted_at'
 >;
 
 export function sortMessagesByCreatedAt(messages: Message[]) {
@@ -68,6 +69,45 @@ export function attachmentsFromUnknown(value: unknown): Attachment[] {
     return attachments;
 }
 
+export function chatResponseStatsFromUnknown(value: unknown): ChatResponseStats | undefined {
+    if (!value || typeof value !== 'object') return undefined;
+    const record = value as Record<string, unknown>;
+    const outputTokens = record.outputTokens;
+    const seconds = record.seconds;
+    const tokensPerSecond = record.tokensPerSecond;
+    const ttfbSeconds = record.ttfbSeconds;
+
+    if (
+        typeof outputTokens !== 'number'
+        || !Number.isFinite(outputTokens)
+        || outputTokens < 0
+        || !Number.isInteger(outputTokens)
+        || typeof seconds !== 'number'
+        || !Number.isFinite(seconds)
+        || seconds < 0
+        || typeof tokensPerSecond !== 'number'
+        || !Number.isFinite(tokensPerSecond)
+        || tokensPerSecond < 0
+    ) {
+        return undefined;
+    }
+
+    if (ttfbSeconds !== undefined && (
+        typeof ttfbSeconds !== 'number'
+        || !Number.isFinite(ttfbSeconds)
+        || ttfbSeconds < 0
+    )) {
+        return undefined;
+    }
+
+    return {
+        outputTokens,
+        seconds,
+        tokensPerSecond,
+        ttfbSeconds: typeof ttfbSeconds === 'number' ? ttfbSeconds : undefined,
+    };
+}
+
 export function toMessage(value: unknown): Message | null {
     if (!value || typeof value !== 'object') return null;
     const record = value as Record<string, unknown>;
@@ -89,6 +129,7 @@ export function toMessage(value: unknown): Message | null {
         attachments: attachmentsFromUnknown(record.attachments),
         reasoning: typeof record.reasoning === 'string' ? record.reasoning : undefined,
         model_id: typeof record.model_id === 'string' ? record.model_id : undefined,
+        reply_stats: chatResponseStatsFromUnknown(record.reply_stats),
         created_at: record.created_at,
         deleted_at: typeof record.deleted_at === 'string' ? record.deleted_at : null,
     };
@@ -103,6 +144,7 @@ export function mapMessageRowToMessage(row: MessageRow): Message {
         attachments: attachmentsFromUnknown(row.attachments),
         reasoning: row.reasoning ?? undefined,
         model_id: row.model_id ?? undefined,
+        reply_stats: chatResponseStatsFromUnknown(row.reply_stats),
         created_at: row.created_at,
         deleted_at: row.deleted_at ?? null,
     };

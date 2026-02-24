@@ -25,6 +25,17 @@ function areAttachmentListsEqual(left: Attachment[] | undefined, right: Attachme
     return true;
 }
 
+function areReplyStatsEqual(left: ChatResponseStats | undefined, right: ChatResponseStats | undefined) {
+    if (!left && !right) return true;
+    if (!left || !right) return false;
+    return (
+        left.outputTokens === right.outputTokens
+        && left.seconds === right.seconds
+        && left.tokensPerSecond === right.tokensPerSecond
+        && left.ttfbSeconds === right.ttfbSeconds
+    );
+}
+
 function shouldPreserveStats(previous: ChatViewMessage | undefined, message: Message): previous is ChatViewMessage {
     if (!previous || previous.role !== 'assistant') return false;
     return (
@@ -42,17 +53,19 @@ function mapStoredMessageToViewMessage(message: Message, previousStats?: ChatRes
         attachments: message.attachments ?? [],
         reasoning: message.reasoning,
         model_id: message.model_id,
-        stats: previousStats,
+        stats: message.reply_stats ?? previousStats,
     };
 }
 
 function isSameMessageSnapshot(view: ChatViewMessage, stored: Message) {
+    const storedStats = stored.reply_stats ?? undefined;
     return (
         view.id === stored.id
         && view.role === stored.role
         && view.content === stored.content
         && (view.reasoning ?? undefined) === (stored.reasoning ?? undefined)
         && (view.model_id ?? undefined) === (stored.model_id ?? undefined)
+        && areReplyStatsEqual(view.stats, storedStats)
         && areAttachmentListsEqual(view.attachments, stored.attachments)
     );
 }

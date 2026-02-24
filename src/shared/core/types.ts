@@ -19,6 +19,15 @@ export const AttachmentSchema = z.object({
 });
 export type Attachment = z.infer<typeof AttachmentSchema>;
 
+// Persisted assistant response performance stats.
+export const ChatResponseStatsSchema = z.object({
+    outputTokens: z.number().int().nonnegative(),
+    seconds: z.number().nonnegative(),
+    tokensPerSecond: z.number().nonnegative(),
+    ttfbSeconds: z.number().nonnegative().optional(),
+});
+export type ChatResponseStats = z.infer<typeof ChatResponseStatsSchema>;
+
 // Single message in a chat request
 export const ChatMessageSchema = z.object({
     role: MessageRoleSchema,

@@ -1,11 +1,5 @@
-import { type Attachment } from '@/shared/core/types';
-
-export interface ChatResponseStats {
-    outputTokens: number;
-    seconds: number;
-    tokensPerSecond: number;
-    ttfbSeconds?: number;
-}
+import { type Attachment, type ChatResponseStats } from '@/shared/core/types';
+export type { ChatResponseStats } from '@/shared/core/types';
 
 export interface ChatViewMessage {
     id: string;

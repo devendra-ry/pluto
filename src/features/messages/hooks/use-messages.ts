@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { DEFAULT_ATTACHMENTS_BUCKET } from '@/features/attachments/lib/attachments';
 import { isLegacyAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
 import { getMessagesQueryKey, getQueryClient, MESSAGE_QUERY_KEY_PREFIX } from '@/shared/lib/query-client';
-import { type Attachment } from '@/shared/core/types';
+import { type Attachment, type ChatResponseStats } from '@/shared/core/types';
 import { createClient } from '@/utils/supabase/client';
 import type { Json } from '@/utils/supabase/database.types';
 
@@ -220,7 +220,8 @@ export async function addMessage(
     content: string,
     reasoning?: string,
     modelId?: string,
-    attachments: Attachment[] = []
+    attachments: Attachment[] = [],
+    replyStats?: ChatResponseStats,
 ): Promise<Message> {
     const supabase = createClient();
     const { data, error } = await supabase
@@ -232,6 +233,7 @@ export async function addMessage(
             attachments: attachments as Json,
             reasoning,
             model_id: modelId,
+            reply_stats: replyStats ? replyStats as Json : null,
         })
         .select()
         .single();

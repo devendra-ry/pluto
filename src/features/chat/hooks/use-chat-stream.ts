@@ -342,14 +342,15 @@ export function useChatStream({
         const persistAssistantMessage = async (
             content: string,
             reasoning?: string,
-            attachments: Attachment[] = []
+            attachments: Attachment[] = [],
+            stats?: ChatResponseStats,
         ) => {
             if (!content && !reasoning && attachments.length === 0) {
                 return false;
             }
 
             dispatch({ type: 'PERSISTING' });
-            const newMsg = await addMessage(chatId, 'assistant', content, reasoning, activeModelId, attachments);
+            const newMsg = await addMessage(chatId, 'assistant', content, reasoning, activeModelId, attachments, stats);
             setMessages(prev =>
                 prev.map((m) => (m.id === assistantMsgId ? { ...m, id: newMsg.id } : m))
             );
@@ -446,7 +447,7 @@ export function useChatStream({
             }
 
             flushAssistantUpdate();
-            const persisted = await persistAssistantMessage(fullContent, fullReasoning);
+            const persisted = await persistAssistantMessage(fullContent, fullReasoning, [], buildReplyStats());
             if (!persisted) {
                 hasPendingAssistantUpdate = false;
                 setMessages(currentMessages);
@@ -464,7 +465,7 @@ export function useChatStream({
                     return false;
                 }
                 flushAssistantUpdate();
-                const persisted = await persistAssistantMessage(fullContent, fullReasoning);
+                const persisted = await persistAssistantMessage(fullContent, fullReasoning, [], buildReplyStats());
                 if (!persisted) {
                     requestFailed = true;
                     hasPendingAssistantUpdate = false;
