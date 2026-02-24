@@ -36,6 +36,7 @@ export async function handleChatRequest(
     { user, supabase }: AuthenticatedContext
 ): Promise<Response> {
     const signal = req.signal;
+    let streamClosed = false;
     const streamId = readChatStreamId(req);
     const resumeOffset = readChatResumeOffset(req);
     let streamLockToken: string | null = null;
@@ -67,7 +68,7 @@ export async function handleChatRequest(
 
     const safeEnqueue = (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
         try {
-            if (signal.aborted) return;
+            if (signal.aborted || streamClosed) return;
             const encoded = typeof chunk === 'string' ? sharedTextEncoder.encode(chunk) : chunk;
             controller.enqueue(encoded);
         } catch (error) {
@@ -75,6 +76,18 @@ export async function handleChatRequest(
                 console.warn('[chat][controller] Failed to enqueue stream chunk', error);
             }
             // Ignore closed controller errors
+        }
+    };
+
+    const safeClose = (controller: ReadableStreamDefaultController) => {
+        if (streamClosed) return;
+        streamClosed = true;
+        try {
+            controller.close();
+        } catch (error) {
+            if (IS_DEV) {
+                console.warn('[chat][controller] Failed to close stream controller', error);
+            }
         }
     };
 
@@ -90,7 +103,7 @@ export async function handleChatRequest(
                 const parseResult = ChatRequestSchema.safeParse(body);
                 if (!parseResult.success) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid request' })}\n\n`);
-                    controller.close();
+                    safeClose(controller);
                     return;
                 }
 
@@ -98,7 +111,7 @@ export async function handleChatRequest(
                 const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
                 if (!modelConfig) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid model selection' })}\n\n`);
-                    controller.close();
+                    safeClose(controller);
                     return;
                 }
 
@@ -108,13 +121,13 @@ export async function handleChatRequest(
 
                 if (modelConfig.capabilities.includes('imageGen')) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Selected model is image-generation only. Use image generation flow.' })}\n\n`);
-                    controller.close();
+                    safeClose(controller);
                     return;
                 }
 
                 if (useSearch && (chatProvider.id !== 'google' || !SEARCH_ENABLED_MODEL_SET.has(model))) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Search is supported only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite.' })}\n\n`);
-                    controller.close();
+                    safeClose(controller);
                     return;
                 }
 
@@ -123,7 +136,7 @@ export async function handleChatRequest(
                 const systemPromptPlan = resolveOutputTokenPlan(limits, limits.maxOutputTokens, systemPromptTokenEstimate);
                 if (systemPromptPlan.remainingForOutput <= 0) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'System prompt is too long for the selected model context window.' })}\n\n`);
-                    controller.close();
+                    safeClose(controller);
                     return;
                 }
 
@@ -248,24 +261,26 @@ export async function handleChatRequest(
                     }
                 }
 
-                if (heartbeatInterval) clearInterval(heartbeatInterval);
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                    heartbeatInterval = undefined;
+                }
                 if (!signal.aborted) {
-                    controller.close();
+                    safeClose(controller);
                 }
                 if (writer) {
                     await writer.close();
                 }
             } catch (error) {
-                if (heartbeatInterval) clearInterval(heartbeatInterval);
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                    heartbeatInterval = undefined;
+                }
 
                 if (!signal.aborted) {
                     console.error('Chat API error:', error);
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: GENERIC_CHAT_ERROR_MESSAGE })}\n\n`);
-                    try { controller.close(); } catch (closeError) {
-                        if (IS_DEV) {
-                            console.warn('[chat][controller] Failed to close stream controller', closeError);
-                        }
-                    }
+                    safeClose(controller);
                     await recordAbuseSignal(user.id, 'chat', 'stream-failure');
                 }
                 if (writer) {

@@ -1,5 +1,6 @@
 import { type Attachment, type ChatMessage, type ReasoningEffort } from '@/shared/core/types';
 import { createIdempotencyKey } from '@/shared/lib/idempotency';
+import { sharedTextEncoder } from '@/shared/lib/text-encoder';
 
 /**
  * Extract a string-typed field value from a JSON string using indexOf,
@@ -220,7 +221,6 @@ export class ChatService {
                         return;
                     }
 
-                    resumeByteOffset += value.byteLength;
                     buffer += decoder.decode(value, { stream: true });
 
                     // indexOf-based line scanner — avoids split() array allocation.
@@ -234,6 +234,10 @@ export class ChatService {
 
                         if (!line.startsWith('data: ')) continue;
                         const data = line.substring(6);
+                        // Track acknowledged bytes by complete SSE data events so resume
+                        // offsets stay aligned with replay semantics and avoid decode
+                        // boundary drift from partial UTF-8 chunks.
+                        resumeByteOffset += sharedTextEncoder.encode(`data: ${data}\n\n`).byteLength;
 
                         if (data === '[DONE]') continue;
 
@@ -256,6 +260,7 @@ export class ChatService {
                                 extractJsonStringField(data, 'reasoning_content') ||
                                 extractJsonStringField(data, 'thinking');
 
+                            // Empty-string chunks are intentionally treated as no-op.
                             if (reasoningContent) {
                                 yield { type: 'reasoning', value: reasoningContent };
                             }
@@ -263,6 +268,7 @@ export class ChatService {
                             const content =
                                 extractJsonStringField(data, 'c') ||
                                 extractJsonStringField(data, 'content');
+                            // Empty-string chunks are intentionally treated as no-op.
                             if (content) {
                                 yield { type: 'content', value: content };
                             }
