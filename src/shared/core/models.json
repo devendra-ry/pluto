@@ -264,8 +264,10 @@
         "description": "Xiaomi's fast reasoning model with TEE",
         "provider": "XiaomiMiMo",
         "supportsReasoning": true,
+        "usesThinkingParam": true,
         "capabilities": [
             "reasoning",
+            "effortControl",
             "fast"
         ]
     }
