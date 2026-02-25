@@ -244,15 +244,15 @@ export function useThreads() {
 
         const setup = async () => {
             try {
-                // Use getSession() (local JWT parse) instead of getUser() to avoid a network round-trip.
-                const { data: { session }, error: authError } = await supabase.auth.getSession();
+                // Authenticate user via the Supabase Auth server.
+                const { data: { user }, error: authError } = await supabase.auth.getUser();
                 if (!isActive) return;
                 if (authError) {
                     console.error('[useThreads] Error resolving current user:', authError);
                     return;
                 }
 
-                localUserId = session?.user?.id ?? null;
+                localUserId = user?.id ?? null;
                 setCurrentUserId(localUserId);
             } catch (err) {
                 if (!isActive) return;
@@ -354,12 +354,12 @@ const triggerRefresh = () => {
 export async function createThread(model: string, reasoningEffort?: ReasoningEffort, systemPrompt?: string | null): Promise<Thread> {
     const supabase = createClient();
 
-    // Use getSession() (local JWT parse) — RLS on the insert will enforce auth server-side.
-    const { data: { session }, error: authError } = await supabase.auth.getSession();
+    // Authenticate user via the Supabase Auth server.
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError) {
         throw authError;
     }
-    const userId = session?.user?.id ?? null;
+    const userId = user?.id ?? null;
     if (!userId) {
         throw new Error('You must be signed in to create a chat.');
     }
