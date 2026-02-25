@@ -35,19 +35,6 @@
         ]
     },
     {
-        "id": "openai/gpt-oss-20b",
-        "name": "GPT-OSS 20B",
-        "description": "Open source GPT 20B (toggle thinking)",
-        "provider": "openai",
-        "supportsReasoning": true,
-        "usesThinkingParam": true,
-        "capabilities": [
-            "fast",
-            "reasoning",
-            "effortControl"
-        ]
-    },
-    {
         "id": "moonshotai/Kimi-K2.5-TEE",
         "name": "Kimi K2.5",
         "description": "Moonshot AI latest model (toggle thinking)",
@@ -74,18 +61,6 @@
         "id": "zai-org/GLM-4.7-TEE",
         "name": "GLM 4.7 TEE",
         "description": "GLM with TEE security (toggle thinking)",
-        "provider": "zai-org",
-        "supportsReasoning": true,
-        "usesThinkingParam": true,
-        "capabilities": [
-            "reasoning",
-            "effortControl"
-        ]
-    },
-    {
-        "id": "zai-org/GLM-4.7-FP8",
-        "name": "GLM 4.7 FP8",
-        "description": "GLM optimized FP8 (toggle thinking)",
         "provider": "zai-org",
         "supportsReasoning": true,
         "usesThinkingParam": true,
@@ -140,46 +115,6 @@
         "supportsReasoning": true,
         "capabilities": [
             "reasoning"
-        ]
-    },
-    {
-        "id": "NousResearch/Hermes-4.3-36B",
-        "name": "Hermes 4.3 36B",
-        "description": "Efficient and smart Hermes model",
-        "provider": "NousResearch",
-        "supportsReasoning": true,
-        "usesThinkingParam": true,
-        "capabilities": [
-            "fast",
-            "reasoning",
-            "effortControl",
-            "toolCalling"
-        ]
-    },
-    {
-        "id": "NousResearch/Hermes-4-70B",
-        "name": "Hermes 4 70B",
-        "description": "Large-scale Hermes language model",
-        "provider": "NousResearch",
-        "supportsReasoning": true,
-        "usesThinkingParam": true,
-        "capabilities": [
-            "reasoning",
-            "effortControl",
-            "toolCalling"
-        ]
-    },
-    {
-        "id": "NousResearch/Hermes-4-405B-FP8-TEE",
-        "name": "Hermes 4 405B TEE",
-        "description": "Flagship Hermes model with TEE protection",
-        "provider": "NousResearch",
-        "supportsReasoning": true,
-        "usesThinkingParam": true,
-        "capabilities": [
-            "reasoning",
-            "effortControl",
-            "toolCalling"
         ]
     },
     {
@@ -246,16 +181,6 @@
             "vision",
             "toolCalling",
             "fast"
-        ]
-    },
-    {
-        "id": "tngtech/DeepSeek-TNG-R1T2-Chimera",
-        "name": "DeepSeek TNG-R1T2 Chimera",
-        "description": "Advanced reasoning model (Chimera)",
-        "provider": "deepseek-ai",
-        "supportsReasoning": true,
-        "capabilities": [
-            "reasoning"
         ]
     },
     {

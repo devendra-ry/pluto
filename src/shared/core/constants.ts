@@ -34,7 +34,7 @@ export const PROVIDERS: Provider[] = [
     { id: 'zai-org', name: 'ZAI', color: '#9B59B6' },
     { id: 'Qwen', name: 'Qwen', color: '#3498DB' },
     { id: 'XiaomiMiMo', name: 'Xiaomi MiMo', color: '#FF6900' },
-    { id: 'NousResearch', name: 'Nous', color: '#FFFFFF' },
+
     { id: 'google', name: 'Google', color: '#4285F4' },
     { id: 'openrouter', name: 'OpenRouter', color: '#6563FF' },
 ];
