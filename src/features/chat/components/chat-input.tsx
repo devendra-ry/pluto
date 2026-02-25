@@ -69,6 +69,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const isImageEditModeRef = useRef(false);
     const isVideoModeRef = useRef(false);
     const isSearchModeRef = useRef(false);
+    const searchForcedRef = useRef(false);
     const selectedImageModelIdRef = useRef(IMAGE_GENERATION_MODEL);
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
     const { showToast } = useToast();
@@ -102,15 +103,21 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const activeMode: ChatSubmitMode = isImageMode
         ? 'image'
         : isImageEditMode
-        ? 'image-edit'
-        : isVideoMode
-        ? 'video'
-        : isSearchMode
-        ? 'search'
-        : 'chat';
+            ? 'image-edit'
+            : isVideoMode
+                ? 'video'
+                : isSearchMode
+                    ? 'search'
+                    : 'chat';
 
     useEffect(() => {
         if (!supportsSearchMode && isSearchMode) {
+            // Skip the reset if search mode was force-set (e.g. by pending generation handoff)
+            // before the model prop has caught up.
+            if (searchForcedRef.current) {
+                searchForcedRef.current = false;
+                return;
+            }
             isSearchModeRef.current = false;
             setIsSearchMode(false);
             showToast('Search is available only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite', 'error');
@@ -303,9 +310,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         }
     };
 
-    const setMode = useCallback((mode: ChatSubmitMode) => {
+    const setMode = useCallback((mode: ChatSubmitMode, force?: boolean) => {
         if (mode === activeMode) return;
-        if (mode === 'search' && !supportsSearchMode) {
+        if (mode === 'search' && !force && !supportsSearchMode) {
             showToast('Search is available only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite', 'error');
             return;
         }
@@ -324,6 +331,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         setIsVideoMode(nextVideo);
         isSearchModeRef.current = nextSearch;
         setIsSearchMode(nextSearch);
+        if (force && nextSearch) {
+            searchForcedRef.current = true;
+        }
 
         if (nextImage || nextImageEdit || nextVideo) {
             const tasks = uploadTasksRef.current;
@@ -355,7 +365,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             });
         },
         focus: () => textareaRef.current?.focus(),
-        setMode: (mode: ChatSubmitMode) => setMode(mode),
+        setMode: (mode: ChatSubmitMode) => setMode(mode, true),
         setImageModelId: (modelId: string) => setImageModelId(modelId),
         getMode: () => getSubmitMode(),
         getImageModelId: () => selectedImageModelIdRef.current,
@@ -585,12 +595,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                             {isImageMode
                                                 ? 'Attachments are disabled in Image mode'
                                                 : isImageEditMode
-                                                ? 'Attach one or more images to edit'
-                                                : isVideoMode
-                                                ? 'Attach one image to animate'
-                                                : supportsAttachments
-                                                ? 'Attach file'
-                                                : 'Use an attachment-capable model to attach files'}
+                                                    ? 'Attach one or more images to edit'
+                                                    : isVideoMode
+                                                        ? 'Attach one image to animate'
+                                                        : supportsAttachments
+                                                            ? 'Attach file'
+                                                            : 'Use an attachment-capable model to attach files'}
                                         </span>
                                     </div>
                                 </div>
