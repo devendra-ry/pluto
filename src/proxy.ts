@@ -4,8 +4,10 @@ import { createClient } from "@/utils/supabase/middleware";
 export async function proxy(request: NextRequest) {
     const { supabase, supabaseResponse } = createClient(request);
 
-    // This will refresh the session if needed
-    const { data: { user } } = await supabase.auth.getUser();
+    // Refresh session cookie locally (JWT parse only — no network call).
+    // Actual server-verified auth happens in route handlers via requireUser().
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user ?? null;
 
     const { pathname } = request.nextUrl;
 

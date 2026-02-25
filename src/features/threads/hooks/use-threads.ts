@@ -244,14 +244,15 @@ export function useThreads() {
 
         const setup = async () => {
             try {
-                const { data: authData, error: authError } = await supabase.auth.getUser();
+                // Use getSession() (local JWT parse) instead of getUser() to avoid a network round-trip.
+                const { data: { session }, error: authError } = await supabase.auth.getSession();
                 if (!isActive) return;
                 if (authError) {
                     console.error('[useThreads] Error resolving current user:', authError);
                     return;
                 }
 
-                localUserId = authData?.user?.id ?? null;
+                localUserId = session?.user?.id ?? null;
                 setCurrentUserId(localUserId);
             } catch (err) {
                 if (!isActive) return;
@@ -276,6 +277,22 @@ export function useThreads() {
 
         void setup();
 
+        // React to sign-in / sign-out without issuing extra getUser() calls.
+        const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange(
+            (_event, session) => {
+                if (!isActive) return;
+                const nextUserId = session?.user?.id ?? null;
+                localUserId = nextUserId;
+                setCurrentUserId(nextUserId);
+                if (nextUserId) {
+                    void fetchThreads();
+                } else {
+                    setThreads([]);
+                    unsubscribeRealtime();
+                }
+            }
+        );
+
         // Local CustomEvent sync for immediate updates
         const handleRefresh = () => {
             void fetchThreads();
@@ -294,6 +311,7 @@ export function useThreads() {
         return () => {
             isActive = false;
             backfillRunRef.current += 1;
+            authSubscription.unsubscribe();
             if (typeof document !== 'undefined') {
                 document.removeEventListener('visibilitychange', handleVisibilityChange);
             }
@@ -336,11 +354,12 @@ const triggerRefresh = () => {
 export async function createThread(model: string, reasoningEffort?: ReasoningEffort, systemPrompt?: string | null): Promise<Thread> {
     const supabase = createClient();
 
-    const { data: authData, error: authError } = await supabase.auth.getUser();
+    // Use getSession() (local JWT parse) — RLS on the insert will enforce auth server-side.
+    const { data: { session }, error: authError } = await supabase.auth.getSession();
     if (authError) {
         throw authError;
     }
-    const userId = authData.user?.id ?? null;
+    const userId = session?.user?.id ?? null;
     if (!userId) {
         throw new Error('You must be signed in to create a chat.');
     }
