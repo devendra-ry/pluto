@@ -1,6 +1,6 @@
 'use client';
 
-import { Minimax, Qwen, Zhipu, NousResearch, Gemini, OpenRouter, OpenAI, Kimi, DeepSeek } from '@lobehub/icons';
+import { Minimax, Qwen, Zhipu, NousResearch, Gemini, OpenRouter, OpenAI, Kimi, DeepSeek, XiaomiMiMo } from '@lobehub/icons';
 import { useState, useMemo, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -66,6 +66,7 @@ const PROVIDER_LOGOS: Record<string, React.ComponentType<{ className?: string }>
     'NousResearch': ({ className }) => <div className={cn(className, "pointer-events-none")}><NousResearch size={20} /></div>,
     'google': ({ className }) => <div className={cn(className, "pointer-events-none")}><Gemini.Color size={20} /></div>,
     'openrouter': ({ className }) => <div className={cn(className, "pointer-events-none")}><OpenRouter size={20} /></div>,
+    'XiaomiMiMo': ({ className }) => <div className={cn(className, "pointer-events-none")}><XiaomiMiMo size={20} /></div>,
 };
 
 export const ModelSelector = memo(function ModelSelector({ currentModel, onModelChange }: ModelSelectorProps) {

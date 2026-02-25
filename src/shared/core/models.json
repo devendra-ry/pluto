@@ -5,7 +5,9 @@
         "description": "Latest DeepSeek with TEE",
         "provider": "deepseek-ai",
         "supportsReasoning": true,
-        "capabilities": ["reasoning"]
+        "capabilities": [
+            "reasoning"
+        ]
     },
     {
         "id": "deepseek-ai/DeepSeek-V3.2-TEE",
@@ -14,7 +16,10 @@
         "provider": "deepseek-ai",
         "supportsReasoning": true,
         "usesThinkingParam": true,
-        "capabilities": ["reasoning", "effortControl"]
+        "capabilities": [
+            "reasoning",
+            "effortControl"
+        ]
     },
     {
         "id": "openai/gpt-oss-120b-TEE",
@@ -23,7 +28,11 @@
         "provider": "openai",
         "supportsReasoning": true,
         "usesThinkingParam": true,
-        "capabilities": ["fast", "reasoning", "effortControl"]
+        "capabilities": [
+            "fast",
+            "reasoning",
+            "effortControl"
+        ]
     },
     {
         "id": "openai/gpt-oss-20b",
@@ -32,7 +41,11 @@
         "provider": "openai",
         "supportsReasoning": true,
         "usesThinkingParam": true,
-        "capabilities": ["fast", "reasoning", "effortControl"]
+        "capabilities": [
+            "fast",
+            "reasoning",
+            "effortControl"
+        ]
     },
     {
         "id": "moonshotai/Kimi-K2.5-TEE",
@@ -41,7 +54,11 @@
         "provider": "moonshotai",
         "supportsReasoning": true,
         "usesThinkingParam": true,
-        "capabilities": ["reasoning", "vision", "effortControl"]
+        "capabilities": [
+            "reasoning",
+            "vision",
+            "effortControl"
+        ]
     },
     {
         "id": "MiniMaxAI/MiniMax-M2.5-TEE",
@@ -49,7 +66,9 @@
         "description": "MiniMax latest flagship model",
         "provider": "MiniMaxAI",
         "supportsReasoning": true,
-        "capabilities": ["reasoning"]
+        "capabilities": [
+            "reasoning"
+        ]
     },
     {
         "id": "zai-org/GLM-4.7-TEE",
@@ -58,7 +77,10 @@
         "provider": "zai-org",
         "supportsReasoning": true,
         "usesThinkingParam": true,
-        "capabilities": ["reasoning", "effortControl"]
+        "capabilities": [
+            "reasoning",
+            "effortControl"
+        ]
     },
     {
         "id": "zai-org/GLM-4.7-FP8",
@@ -67,7 +89,10 @@
         "provider": "zai-org",
         "supportsReasoning": true,
         "usesThinkingParam": true,
-        "capabilities": ["reasoning", "effortControl"]
+        "capabilities": [
+            "reasoning",
+            "effortControl"
+        ]
     },
     {
         "id": "zai-org/GLM-5-TEE",
@@ -76,7 +101,10 @@
         "provider": "zai-org",
         "supportsReasoning": true,
         "usesThinkingParam": true,
-        "capabilities": ["reasoning", "effortControl"]
+        "capabilities": [
+            "reasoning",
+            "effortControl"
+        ]
     },
     {
         "id": "Qwen/Qwen3-Coder-Next-TEE",
@@ -85,7 +113,11 @@
         "provider": "Qwen",
         "supportsReasoning": true,
         "usesThinkingParam": true,
-        "capabilities": ["reasoning", "effortControl", "toolCalling"]
+        "capabilities": [
+            "reasoning",
+            "effortControl",
+            "toolCalling"
+        ]
     },
     {
         "id": "Qwen/Qwen3.5-397B-A17B-TEE",
@@ -94,7 +126,11 @@
         "provider": "Qwen",
         "supportsReasoning": true,
         "usesThinkingParam": true,
-        "capabilities": ["reasoning", "effortControl", "toolCalling"]
+        "capabilities": [
+            "reasoning",
+            "effortControl",
+            "toolCalling"
+        ]
     },
     {
         "id": "moonshotai/Kimi-K2-Thinking-TEE",
@@ -102,7 +138,9 @@
         "description": "Kimi thinking model with TEE protection",
         "provider": "moonshotai",
         "supportsReasoning": true,
-        "capabilities": ["reasoning"]
+        "capabilities": [
+            "reasoning"
+        ]
     },
     {
         "id": "NousResearch/Hermes-4.3-36B",
@@ -111,7 +149,12 @@
         "provider": "NousResearch",
         "supportsReasoning": true,
         "usesThinkingParam": true,
-        "capabilities": ["fast", "reasoning", "effortControl", "toolCalling"]
+        "capabilities": [
+            "fast",
+            "reasoning",
+            "effortControl",
+            "toolCalling"
+        ]
     },
     {
         "id": "NousResearch/Hermes-4-70B",
@@ -120,7 +163,11 @@
         "provider": "NousResearch",
         "supportsReasoning": true,
         "usesThinkingParam": true,
-        "capabilities": ["reasoning", "effortControl", "toolCalling"]
+        "capabilities": [
+            "reasoning",
+            "effortControl",
+            "toolCalling"
+        ]
     },
     {
         "id": "NousResearch/Hermes-4-405B-FP8-TEE",
@@ -129,7 +176,11 @@
         "provider": "NousResearch",
         "supportsReasoning": true,
         "usesThinkingParam": true,
-        "capabilities": ["reasoning", "effortControl", "toolCalling"]
+        "capabilities": [
+            "reasoning",
+            "effortControl",
+            "toolCalling"
+        ]
     },
     {
         "id": "gemini-3-flash-preview",
@@ -137,7 +188,11 @@
         "description": "Google's latest reasoning model",
         "provider": "google",
         "supportsReasoning": true,
-        "capabilities": ["reasoning", "vision", "fast"]
+        "capabilities": [
+            "reasoning",
+            "vision",
+            "fast"
+        ]
     },
     {
         "id": "stepfun/step-3.5-flash:free",
@@ -145,7 +200,9 @@
         "description": "High-speed reasoning model from Stepfun",
         "provider": "openrouter",
         "supportsReasoning": true,
-        "capabilities": ["reasoning"]
+        "capabilities": [
+            "reasoning"
+        ]
     },
     {
         "id": "arcee-ai/trinity-large-preview:free",
@@ -161,7 +218,9 @@
         "description": "Lightweight efficient reasoning model from Arcee AI",
         "provider": "openrouter",
         "supportsReasoning": true,
-        "capabilities": ["reasoning"]
+        "capabilities": [
+            "reasoning"
+        ]
     },
     {
         "id": "gemini-2.5-flash",
@@ -169,7 +228,12 @@
         "description": "Fast and capable multimodal reasoning model",
         "provider": "google",
         "supportsReasoning": true,
-        "capabilities": ["reasoning", "vision", "toolCalling", "fast"]
+        "capabilities": [
+            "reasoning",
+            "vision",
+            "toolCalling",
+            "fast"
+        ]
     },
     {
         "id": "gemini-2.5-flash-lite",
@@ -177,7 +241,12 @@
         "description": "Ultra-fast lightweight reasoning model",
         "provider": "google",
         "supportsReasoning": true,
-        "capabilities": ["reasoning", "vision", "toolCalling", "fast"]
+        "capabilities": [
+            "reasoning",
+            "vision",
+            "toolCalling",
+            "fast"
+        ]
     },
     {
         "id": "tngtech/DeepSeek-TNG-R1T2-Chimera",
@@ -185,6 +254,19 @@
         "description": "Advanced reasoning model (Chimera)",
         "provider": "deepseek-ai",
         "supportsReasoning": true,
-        "capabilities": ["reasoning"]
+        "capabilities": [
+            "reasoning"
+        ]
+    },
+    {
+        "id": "XiaomiMiMo/MiMo-V2-Flash-TEE",
+        "name": "MiMo V2 Flash",
+        "description": "Xiaomi's fast reasoning model with TEE",
+        "provider": "XiaomiMiMo",
+        "supportsReasoning": true,
+        "capabilities": [
+            "reasoning",
+            "fast"
+        ]
     }
 ]
