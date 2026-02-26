@@ -191,15 +191,17 @@ export function AssistantMessage({
                             const isImage = attachment.mimeType.startsWith('image/');
                             const isVideo = attachment.mimeType.startsWith('video/');
                             return (
-                                <a
+                                <div
                                     key={attachment.id}
-                                    href={attachment.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="block rounded-xl border border-white/10 bg-black/20 hover:bg-black/30 transition-colors p-2 max-w-xl"
+                                    className="rounded-xl border border-white/10 bg-black/20 p-2 max-w-xl"
                                 >
                                     {isImage && (
-                                        <div className="mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+                                        <a
+                                            href={attachment.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="block mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/30"
+                                        >
                                             <Image
                                                 src={attachment.url}
                                                 alt={attachment.name}
@@ -208,7 +210,7 @@ export function AssistantMessage({
                                                 className="h-auto w-full object-cover"
                                                 unoptimized={isLegacyAttachmentProxyUrl(attachment.url)}
                                             />
-                                        </div>
+                                        </a>
                                     )}
                                     {isVideo && (
                                         <div className="mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
@@ -222,9 +224,17 @@ export function AssistantMessage({
                                             </video>
                                         </div>
                                     )}
-                                    <p className="text-sm text-zinc-200 truncate">{attachment.name}</p>
+                                    <a
+                                        href={attachment.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-sm text-zinc-200 hover:text-zinc-100 underline underline-offset-2 truncate block"
+                                        title={attachment.name}
+                                    >
+                                        {attachment.name}
+                                    </a>
                                     <p className="text-xs text-zinc-400">{attachment.mimeType}</p>
-                                </a>
+                                </div>
                             );
                         })}
                     </div>
