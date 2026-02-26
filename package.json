@@ -12,6 +12,7 @@
   "dependencies": {
     "@google/genai": "^1.42.0",
     "@lobehub/icons": "^4.2.0",
+    "@microsoft/fetch-event-source": "^2.0.1",
     "@openrouter/sdk": "^0.8.0",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@supabase/ssr": "^0.8.0",
@@ -27,6 +28,7 @@
     "date-fns": "^4.1.0",
     "framer-motion": "^12.33.0",
     "highlight.js": "^11.11.1",
+    "hls.js": "^1.6.15",
     "katex": "^0.16.28",
     "lucide-react": "^0.563.0",
     "nanoid": "^5.1.6",

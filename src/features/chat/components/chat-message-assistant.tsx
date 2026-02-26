@@ -10,6 +10,7 @@ import { type Attachment } from '@/shared/core/types';
 import { type ChatResponseStats } from '@/features/chat/lib/chat-view';
 import { isLegacyAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
 import { ActionIcon } from './chat-action-icon';
+import { ChatVideoPlayer } from './chat-video-player';
 import { StreamingMarkdown } from './streaming-markdown';
 
 const MARKDOWN_COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = {
@@ -214,14 +215,11 @@ export function AssistantMessage({
                                     )}
                                     {isVideo && (
                                         <div className="mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
-                                            <video
-                                                controls
-                                                preload="metadata"
-                                                playsInline
+                                            <ChatVideoPlayer
+                                                url={attachment.url}
+                                                mimeType={attachment.mimeType}
                                                 className="h-auto w-full"
-                                            >
-                                                <source src={attachment.url} type={attachment.mimeType} />
-                                            </video>
+                                            />
                                         </div>
                                     )}
                                     <a
