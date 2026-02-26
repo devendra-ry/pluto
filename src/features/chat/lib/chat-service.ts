@@ -1,44 +1,7 @@
 import { type Attachment, type ChatMessage, type ReasoningEffort } from '@/shared/core/types';
 import { createIdempotencyKey } from '@/shared/lib/idempotency';
-import { sharedTextEncoder } from '@/shared/lib/text-encoder';
-
-/**
- * Extract a string-typed field value from a JSON string using indexOf,
- * avoiding a full JSON.parse. Handles standard JSON escape sequences.
- * Returns '' if the field is absent, null, or not a string.
- */
-function extractJsonStringField(json: string, field: string): string {
-    // Look for "field":" pattern — the field must be a string value.
-    const needle = `"${field}":"`;
-    const start = json.indexOf(needle);
-    if (start === -1) return '';
-
-    const valueStart = start + needle.length;
-    // Walk forward to find the unescaped closing quote.
-    let i = valueStart;
-    while (i < json.length) {
-        if (json.charCodeAt(i) === 92 /* backslash */) {
-            i += 2; // skip escaped character
-            continue;
-        }
-        if (json.charCodeAt(i) === 34 /* quote */) {
-            break;
-        }
-        i++;
-    }
-
-    if (i >= json.length) return '';
-
-    const raw = json.substring(valueStart, i);
-    // Fast path: no escapes → return as-is (most SSE chunks are plain text).
-    if (raw.indexOf('\\') === -1) return raw;
-    // Slow path: unescape JSON string escapes.
-    try {
-        return JSON.parse(`"${raw}"`) as string;
-    } catch {
-        return raw;
-    }
-}
+import { DefaultChatTransport, type UIMessage, type UIMessageChunk } from 'ai';
+import { parseProviderUsage } from '@/features/chat/lib/provider-usage';
 
 export interface ChatStreamParams {
     messages: ChatMessage[];
@@ -72,11 +35,6 @@ export interface GenerationResult {
     revisedPrompt?: string;
 }
 
-const MAX_STREAM_RESUME_ATTEMPTS = 2;
-const STREAM_BUFFER_WARN_CHARS = 256 * 1024;
-const STREAM_BUFFER_MAX_CHARS = 2 * 1024 * 1024;
-const IS_DEV = process.env.NODE_ENV !== 'production';
-
 function isAttachment(value: unknown): value is Attachment {
     if (!value || typeof value !== 'object') return false;
     const record = value as Record<string, unknown>;
@@ -90,70 +48,41 @@ function isAttachment(value: unknown): value is Attachment {
     );
 }
 
-function readNonNegativeInt(value: unknown): number | undefined {
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
-    return Math.floor(value);
-}
+const transport = new DefaultChatTransport<UIMessage>({
+    api: '/api/chat',
+    prepareSendMessagesRequest: ({ api, body, headers, credentials }) => {
+        const payload = body as Record<string, unknown>;
+        return {
+            api,
+            headers,
+            credentials,
+            body: {
+                messages: Array.isArray(payload.messagesPayload) ? payload.messagesPayload : [],
+                model: typeof payload.model === 'string' ? payload.model : '',
+                reasoningEffort: payload.reasoningEffort,
+                systemPrompt: typeof payload.systemPrompt === 'string' ? payload.systemPrompt : undefined,
+                search: payload.search === true,
+            },
+        };
+    },
+});
 
-function parseUsageEvent(data: string): { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' } | null {
-    if (
-        !data.includes('"usage"')
-        && !data.includes('"usageMetadata"')
-        && !data.includes('"outputTokens"')
-        && !data.includes('"completion_tokens"')
-        && !data.includes('"tokens_completion"')
-        && !data.includes('"tokens_prompt"')
-        && !data.includes('"type":"data-usage"')
-    ) {
-        return null;
+function normalizeTransportError(error: unknown): string {
+    if (!(error instanceof Error)) {
+        return 'Failed to get response';
     }
-
+    const message = error.message || 'Failed to get response';
     try {
-        const parsed = JSON.parse(data) as Record<string, unknown>;
-        const typedData = (parsed.type === 'data-usage' && parsed.data && typeof parsed.data === 'object')
-            ? parsed.data as Record<string, unknown>
-            : null;
-        const normalizedUsage = (
-            parsed.meta === 'usage'
-            && parsed.usage
-            && typeof parsed.usage === 'object'
-        ) ? parsed.usage as Record<string, unknown> : null;
-
-        const usage = typedData
-            ?? normalizedUsage
-            ?? ((parsed.usage && typeof parsed.usage === 'object') ? parsed.usage as Record<string, unknown> : null)
-            ?? ((parsed.usageMetadata && typeof parsed.usageMetadata === 'object') ? parsed.usageMetadata as Record<string, unknown> : null)
-            // OpenRouter may emit usage fields at top level.
-            ?? parsed;
-        if (!usage) return null;
-
-        const inputTokens =
-            readNonNegativeInt(usage.inputTokens) ??
-            readNonNegativeInt(usage.prompt_tokens) ??
-            readNonNegativeInt(usage.promptTokenCount) ??
-            readNonNegativeInt(usage.tokens_prompt) ??
-            readNonNegativeInt(usage.native_tokens_prompt);
-        let outputTokens =
-            readNonNegativeInt(usage.outputTokens) ??
-            readNonNegativeInt(usage.completion_tokens) ??
-            readNonNegativeInt(usage.candidatesTokenCount) ??
-            readNonNegativeInt(usage.tokens_completion) ??
-            readNonNegativeInt(usage.native_tokens_completion);
-        const totalTokens =
-            readNonNegativeInt(usage.totalTokens) ??
-            readNonNegativeInt(usage.total_tokens) ??
-            readNonNegativeInt(usage.totalTokenCount);
-
-        if (outputTokens === undefined && inputTokens !== undefined && totalTokens !== undefined) {
-            const inferred = totalTokens - inputTokens;
-            if (inferred >= 0) outputTokens = inferred;
+        const parsed = JSON.parse(message) as Record<string, unknown>;
+        const errorText = typeof parsed.error === 'string' ? parsed.error : '';
+        const detailsText = typeof parsed.details === 'string' ? parsed.details : '';
+        if (errorText) {
+            return detailsText ? `${errorText}: ${detailsText}` : errorText;
         }
-        if (outputTokens === undefined) return null;
-
-        return { outputTokens, inputTokens, totalTokens, source: 'provider' };
     } catch {
-        return null;
+        // Error message is not JSON.
     }
+    return message;
 }
 
 export class ChatService {
@@ -230,178 +159,59 @@ export class ChatService {
         signal,
     }: ChatStreamParams): AsyncGenerator<StreamChunk, void, unknown> {
         const streamId = createIdempotencyKey('chat');
-        let attempts = 0;
-        let resumeByteOffset = 0;
-
-        while (true) {
-            const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Idempotency-Key': streamId,
-                    ...(resumeByteOffset > 0 ? { 'X-Chat-Resume-Offset': String(resumeByteOffset) } : {}),
-                },
-                body: JSON.stringify({
-                    messages,
+        let stream: ReadableStream<UIMessageChunk>;
+        try {
+            stream = await transport.sendMessages({
+                trigger: 'submit-message',
+                chatId: 'pluto-chat',
+                messageId: undefined,
+                messages: [],
+                body: {
+                    messagesPayload: messages,
                     model,
                     reasoningEffort,
                     systemPrompt,
                     search,
-                }),
-                signal,
+                },
+                headers: {
+                    'X-Idempotency-Key': streamId,
+                },
+                abortSignal: signal,
             });
+        } catch (error) {
+            throw new Error(normalizeTransportError(error));
+        }
 
-            if (!response.ok) {
-                let message = `Failed to get response (${response.status})`;
-                try {
-                    const payload = await response.json() as Record<string, unknown>;
-                    const errorText = typeof payload.error === 'string' ? payload.error : '';
-                    const detailsText = typeof payload.details === 'string' ? payload.details : '';
-                    if (errorText) {
-                        message = detailsText ? `${errorText}: ${detailsText}` : errorText;
-                    }
-                } catch {
-                    // Ignore parse failures and keep fallback status message.
+        const reader = stream.getReader();
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                const chunk = value as UIMessageChunk;
+                if (chunk.type === 'error') {
+                    throw new Error(chunk.errorText || 'Unable to complete request right now. Please try again.');
                 }
-                throw new Error(message);
+                if (chunk.type === 'reasoning-delta') {
+                    if (chunk.delta) {
+                        yield { type: 'reasoning', value: chunk.delta };
+                    }
+                    continue;
+                }
+                if (chunk.type === 'text-delta') {
+                    if (chunk.delta) {
+                        yield { type: 'content', value: chunk.delta };
+                    }
+                    continue;
+                }
+                if (chunk.type === 'data-usage') {
+                    const usage = parseProviderUsage(chunk.data);
+                    if (usage) {
+                        yield { type: 'usage', value: usage };
+                    }
+                }
             }
-
-            const reader = response.body?.getReader();
-            if (!reader) return;
-
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let warnedLargeBuffer = false;
-
-            try {
-                while (true) {
-                    let readResult: ReadableStreamReadResult<Uint8Array<ArrayBufferLike>>;
-                    try {
-                        readResult = await reader.read();
-                    } catch (readError) {
-                        const message = readError instanceof Error ? readError.message : 'stream read failure';
-                        throw new Error(`RESUMEABLE_STREAM_READ:${message}`);
-                    }
-
-                    const { done, value } = readResult;
-                    if (done) {
-                        return;
-                    }
-
-                    buffer += decoder.decode(value, { stream: true });
-
-                    // indexOf-based line scanner — avoids split() array allocation.
-                    let searchFrom = 0;
-                    while (true) {
-                        const nlIdx = buffer.indexOf('\n', searchFrom);
-                        if (nlIdx === -1) break;
-
-                        const line = buffer.substring(searchFrom, nlIdx);
-                        searchFrom = nlIdx + 1;
-
-                        if (!line.startsWith('data: ')) continue;
-                        const data = line.substring(6);
-                        // Track acknowledged bytes by complete SSE data events so resume
-                        // offsets stay aligned with replay semantics and avoid decode
-                        // boundary drift from partial UTF-8 chunks.
-                        resumeByteOffset += sharedTextEncoder.encode(`data: ${data}\n\n`).byteLength;
-
-                        if (data === '[DONE]') continue;
-
-                        try {
-                            const streamType = extractJsonStringField(data, 'type');
-
-                            // Fast path: check for error responses first (rare).
-                            if (data.includes('"error"')) {
-                                const parsed = JSON.parse(data) as Record<string, unknown>;
-                                const streamError = typeof parsed.error === 'string' ? parsed.error.trim() : '';
-                                if (streamError) {
-                                    const streamDetails = typeof parsed.details === 'string' ? parsed.details.trim() : '';
-                                    const normalizedStreamError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
-                                    throw new Error(`STREAM_ERROR:${normalizedStreamError}`);
-                                }
-                            }
-                            if (streamType === 'error') {
-                                const errorText = extractJsonStringField(data, 'errorText') || 'Unable to complete request right now. Please try again.';
-                                throw new Error(`STREAM_ERROR:${errorText}`);
-                            }
-
-                            const usage = parseUsageEvent(data);
-                            if (usage) {
-                                yield { type: 'usage', value: usage };
-                            }
-
-                            if (streamType === 'reasoning-delta') {
-                                const reasoningDelta = extractJsonStringField(data, 'delta');
-                                if (reasoningDelta) {
-                                    yield { type: 'reasoning', value: reasoningDelta };
-                                }
-                                continue;
-                            }
-                            if (streamType === 'text-delta') {
-                                const textDelta = extractJsonStringField(data, 'delta');
-                                if (textDelta) {
-                                    yield { type: 'content', value: textDelta };
-                                }
-                                continue;
-                            }
-
-                            // Hot path: extract delta fields directly via indexOf
-                            // instead of JSON.parse to avoid allocating a full object.
-                            const reasoningContent =
-                                extractJsonStringField(data, 'r') ||
-                                extractJsonStringField(data, 'reasoning_content') ||
-                                extractJsonStringField(data, 'thinking');
-
-                            // Empty-string chunks are intentionally treated as no-op.
-                            if (reasoningContent) {
-                                yield { type: 'reasoning', value: reasoningContent };
-                            }
-
-                            const content =
-                                extractJsonStringField(data, 'c') ||
-                                extractJsonStringField(data, 'content');
-                            // Empty-string chunks are intentionally treated as no-op.
-                            if (content) {
-                                yield { type: 'content', value: content };
-                            }
-                        } catch (streamChunkError) {
-                            if (
-                                streamChunkError instanceof Error
-                                && streamChunkError.message.startsWith('STREAM_ERROR:')
-                            ) {
-                                throw new Error(streamChunkError.message.slice('STREAM_ERROR:'.length));
-                            }
-                            // Skip malformed JSON
-                        }
-                    }
-
-                    // Keep only the unconsumed remainder in the buffer.
-                    buffer = searchFrom > 0 ? buffer.substring(searchFrom) : buffer;
-                    if (!warnedLargeBuffer && buffer.length > STREAM_BUFFER_WARN_CHARS) {
-                        warnedLargeBuffer = true;
-                        if (IS_DEV) {
-                            console.warn(`[chat-service] Large pending SSE buffer (${buffer.length} chars)`);
-                        }
-                    }
-                    if (buffer.length > STREAM_BUFFER_MAX_CHARS) {
-                        throw new Error('Stream buffer overflow while parsing SSE response');
-                    }
-                }
-            } catch (error) {
-                const isResumeableReadError =
-                    error instanceof Error
-                    && error.message.startsWith('RESUMEABLE_STREAM_READ:');
-
-                if (!isResumeableReadError || signal?.aborted || attempts >= MAX_STREAM_RESUME_ATTEMPTS) {
-                    if (isResumeableReadError) {
-                        throw new Error(error.message.slice('RESUMEABLE_STREAM_READ:'.length));
-                    }
-                    throw error;
-                }
-
-                attempts += 1;
-            }
+        } finally {
+            reader.releaseLock();
         }
     }
 }

@@ -11,7 +11,7 @@ import {
 import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/shared/core/constants';
 import { resolveModelLimits } from '@/server/providers/model-limits';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
-import { processAndTransformStream } from '@/features/chat/lib/stream-transform';
+import { parseProviderSseToUiEvents } from '@/features/chat/lib/provider-sse-to-ui-events';
 import { ChatRequestSchema } from '@/shared/core/types';
 import { JsonToSseTransformStream, UI_MESSAGE_STREAM_HEADERS } from 'ai';
 import {
@@ -30,105 +30,6 @@ import type { AuthenticatedContext } from '@/utils/route-handler';
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
 const GENERIC_CHAT_ERROR_MESSAGE = 'Unable to complete request right now. Please try again.';
 const IS_DEV = process.env.NODE_ENV !== 'production';
-type ProviderUsage = { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' };
-
-/**
- * Extract a string-typed field value from a JSON string using indexOf,
- * avoiding a full JSON.parse where possible.
- */
-function extractJsonStringField(json: string, field: string): string {
-    const needle = `"${field}":"`;
-    const start = json.indexOf(needle);
-    if (start === -1) return '';
-
-    const valueStart = start + needle.length;
-    let i = valueStart;
-    while (i < json.length) {
-        if (json.charCodeAt(i) === 92 /* backslash */) {
-            i += 2;
-            continue;
-        }
-        if (json.charCodeAt(i) === 34 /* quote */) {
-            break;
-        }
-        i++;
-    }
-
-    if (i >= json.length) return '';
-
-    const raw = json.substring(valueStart, i);
-    if (raw.indexOf('\\') === -1) return raw;
-    try {
-        return JSON.parse(`"${raw}"`) as string;
-    } catch {
-        return raw;
-    }
-}
-
-function readNonNegativeInt(value: unknown): number | undefined {
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
-    return Math.floor(value);
-}
-
-function parseUsageEvent(data: string): ProviderUsage | null {
-    if (
-        !data.includes('"usage"')
-        && !data.includes('"usageMetadata"')
-        && !data.includes('"outputTokens"')
-        && !data.includes('"completion_tokens"')
-        && !data.includes('"tokens_completion"')
-        && !data.includes('"tokens_prompt"')
-        && !data.includes('"type":"data-usage"')
-    ) {
-        return null;
-    }
-
-    try {
-        const parsed = JSON.parse(data) as Record<string, unknown>;
-        const typedData = (parsed.type === 'data-usage' && parsed.data && typeof parsed.data === 'object')
-            ? parsed.data as Record<string, unknown>
-            : null;
-        const normalizedUsage = (
-            parsed.meta === 'usage'
-            && parsed.usage
-            && typeof parsed.usage === 'object'
-        ) ? parsed.usage as Record<string, unknown> : null;
-
-        const usage = typedData
-            ?? normalizedUsage
-            ?? ((parsed.usage && typeof parsed.usage === 'object') ? parsed.usage as Record<string, unknown> : null)
-            ?? ((parsed.usageMetadata && typeof parsed.usageMetadata === 'object') ? parsed.usageMetadata as Record<string, unknown> : null)
-            ?? parsed;
-        if (!usage) return null;
-
-        const inputTokens =
-            readNonNegativeInt(usage.inputTokens) ??
-            readNonNegativeInt(usage.prompt_tokens) ??
-            readNonNegativeInt(usage.promptTokenCount) ??
-            readNonNegativeInt(usage.tokens_prompt) ??
-            readNonNegativeInt(usage.native_tokens_prompt);
-        let outputTokens =
-            readNonNegativeInt(usage.outputTokens) ??
-            readNonNegativeInt(usage.completion_tokens) ??
-            readNonNegativeInt(usage.candidatesTokenCount) ??
-            readNonNegativeInt(usage.tokens_completion) ??
-            readNonNegativeInt(usage.native_tokens_completion);
-        const totalTokens =
-            readNonNegativeInt(usage.totalTokens) ??
-            readNonNegativeInt(usage.total_tokens) ??
-            readNonNegativeInt(usage.totalTokenCount);
-
-        if (outputTokens === undefined && inputTokens !== undefined && totalTokens !== undefined) {
-            const inferred = totalTokens - inputTokens;
-            if (inferred >= 0) outputTokens = inferred;
-        }
-        if (outputTokens === undefined) return null;
-
-        return { outputTokens, inputTokens, totalTokens, source: 'provider' };
-    } catch {
-        return null;
-    }
-}
 
 export async function handleChatRequest(
     req: Request,
@@ -337,91 +238,40 @@ export async function handleChatRequest(
                 writer = streamId ? createChatStreamWriter(user.id, streamId) : null;
 
                 emitStart();
+                safeEnqueue({
+                    type: 'message-metadata',
+                    messageMetadata: {
+                        model,
+                        provider: chatProvider.id,
+                        search: useSearch,
+                    },
+                });
 
-                const normalizedSourceStream = chatProvider.needsThinkTagTransform
-                    ? new ReadableStream<Uint8Array>({
-                        async start(normalizedController) {
-                            await processAndTransformStream(
-                                sourceStream,
-                                normalizedController as unknown as ReadableStreamDefaultController,
-                                signal
-                            );
-                            normalizedController.close();
-                        }
-                    })
-                    : (sourceStream as ReadableStream<Uint8Array>);
-
-                const decoder = new TextDecoder();
-                const reader = normalizedSourceStream.getReader();
-                let buffer = '';
-                try {
-                    while (true) {
-                        if (signal.aborted) break;
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        buffer += decoder.decode(value, { stream: true });
-
-                        let searchFrom = 0;
-                        while (true) {
-                            const nlIdx = buffer.indexOf('\n', searchFrom);
-                            if (nlIdx === -1) break;
-                            const line = buffer.substring(searchFrom, nlIdx);
-                            searchFrom = nlIdx + 1;
-                            const trimmed = line.trim();
-                            if (!trimmed.startsWith('data: ')) continue;
-                            const data = trimmed.slice(6);
-                            if (data === '[DONE]') continue;
-
-                            if (data.includes('"error"')) {
-                                let parsedError: string | null = null;
-                                try {
-                                    const parsed = JSON.parse(data) as Record<string, unknown>;
-                                    const streamError = typeof parsed.error === 'string' ? parsed.error.trim() : '';
-                                    if (streamError) {
-                                        const streamDetails = typeof parsed.details === 'string' ? parsed.details.trim() : '';
-                                        parsedError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
-                                    }
-                                } catch {
-                                    // Ignore malformed error payloads and continue processing.
-                                }
-                                if (parsedError) {
-                                    throw new Error(parsedError);
-                                }
-                            }
-
-                            const usage = parseUsageEvent(data);
-                            if (usage) {
-                                safeEnqueue({ type: 'data-usage', data: usage });
-                            }
-
-                            const reasoning =
-                                extractJsonStringField(data, 'r') ||
-                                extractJsonStringField(data, 'reasoning_content') ||
-                                extractJsonStringField(data, 'thinking');
-                            if (reasoning) {
-                                if (!reasoningStarted) {
-                                    safeEnqueue({ type: 'reasoning-start', id: reasoningId });
-                                    reasoningStarted = true;
-                                }
-                                safeEnqueue({ type: 'reasoning-delta', id: reasoningId, delta: reasoning });
-                            }
-
-                            const content =
-                                extractJsonStringField(data, 'c') ||
-                                extractJsonStringField(data, 'content');
-                            if (content) {
-                                if (!textStarted) {
-                                    safeEnqueue({ type: 'text-start', id: textId });
-                                    textStarted = true;
-                                }
-                                safeEnqueue({ type: 'text-delta', id: textId, delta: content });
-                            }
-                        }
-
-                        buffer = searchFrom > 0 ? buffer.substring(searchFrom) : buffer;
+                for await (const event of parseProviderSseToUiEvents({
+                    sourceStream,
+                    needsThinkTagTransform: chatProvider.needsThinkTagTransform,
+                    signal,
+                })) {
+                    if (event.errorText) {
+                        throw new Error(event.errorText);
                     }
-                } finally {
-                    reader.releaseLock();
+                    if (event.usage) {
+                        safeEnqueue({ type: 'data-usage', data: event.usage });
+                    }
+                    if (event.reasoningDelta) {
+                        if (!reasoningStarted) {
+                            safeEnqueue({ type: 'reasoning-start', id: reasoningId });
+                            reasoningStarted = true;
+                        }
+                        safeEnqueue({ type: 'reasoning-delta', id: reasoningId, delta: event.reasoningDelta });
+                    }
+                    if (event.contentDelta) {
+                        if (!textStarted) {
+                            safeEnqueue({ type: 'text-start', id: textId });
+                            textStarted = true;
+                        }
+                        safeEnqueue({ type: 'text-delta', id: textId, delta: event.contentDelta });
+                    }
                 }
 
                 emitFinish();
