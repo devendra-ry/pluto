@@ -370,13 +370,82 @@ export async function GET(req: Request) {
         const filename = path.split('/').pop() || 'attachment';
         const fallbackFilename = toContentDispositionFallbackFilename(filename);
         const encodedFilename = encodeRfc5987Value(filename);
+        const totalSize = data.size;
+        const baseHeaders: Record<string, string> = {
+            'Content-Type': contentType,
+            'Cache-Control': 'private, max-age=3600',
+            'Content-Disposition': `inline; filename="${fallbackFilename}"; filename*=UTF-8''${encodedFilename}`,
+            'Accept-Ranges': 'bytes',
+        };
+        const range = req.headers.get('range');
+
+        if (range && range.startsWith('bytes=')) {
+            const rangeValue = range.slice('bytes='.length).trim();
+            const [rawStart, rawEnd] = rangeValue.split('-', 2);
+            let start = 0;
+            let end = totalSize - 1;
+
+            if (rawStart === '') {
+                const suffixLength = Number.parseInt(rawEnd || '', 10);
+                if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+                    return new Response('Requested range not satisfiable', {
+                        status: 416,
+                        headers: { ...baseHeaders, 'Content-Range': `bytes */${totalSize}` },
+                    });
+                }
+                start = Math.max(totalSize - suffixLength, 0);
+            } else {
+                start = Number.parseInt(rawStart, 10);
+                if (!Number.isFinite(start) || start < 0) {
+                    return new Response('Requested range not satisfiable', {
+                        status: 416,
+                        headers: { ...baseHeaders, 'Content-Range': `bytes */${totalSize}` },
+                    });
+                }
+            }
+
+            if (rawEnd && rawEnd.length > 0) {
+                const parsedEnd = Number.parseInt(rawEnd, 10);
+                if (!Number.isFinite(parsedEnd) || parsedEnd < 0) {
+                    return new Response('Requested range not satisfiable', {
+                        status: 416,
+                        headers: { ...baseHeaders, 'Content-Range': `bytes */${totalSize}` },
+                    });
+                }
+                end = parsedEnd;
+            }
+
+            if (totalSize <= 0 || start >= totalSize) {
+                return new Response('Requested range not satisfiable', {
+                    status: 416,
+                    headers: { ...baseHeaders, 'Content-Range': `bytes */${totalSize}` },
+                });
+            }
+
+            end = Math.min(end, totalSize - 1);
+            if (end < start) {
+                return new Response('Requested range not satisfiable', {
+                    status: 416,
+                    headers: { ...baseHeaders, 'Content-Range': `bytes */${totalSize}` },
+                });
+            }
+
+            const chunk = data.slice(start, end + 1);
+            return new Response(chunk, {
+                status: 206,
+                headers: {
+                    ...baseHeaders,
+                    'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+                    'Content-Length': String(end - start + 1),
+                },
+            });
+        }
 
         return new Response(data, {
             status: 200,
             headers: {
-                'Content-Type': contentType,
-                'Cache-Control': 'private, max-age=3600',
-                'Content-Disposition': `inline; filename="${fallbackFilename}"; filename*=UTF-8''${encodedFilename}`,
+                ...baseHeaders,
+                'Content-Length': String(totalSize),
             },
         });
     } catch (error) {
