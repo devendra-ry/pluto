@@ -124,6 +124,56 @@ describe('ChatService', () => {
         });
     });
 
+    test('streamChat parses AI SDK UI message chunk format', async () => {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+            start(controller) {
+                const chunks = [
+                    'data: {"type":"start"}\n\n',
+                    'data: {"type":"start-step"}\n\n',
+                    'data: {"type":"reasoning-start","id":"reasoning-1"}\n\n',
+                    'data: {"type":"reasoning-delta","id":"reasoning-1","delta":"Thinking"}\n\n',
+                    'data: {"type":"text-start","id":"text-1"}\n\n',
+                    'data: {"type":"text-delta","id":"text-1","delta":"Hello"}\n\n',
+                    'data: {"type":"data-usage","data":{"inputTokens":12,"outputTokens":8,"totalTokens":20,"source":"provider"}}\n\n',
+                    'data: {"type":"text-end","id":"text-1"}\n\n',
+                    'data: {"type":"finish-step"}\n\n',
+                    'data: {"type":"finish","finishReason":"stop"}\n\n',
+                    'data: [DONE]\n\n'
+                ];
+                for (const chunk of chunks) {
+                    controller.enqueue(encoder.encode(chunk));
+                }
+                controller.close();
+            }
+        });
+
+        fetchMock.mock.mockImplementation(async () => ({ ok: true, body: stream }));
+
+        const chunks: any[] = [];
+        for await (const chunk of chatService.streamChat({
+            messages: [],
+            model: 'm1',
+            reasoningEffort: 'low',
+            search: false
+        })) {
+            chunks.push(chunk);
+        }
+
+        assert.strictEqual(chunks.length, 3);
+        assert.deepStrictEqual(chunks[0], { type: 'reasoning', value: 'Thinking' });
+        assert.deepStrictEqual(chunks[1], { type: 'content', value: 'Hello' });
+        assert.deepStrictEqual(chunks[2], {
+            type: 'usage',
+            value: {
+                outputTokens: 8,
+                inputTokens: 12,
+                totalTokens: 20,
+                source: 'provider'
+            }
+        });
+    });
+
     test('streamChat infers output tokens for Chutes usage when completion_tokens is null', async () => {
         const encoder = new TextEncoder();
         const stream = new ReadableStream({

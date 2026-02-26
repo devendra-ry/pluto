@@ -13,6 +13,7 @@ import { resolveModelLimits } from '@/server/providers/model-limits';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
 import { processAndTransformStream } from '@/features/chat/lib/stream-transform';
 import { ChatRequestSchema } from '@/shared/core/types';
+import { JsonToSseTransformStream, UI_MESSAGE_STREAM_HEADERS } from 'ai';
 import {
     buildSseReplayResponse,
     getCachedChatStreamEvents,
@@ -24,12 +25,110 @@ import {
     type ChatStreamEventWriter,
 } from '@/server/redis/chat-stream-cache';
 import { recordAbuseSignal } from '@/server/security/abuse-protection';
-import { sharedTextEncoder } from '@/shared/lib/text-encoder';
 import type { AuthenticatedContext } from '@/utils/route-handler';
 
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
 const GENERIC_CHAT_ERROR_MESSAGE = 'Unable to complete request right now. Please try again.';
 const IS_DEV = process.env.NODE_ENV !== 'production';
+type ProviderUsage = { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' };
+
+/**
+ * Extract a string-typed field value from a JSON string using indexOf,
+ * avoiding a full JSON.parse where possible.
+ */
+function extractJsonStringField(json: string, field: string): string {
+    const needle = `"${field}":"`;
+    const start = json.indexOf(needle);
+    if (start === -1) return '';
+
+    const valueStart = start + needle.length;
+    let i = valueStart;
+    while (i < json.length) {
+        if (json.charCodeAt(i) === 92 /* backslash */) {
+            i += 2;
+            continue;
+        }
+        if (json.charCodeAt(i) === 34 /* quote */) {
+            break;
+        }
+        i++;
+    }
+
+    if (i >= json.length) return '';
+
+    const raw = json.substring(valueStart, i);
+    if (raw.indexOf('\\') === -1) return raw;
+    try {
+        return JSON.parse(`"${raw}"`) as string;
+    } catch {
+        return raw;
+    }
+}
+
+function readNonNegativeInt(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
+    return Math.floor(value);
+}
+
+function parseUsageEvent(data: string): ProviderUsage | null {
+    if (
+        !data.includes('"usage"')
+        && !data.includes('"usageMetadata"')
+        && !data.includes('"outputTokens"')
+        && !data.includes('"completion_tokens"')
+        && !data.includes('"tokens_completion"')
+        && !data.includes('"tokens_prompt"')
+        && !data.includes('"type":"data-usage"')
+    ) {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(data) as Record<string, unknown>;
+        const typedData = (parsed.type === 'data-usage' && parsed.data && typeof parsed.data === 'object')
+            ? parsed.data as Record<string, unknown>
+            : null;
+        const normalizedUsage = (
+            parsed.meta === 'usage'
+            && parsed.usage
+            && typeof parsed.usage === 'object'
+        ) ? parsed.usage as Record<string, unknown> : null;
+
+        const usage = typedData
+            ?? normalizedUsage
+            ?? ((parsed.usage && typeof parsed.usage === 'object') ? parsed.usage as Record<string, unknown> : null)
+            ?? ((parsed.usageMetadata && typeof parsed.usageMetadata === 'object') ? parsed.usageMetadata as Record<string, unknown> : null)
+            ?? parsed;
+        if (!usage) return null;
+
+        const inputTokens =
+            readNonNegativeInt(usage.inputTokens) ??
+            readNonNegativeInt(usage.prompt_tokens) ??
+            readNonNegativeInt(usage.promptTokenCount) ??
+            readNonNegativeInt(usage.tokens_prompt) ??
+            readNonNegativeInt(usage.native_tokens_prompt);
+        let outputTokens =
+            readNonNegativeInt(usage.outputTokens) ??
+            readNonNegativeInt(usage.completion_tokens) ??
+            readNonNegativeInt(usage.candidatesTokenCount) ??
+            readNonNegativeInt(usage.tokens_completion) ??
+            readNonNegativeInt(usage.native_tokens_completion);
+        const totalTokens =
+            readNonNegativeInt(usage.totalTokens) ??
+            readNonNegativeInt(usage.total_tokens) ??
+            readNonNegativeInt(usage.totalTokenCount);
+
+        if (outputTokens === undefined && inputTokens !== undefined && totalTokens !== undefined) {
+            const inferred = totalTokens - inputTokens;
+            if (inferred >= 0) outputTokens = inferred;
+        }
+        if (outputTokens === undefined) return null;
+
+        return { outputTokens, inputTokens, totalTokens, source: 'provider' };
+    } catch {
+        return null;
+    }
+}
 
 export async function handleChatRequest(
     req: Request,
@@ -66,20 +165,7 @@ export async function handleChatRequest(
         }
     }
 
-    const safeEnqueue = (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
-        try {
-            if (signal.aborted || streamClosed) return;
-            const encoded = typeof chunk === 'string' ? sharedTextEncoder.encode(chunk) : chunk;
-            controller.enqueue(encoded);
-        } catch (error) {
-            if (IS_DEV) {
-                console.warn('[chat][controller] Failed to enqueue stream chunk', error);
-            }
-            // Ignore closed controller errors
-        }
-    };
-
-    const safeClose = (controller: ReadableStreamDefaultController) => {
+    const safeClose = (controller: ReadableStreamDefaultController<Record<string, unknown>>) => {
         if (streamClosed) return;
         streamClosed = true;
         try {
@@ -91,10 +177,45 @@ export async function handleChatRequest(
         }
     };
 
-    const stream = new ReadableStream({
+    const stream = new ReadableStream<Record<string, unknown>>({
         async start(controller) {
-            let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
             let writer: ChatStreamEventWriter | null = null;
+            let textStarted = false;
+            let reasoningStarted = false;
+            const textId = 'text-1';
+            const reasoningId = 'reasoning-1';
+
+            const safeEnqueue = (chunk: Record<string, unknown>) => {
+                try {
+                    if (signal.aborted || streamClosed) return;
+                    const serialized = JSON.stringify(chunk);
+                    if (writer) {
+                        writer.push(serialized);
+                    }
+                    controller.enqueue(chunk);
+                } catch (error) {
+                    if (IS_DEV) {
+                        console.warn('[chat][controller] Failed to enqueue stream chunk', error);
+                    }
+                }
+            };
+
+            const emitStart = () => {
+                safeEnqueue({ type: 'start' });
+                safeEnqueue({ type: 'start-step' });
+            };
+            const emitFinish = () => {
+                if (reasoningStarted) {
+                    safeEnqueue({ type: 'reasoning-end', id: reasoningId });
+                    reasoningStarted = false;
+                }
+                if (textStarted) {
+                    safeEnqueue({ type: 'text-end', id: textId });
+                    textStarted = false;
+                }
+                safeEnqueue({ type: 'finish-step' });
+                safeEnqueue({ type: 'finish', finishReason: 'stop' });
+            };
 
             if (signal.aborted) return;
 
@@ -102,7 +223,7 @@ export async function handleChatRequest(
                 const body = await req.json();
                 const parseResult = ChatRequestSchema.safeParse(body);
                 if (!parseResult.success) {
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid request' })}\n\n`);
+                    safeEnqueue({ type: 'error', errorText: 'Invalid request' });
                     safeClose(controller);
                     return;
                 }
@@ -110,7 +231,7 @@ export async function handleChatRequest(
                 const { messages, model, reasoningEffort, systemPrompt, search } = parseResult.data;
                 const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
                 if (!modelConfig) {
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid model selection' })}\n\n`);
+                    safeEnqueue({ type: 'error', errorText: 'Invalid model selection' });
                     safeClose(controller);
                     return;
                 }
@@ -120,13 +241,13 @@ export async function handleChatRequest(
                 const chatProvider = resolveChatProvider(modelConfig);
 
                 if (modelConfig.capabilities.includes('imageGen')) {
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Selected model is image-generation only. Use image generation flow.' })}\n\n`);
+                    safeEnqueue({ type: 'error', errorText: 'Selected model is image-generation only. Use image generation flow.' });
                     safeClose(controller);
                     return;
                 }
 
                 if (useSearch && (chatProvider.id !== 'google' || !SEARCH_ENABLED_MODEL_SET.has(model))) {
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Search is supported only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite.' })}\n\n`);
+                    safeEnqueue({ type: 'error', errorText: 'Search is supported only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite.' });
                     safeClose(controller);
                     return;
                 }
@@ -135,7 +256,7 @@ export async function handleChatRequest(
                 const systemPromptTokenEstimate = estimateSystemPromptTokens(normalizedSystemPrompt);
                 const systemPromptPlan = resolveOutputTokenPlan(limits, limits.maxOutputTokens, systemPromptTokenEstimate);
                 if (systemPromptPlan.remainingForOutput <= 0) {
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'System prompt is too long for the selected model context window.' })}\n\n`);
+                    safeEnqueue({ type: 'error', errorText: 'System prompt is too long for the selected model context window.' });
                     safeClose(controller);
                     return;
                 }
@@ -212,59 +333,98 @@ export async function handleChatRequest(
                     sourceStream = await getSourceStream(trimmedContext);
                 }
 
-                // Start heartbeat now that provider connection is established.
-                heartbeatInterval = setInterval(() => {
-                    safeEnqueue(controller, ': keep-alive\n\n');
-                }, 15000);
                 // Batched event writer — buffers events and flushes via pipeline.
                 writer = streamId ? createChatStreamWriter(user.id, streamId) : null;
-                const captureEvent = writer
-                    ? (event: string) => { writer!.push(event); }
-                    : undefined;
 
-                if (chatProvider.needsThinkTagTransform) {
-                    // Chutes/OpenRouter: SSE content may embed <think> tags that need
-                    // to be parsed and mapped to reasoning_content fields.
-                    await processAndTransformStream(sourceStream, controller, signal, captureEvent);
-                } else {
-                    // Google: stream is already in final SSE format with content/reasoning_content
-                    // properly separated. Pipe bytes directly — no JSON round-trip needed.
-                    const pipeDecoder = new TextDecoder();
-                    const reader = sourceStream.getReader();
-                    let pipeBuffer = '';
-                    try {
+                emitStart();
+
+                const normalizedSourceStream = chatProvider.needsThinkTagTransform
+                    ? new ReadableStream<Uint8Array>({
+                        async start(normalizedController) {
+                            await processAndTransformStream(
+                                sourceStream,
+                                normalizedController as unknown as ReadableStreamDefaultController,
+                                signal
+                            );
+                            normalizedController.close();
+                        }
+                    })
+                    : (sourceStream as ReadableStream<Uint8Array>);
+
+                const decoder = new TextDecoder();
+                const reader = normalizedSourceStream.getReader();
+                let buffer = '';
+                try {
+                    while (true) {
+                        if (signal.aborted) break;
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+
+                        let searchFrom = 0;
                         while (true) {
-                            if (signal.aborted) break;
-                            const { done, value } = await reader.read();
-                            if (done) break;
+                            const nlIdx = buffer.indexOf('\n', searchFrom);
+                            if (nlIdx === -1) break;
+                            const line = buffer.substring(searchFrom, nlIdx);
+                            searchFrom = nlIdx + 1;
+                            const trimmed = line.trim();
+                            if (!trimmed.startsWith('data: ')) continue;
+                            const data = trimmed.slice(6);
+                            if (data === '[DONE]') continue;
 
-                            // Decode once for event capture (only when caching is active).
-                            if (captureEvent) {
-                                pipeBuffer += pipeDecoder.decode(value, { stream: true });
-                                let nlIdx: number;
-                                let searchFrom = 0;
-                                while ((nlIdx = pipeBuffer.indexOf('\n', searchFrom)) !== -1) {
-                                    const line = pipeBuffer.substring(searchFrom, nlIdx);
-                                    searchFrom = nlIdx + 1;
-                                    if (line.startsWith('data: ')) {
-                                        captureEvent(line.substring(6));
+                            if (data.includes('"error"')) {
+                                let parsedError: string | null = null;
+                                try {
+                                    const parsed = JSON.parse(data) as Record<string, unknown>;
+                                    const streamError = typeof parsed.error === 'string' ? parsed.error.trim() : '';
+                                    if (streamError) {
+                                        const streamDetails = typeof parsed.details === 'string' ? parsed.details.trim() : '';
+                                        parsedError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
                                     }
+                                } catch {
+                                    // Ignore malformed error payloads and continue processing.
                                 }
-                                pipeBuffer = searchFrom > 0 ? pipeBuffer.substring(searchFrom) : pipeBuffer;
+                                if (parsedError) {
+                                    throw new Error(parsedError);
+                                }
                             }
 
-                            // Enqueue the original bytes directly — no re-encode.
-                            safeEnqueue(controller, value);
+                            const usage = parseUsageEvent(data);
+                            if (usage) {
+                                safeEnqueue({ type: 'data-usage', data: usage });
+                            }
+
+                            const reasoning =
+                                extractJsonStringField(data, 'r') ||
+                                extractJsonStringField(data, 'reasoning_content') ||
+                                extractJsonStringField(data, 'thinking');
+                            if (reasoning) {
+                                if (!reasoningStarted) {
+                                    safeEnqueue({ type: 'reasoning-start', id: reasoningId });
+                                    reasoningStarted = true;
+                                }
+                                safeEnqueue({ type: 'reasoning-delta', id: reasoningId, delta: reasoning });
+                            }
+
+                            const content =
+                                extractJsonStringField(data, 'c') ||
+                                extractJsonStringField(data, 'content');
+                            if (content) {
+                                if (!textStarted) {
+                                    safeEnqueue({ type: 'text-start', id: textId });
+                                    textStarted = true;
+                                }
+                                safeEnqueue({ type: 'text-delta', id: textId, delta: content });
+                            }
                         }
-                    } finally {
-                        reader.releaseLock();
+
+                        buffer = searchFrom > 0 ? buffer.substring(searchFrom) : buffer;
                     }
+                } finally {
+                    reader.releaseLock();
                 }
 
-                if (heartbeatInterval) {
-                    clearInterval(heartbeatInterval);
-                    heartbeatInterval = undefined;
-                }
+                emitFinish();
                 if (!signal.aborted) {
                     safeClose(controller);
                 }
@@ -272,14 +432,12 @@ export async function handleChatRequest(
                     await writer.close();
                 }
             } catch (error) {
-                if (heartbeatInterval) {
-                    clearInterval(heartbeatInterval);
-                    heartbeatInterval = undefined;
-                }
-
                 if (!signal.aborted) {
                     console.error('Chat API error:', error);
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: GENERIC_CHAT_ERROR_MESSAGE })}\n\n`);
+                    const errorText = error instanceof Error && error.message
+                        ? error.message
+                        : GENERIC_CHAT_ERROR_MESSAGE;
+                    safeEnqueue({ type: 'error', errorText });
                     safeClose(controller);
                     await recordAbuseSignal(user.id, 'chat', 'stream-failure');
                 }
@@ -294,12 +452,12 @@ export async function handleChatRequest(
         }
     });
 
-    return new Response(stream, {
-        headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no',
-        },
-    });
+    return new Response(
+        stream
+            .pipeThrough(new JsonToSseTransformStream())
+            .pipeThrough(new TextEncoderStream()),
+        {
+        headers: UI_MESSAGE_STREAM_HEADERS,
+        }
+    );
 }

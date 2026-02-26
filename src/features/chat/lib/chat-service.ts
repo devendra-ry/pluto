@@ -103,19 +103,24 @@ function parseUsageEvent(data: string): { outputTokens: number; inputTokens?: nu
         && !data.includes('"completion_tokens"')
         && !data.includes('"tokens_completion"')
         && !data.includes('"tokens_prompt"')
+        && !data.includes('"type":"data-usage"')
     ) {
         return null;
     }
 
     try {
         const parsed = JSON.parse(data) as Record<string, unknown>;
+        const typedData = (parsed.type === 'data-usage' && parsed.data && typeof parsed.data === 'object')
+            ? parsed.data as Record<string, unknown>
+            : null;
         const normalizedUsage = (
             parsed.meta === 'usage'
             && parsed.usage
             && typeof parsed.usage === 'object'
         ) ? parsed.usage as Record<string, unknown> : null;
 
-        const usage = normalizedUsage
+        const usage = typedData
+            ?? normalizedUsage
             ?? ((parsed.usage && typeof parsed.usage === 'object') ? parsed.usage as Record<string, unknown> : null)
             ?? ((parsed.usageMetadata && typeof parsed.usageMetadata === 'object') ? parsed.usageMetadata as Record<string, unknown> : null)
             // OpenRouter may emit usage fields at top level.
@@ -304,6 +309,8 @@ export class ChatService {
                         if (data === '[DONE]') continue;
 
                         try {
+                            const streamType = extractJsonStringField(data, 'type');
+
                             // Fast path: check for error responses first (rare).
                             if (data.includes('"error"')) {
                                 const parsed = JSON.parse(data) as Record<string, unknown>;
@@ -314,10 +321,29 @@ export class ChatService {
                                     throw new Error(`STREAM_ERROR:${normalizedStreamError}`);
                                 }
                             }
+                            if (streamType === 'error') {
+                                const errorText = extractJsonStringField(data, 'errorText') || 'Unable to complete request right now. Please try again.';
+                                throw new Error(`STREAM_ERROR:${errorText}`);
+                            }
 
                             const usage = parseUsageEvent(data);
                             if (usage) {
                                 yield { type: 'usage', value: usage };
+                            }
+
+                            if (streamType === 'reasoning-delta') {
+                                const reasoningDelta = extractJsonStringField(data, 'delta');
+                                if (reasoningDelta) {
+                                    yield { type: 'reasoning', value: reasoningDelta };
+                                }
+                                continue;
+                            }
+                            if (streamType === 'text-delta') {
+                                const textDelta = extractJsonStringField(data, 'delta');
+                                if (textDelta) {
+                                    yield { type: 'content', value: textDelta };
+                                }
+                                continue;
                             }
 
                             // Hot path: extract delta fields directly via indexOf
