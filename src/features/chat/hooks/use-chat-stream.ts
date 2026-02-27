@@ -346,10 +346,21 @@ export function useChatStream({
         const waitForFrameFlush = (): Promise<void> => {
             if (!hasPendingAssistantUpdate) return Promise.resolve();
             return new Promise<void>((resolve) => {
-                scheduleFrame(() => {
-                    flushAssistantUpdate();
-                    resolve();
-                });
+                if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+                    // When the tab is in the background, browsers pause requestAnimationFrame.
+                    // If we block on scheduleFrame, the stream will halt, TCP backpressure will
+                    // build up, and the connection may timeout, failing to persist the message.
+                    // Bypass the frame wait so the stream completes and saves to the database.
+                    setTimeout(() => {
+                        flushAssistantUpdate();
+                        resolve();
+                    }, 10);
+                } else {
+                    scheduleFrame(() => {
+                        flushAssistantUpdate();
+                        resolve();
+                    });
+                }
             });
         };
 
