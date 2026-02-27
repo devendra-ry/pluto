@@ -11,9 +11,8 @@ import {
 import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/shared/core/constants';
 import { resolveModelLimits } from '@/server/providers/model-limits';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
-import { parseProviderSseToUiEvents } from '@/features/chat/lib/provider-sse-to-ui-events';
+import { processAndTransformStream } from '@/features/chat/lib/stream-transform';
 import { ChatRequestSchema } from '@/shared/core/types';
-import { JsonToSseTransformStream, UI_MESSAGE_STREAM_HEADERS } from 'ai';
 import {
     buildSseReplayResponse,
     getCachedChatStreamEvents,
@@ -25,6 +24,7 @@ import {
     type ChatStreamEventWriter,
 } from '@/server/redis/chat-stream-cache';
 import { recordAbuseSignal } from '@/server/security/abuse-protection';
+import { sharedTextEncoder } from '@/shared/lib/text-encoder';
 import type { AuthenticatedContext } from '@/utils/route-handler';
 
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
@@ -66,7 +66,20 @@ export async function handleChatRequest(
         }
     }
 
-    const safeClose = (controller: ReadableStreamDefaultController<Record<string, unknown>>) => {
+    const safeEnqueue = (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
+        try {
+            if (signal.aborted || streamClosed) return;
+            const encoded = typeof chunk === 'string' ? sharedTextEncoder.encode(chunk) : chunk;
+            controller.enqueue(encoded);
+        } catch (error) {
+            if (IS_DEV) {
+                console.warn('[chat][controller] Failed to enqueue stream chunk', error);
+            }
+            // Ignore closed controller errors
+        }
+    };
+
+    const safeClose = (controller: ReadableStreamDefaultController) => {
         if (streamClosed) return;
         streamClosed = true;
         try {
@@ -78,45 +91,10 @@ export async function handleChatRequest(
         }
     };
 
-    const stream = new ReadableStream<Record<string, unknown>>({
+    const stream = new ReadableStream({
         async start(controller) {
+            let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
             let writer: ChatStreamEventWriter | null = null;
-            let textStarted = false;
-            let reasoningStarted = false;
-            const textId = 'text-1';
-            const reasoningId = 'reasoning-1';
-
-            const safeEnqueue = (chunk: Record<string, unknown>) => {
-                try {
-                    if (signal.aborted || streamClosed) return;
-                    const serialized = JSON.stringify(chunk);
-                    if (writer) {
-                        writer.push(serialized);
-                    }
-                    controller.enqueue(chunk);
-                } catch (error) {
-                    if (IS_DEV) {
-                        console.warn('[chat][controller] Failed to enqueue stream chunk', error);
-                    }
-                }
-            };
-
-            const emitStart = () => {
-                safeEnqueue({ type: 'start' });
-                safeEnqueue({ type: 'start-step' });
-            };
-            const emitFinish = () => {
-                if (reasoningStarted) {
-                    safeEnqueue({ type: 'reasoning-end', id: reasoningId });
-                    reasoningStarted = false;
-                }
-                if (textStarted) {
-                    safeEnqueue({ type: 'text-end', id: textId });
-                    textStarted = false;
-                }
-                safeEnqueue({ type: 'finish-step' });
-                safeEnqueue({ type: 'finish', finishReason: 'stop' });
-            };
 
             if (signal.aborted) return;
 
@@ -124,7 +102,7 @@ export async function handleChatRequest(
                 const body = await req.json();
                 const parseResult = ChatRequestSchema.safeParse(body);
                 if (!parseResult.success) {
-                    safeEnqueue({ type: 'error', errorText: 'Invalid request' });
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid request' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
@@ -132,7 +110,7 @@ export async function handleChatRequest(
                 const { messages, model, reasoningEffort, systemPrompt, search } = parseResult.data;
                 const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
                 if (!modelConfig) {
-                    safeEnqueue({ type: 'error', errorText: 'Invalid model selection' });
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid model selection' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
@@ -142,13 +120,13 @@ export async function handleChatRequest(
                 const chatProvider = resolveChatProvider(modelConfig);
 
                 if (modelConfig.capabilities.includes('imageGen')) {
-                    safeEnqueue({ type: 'error', errorText: 'Selected model is image-generation only. Use image generation flow.' });
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Selected model is image-generation only. Use image generation flow.' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
 
                 if (useSearch && (chatProvider.id !== 'google' || !SEARCH_ENABLED_MODEL_SET.has(model))) {
-                    safeEnqueue({ type: 'error', errorText: 'Search is supported only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite.' });
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Search is supported only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite.' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
@@ -157,7 +135,7 @@ export async function handleChatRequest(
                 const systemPromptTokenEstimate = estimateSystemPromptTokens(normalizedSystemPrompt);
                 const systemPromptPlan = resolveOutputTokenPlan(limits, limits.maxOutputTokens, systemPromptTokenEstimate);
                 if (systemPromptPlan.remainingForOutput <= 0) {
-                    safeEnqueue({ type: 'error', errorText: 'System prompt is too long for the selected model context window.' });
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'System prompt is too long for the selected model context window.' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
@@ -234,47 +212,59 @@ export async function handleChatRequest(
                     sourceStream = await getSourceStream(trimmedContext);
                 }
 
+                // Start heartbeat now that provider connection is established.
+                heartbeatInterval = setInterval(() => {
+                    safeEnqueue(controller, ': keep-alive\n\n');
+                }, 15000);
                 // Batched event writer — buffers events and flushes via pipeline.
                 writer = streamId ? createChatStreamWriter(user.id, streamId) : null;
+                const captureEvent = writer
+                    ? (event: string) => { writer!.push(event); }
+                    : undefined;
 
-                emitStart();
-                safeEnqueue({
-                    type: 'message-metadata',
-                    messageMetadata: {
-                        model,
-                        provider: chatProvider.id,
-                        search: useSearch,
-                    },
-                });
+                if (chatProvider.needsThinkTagTransform) {
+                    // Chutes/OpenRouter: SSE content may embed <think> tags that need
+                    // to be parsed and mapped to reasoning_content fields.
+                    await processAndTransformStream(sourceStream, controller, signal, captureEvent);
+                } else {
+                    // Google: stream is already in final SSE format with content/reasoning_content
+                    // properly separated. Pipe bytes directly — no JSON round-trip needed.
+                    const pipeDecoder = new TextDecoder();
+                    const reader = sourceStream.getReader();
+                    let pipeBuffer = '';
+                    try {
+                        while (true) {
+                            if (signal.aborted) break;
+                            const { done, value } = await reader.read();
+                            if (done) break;
 
-                for await (const event of parseProviderSseToUiEvents({
-                    sourceStream,
-                    needsThinkTagTransform: chatProvider.needsThinkTagTransform,
-                    signal,
-                })) {
-                    if (event.errorText) {
-                        throw new Error(event.errorText);
-                    }
-                    if (event.usage) {
-                        safeEnqueue({ type: 'data-usage', data: event.usage });
-                    }
-                    if (event.reasoningDelta) {
-                        if (!reasoningStarted) {
-                            safeEnqueue({ type: 'reasoning-start', id: reasoningId });
-                            reasoningStarted = true;
+                            // Decode once for event capture (only when caching is active).
+                            if (captureEvent) {
+                                pipeBuffer += pipeDecoder.decode(value, { stream: true });
+                                let nlIdx: number;
+                                let searchFrom = 0;
+                                while ((nlIdx = pipeBuffer.indexOf('\n', searchFrom)) !== -1) {
+                                    const line = pipeBuffer.substring(searchFrom, nlIdx);
+                                    searchFrom = nlIdx + 1;
+                                    if (line.startsWith('data: ')) {
+                                        captureEvent(line.substring(6));
+                                    }
+                                }
+                                pipeBuffer = searchFrom > 0 ? pipeBuffer.substring(searchFrom) : pipeBuffer;
+                            }
+
+                            // Enqueue the original bytes directly — no re-encode.
+                            safeEnqueue(controller, value);
                         }
-                        safeEnqueue({ type: 'reasoning-delta', id: reasoningId, delta: event.reasoningDelta });
-                    }
-                    if (event.contentDelta) {
-                        if (!textStarted) {
-                            safeEnqueue({ type: 'text-start', id: textId });
-                            textStarted = true;
-                        }
-                        safeEnqueue({ type: 'text-delta', id: textId, delta: event.contentDelta });
+                    } finally {
+                        reader.releaseLock();
                     }
                 }
 
-                emitFinish();
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                    heartbeatInterval = undefined;
+                }
                 if (!signal.aborted) {
                     safeClose(controller);
                 }
@@ -282,12 +272,14 @@ export async function handleChatRequest(
                     await writer.close();
                 }
             } catch (error) {
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                    heartbeatInterval = undefined;
+                }
+
                 if (!signal.aborted) {
                     console.error('Chat API error:', error);
-                    const errorText = error instanceof Error && error.message
-                        ? error.message
-                        : GENERIC_CHAT_ERROR_MESSAGE;
-                    safeEnqueue({ type: 'error', errorText });
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: GENERIC_CHAT_ERROR_MESSAGE })}\n\n`);
                     safeClose(controller);
                     await recordAbuseSignal(user.id, 'chat', 'stream-failure');
                 }
@@ -302,12 +294,12 @@ export async function handleChatRequest(
         }
     });
 
-    return new Response(
-        stream
-            .pipeThrough(new JsonToSseTransformStream())
-            .pipeThrough(new TextEncoderStream()),
-        {
-        headers: UI_MESSAGE_STREAM_HEADERS,
-        }
-    );
+    return new Response(stream, {
+        headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+        },
+    });
 }

@@ -1,8 +1,44 @@
 import { type Attachment, type ChatMessage, type ReasoningEffort } from '@/shared/core/types';
 import { createIdempotencyKey } from '@/shared/lib/idempotency';
-import { DefaultChatTransport, type UIMessage, type UIMessageChunk } from 'ai';
-import { fetchEventSource, type EventSourceMessage } from '@microsoft/fetch-event-source';
-import { parseProviderUsage } from '@/features/chat/lib/provider-usage';
+import { sharedTextEncoder } from '@/shared/lib/text-encoder';
+
+/**
+ * Extract a string-typed field value from a JSON string using indexOf,
+ * avoiding a full JSON.parse. Handles standard JSON escape sequences.
+ * Returns '' if the field is absent, null, or not a string.
+ */
+function extractJsonStringField(json: string, field: string): string {
+    // Look for "field":" pattern — the field must be a string value.
+    const needle = `"${field}":"`;
+    const start = json.indexOf(needle);
+    if (start === -1) return '';
+
+    const valueStart = start + needle.length;
+    // Walk forward to find the unescaped closing quote.
+    let i = valueStart;
+    while (i < json.length) {
+        if (json.charCodeAt(i) === 92 /* backslash */) {
+            i += 2; // skip escaped character
+            continue;
+        }
+        if (json.charCodeAt(i) === 34 /* quote */) {
+            break;
+        }
+        i++;
+    }
+
+    if (i >= json.length) return '';
+
+    const raw = json.substring(valueStart, i);
+    // Fast path: no escapes → return as-is (most SSE chunks are plain text).
+    if (raw.indexOf('\\') === -1) return raw;
+    // Slow path: unescape JSON string escapes.
+    try {
+        return JSON.parse(`"${raw}"`) as string;
+    } catch {
+        return raw;
+    }
+}
 
 export interface ChatStreamParams {
     messages: ChatMessage[];
@@ -36,10 +72,10 @@ export interface GenerationResult {
     revisedPrompt?: string;
 }
 
-type StreamQueueEntry =
-    | { type: 'chunk'; chunk: StreamChunk }
-    | { type: 'error'; error: Error }
-    | { type: 'done' };
+const MAX_STREAM_RESUME_ATTEMPTS = 2;
+const STREAM_BUFFER_WARN_CHARS = 256 * 1024;
+const STREAM_BUFFER_MAX_CHARS = 2 * 1024 * 1024;
+const IS_DEV = process.env.NODE_ENV !== 'production';
 
 function isAttachment(value: unknown): value is Attachment {
     if (!value || typeof value !== 'object') return false;
@@ -54,75 +90,65 @@ function isAttachment(value: unknown): value is Attachment {
     );
 }
 
-const transport = new DefaultChatTransport<UIMessage>({
-    api: '/api/chat',
-    prepareSendMessagesRequest: ({ api, body, headers, credentials }) => {
-        const payload = body as Record<string, unknown>;
-        return {
-            api,
-            headers,
-            credentials,
-            body: {
-                messages: Array.isArray(payload.messagesPayload) ? payload.messagesPayload : [],
-                model: typeof payload.model === 'string' ? payload.model : '',
-                reasoningEffort: payload.reasoningEffort,
-                systemPrompt: typeof payload.systemPrompt === 'string' ? payload.systemPrompt : undefined,
-                search: payload.search === true,
-            },
-        };
-    },
-});
+function readNonNegativeInt(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
+    return Math.floor(value);
+}
 
-function normalizeTransportError(error: unknown): string {
-    if (!(error instanceof Error)) {
-        return 'Failed to get response';
+function parseUsageEvent(data: string): { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' } | null {
+    if (
+        !data.includes('"usage"')
+        && !data.includes('"usageMetadata"')
+        && !data.includes('"outputTokens"')
+        && !data.includes('"completion_tokens"')
+        && !data.includes('"tokens_completion"')
+        && !data.includes('"tokens_prompt"')
+    ) {
+        return null;
     }
-    const message = error.message || 'Failed to get response';
+
     try {
-        const parsed = JSON.parse(message) as Record<string, unknown>;
-        const errorText = typeof parsed.error === 'string' ? parsed.error : '';
-        const detailsText = typeof parsed.details === 'string' ? parsed.details : '';
-        if (errorText) {
-            return detailsText ? `${errorText}: ${detailsText}` : errorText;
+        const parsed = JSON.parse(data) as Record<string, unknown>;
+        const normalizedUsage = (
+            parsed.meta === 'usage'
+            && parsed.usage
+            && typeof parsed.usage === 'object'
+        ) ? parsed.usage as Record<string, unknown> : null;
+
+        const usage = normalizedUsage
+            ?? ((parsed.usage && typeof parsed.usage === 'object') ? parsed.usage as Record<string, unknown> : null)
+            ?? ((parsed.usageMetadata && typeof parsed.usageMetadata === 'object') ? parsed.usageMetadata as Record<string, unknown> : null)
+            // OpenRouter may emit usage fields at top level.
+            ?? parsed;
+        if (!usage) return null;
+
+        const inputTokens =
+            readNonNegativeInt(usage.inputTokens) ??
+            readNonNegativeInt(usage.prompt_tokens) ??
+            readNonNegativeInt(usage.promptTokenCount) ??
+            readNonNegativeInt(usage.tokens_prompt) ??
+            readNonNegativeInt(usage.native_tokens_prompt);
+        let outputTokens =
+            readNonNegativeInt(usage.outputTokens) ??
+            readNonNegativeInt(usage.completion_tokens) ??
+            readNonNegativeInt(usage.candidatesTokenCount) ??
+            readNonNegativeInt(usage.tokens_completion) ??
+            readNonNegativeInt(usage.native_tokens_completion);
+        const totalTokens =
+            readNonNegativeInt(usage.totalTokens) ??
+            readNonNegativeInt(usage.total_tokens) ??
+            readNonNegativeInt(usage.totalTokenCount);
+
+        if (outputTokens === undefined && inputTokens !== undefined && totalTokens !== undefined) {
+            const inferred = totalTokens - inputTokens;
+            if (inferred >= 0) outputTokens = inferred;
         }
+        if (outputTokens === undefined) return null;
+
+        return { outputTokens, inputTokens, totalTokens, source: 'provider' };
     } catch {
-        // Error message is not JSON.
-    }
-    return message;
-}
-
-function normalizeResponseErrorPayload(payload: Record<string, unknown>, fallback: string): string {
-    const errorText = typeof payload.error === 'string' ? payload.error : '';
-    const detailsText = typeof payload.details === 'string' ? payload.details : '';
-    if (errorText) {
-        return detailsText ? `${errorText}: ${detailsText}` : errorText;
-    }
-    return fallback;
-}
-
-function mapUiChunkToStreamChunk(chunk: UIMessageChunk): StreamChunk | null {
-    if (chunk.type === 'error') {
-        throw new Error(chunk.errorText || 'Unable to complete request right now. Please try again.');
-    }
-    if (chunk.type === 'reasoning-delta') {
-        if (chunk.delta) {
-            return { type: 'reasoning', value: chunk.delta };
-        }
         return null;
     }
-    if (chunk.type === 'text-delta') {
-        if (chunk.delta) {
-            return { type: 'content', value: chunk.delta };
-        }
-        return null;
-    }
-    if (chunk.type === 'data-usage') {
-        const usage = parseProviderUsage(chunk.data);
-        if (usage) {
-            return { type: 'usage', value: usage };
-        }
-    }
-    return null;
 }
 
 export class ChatService {
@@ -198,215 +224,158 @@ export class ChatService {
         search,
         signal,
     }: ChatStreamParams): AsyncGenerator<StreamChunk, void, unknown> {
-        const isBrowserRuntime = typeof window !== 'undefined' && typeof document !== 'undefined';
-        if (isBrowserRuntime) {
-            yield* this.streamChatWithFetchEventSource({
-                messages,
-                model,
-                reasoningEffort,
-                systemPrompt,
-                search,
-                signal,
-            });
-            return;
-        }
-        yield* this.streamChatWithTransport({
-            messages,
-            model,
-            reasoningEffort,
-            systemPrompt,
-            search,
-            signal,
-        });
-    }
-
-    private async *streamChatWithFetchEventSource({
-        messages,
-        model,
-        reasoningEffort,
-        systemPrompt,
-        search,
-        signal,
-    }: ChatStreamParams): AsyncGenerator<StreamChunk, void, unknown> {
         const streamId = createIdempotencyKey('chat');
-        const queue: StreamQueueEntry[] = [];
-        let queueResolve: (() => void) | null = null;
-        let streamError: Error | null = null;
-        let streamDone = false;
-
-        const flushQueueWaiter = () => {
-            if (queueResolve) {
-                queueResolve();
-                queueResolve = null;
-            }
-        };
-        const enqueue = (entry: StreamQueueEntry) => {
-            queue.push(entry);
-            flushQueueWaiter();
-        };
-        const waitForQueue = () => {
-            if (queue.length > 0 || streamDone) {
-                return Promise.resolve();
-            }
-            return new Promise<void>((resolve) => {
-                queueResolve = resolve;
-            });
-        };
-
-        const handleMessage = (message: EventSourceMessage) => {
-            if (!message.data || message.data === '[DONE]') {
-                return;
-            }
-            let parsed: unknown;
-            try {
-                parsed = JSON.parse(message.data);
-            } catch {
-                return;
-            }
-            if (!parsed || typeof parsed !== 'object') return;
-            const chunk = parsed as UIMessageChunk;
-            const mapped = mapUiChunkToStreamChunk(chunk);
-            if (mapped) {
-                enqueue({ type: 'chunk', chunk: mapped });
-            }
-        };
-
-        const streamPromise = fetchEventSource('/api/chat', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Idempotency-Key': streamId,
-            },
-            body: JSON.stringify({
-                messages,
-                model,
-                reasoningEffort,
-                systemPrompt,
-                search,
-            }),
-            signal,
-            openWhenHidden: true,
-            async onopen(response) {
-                if (response.ok) {
-                    return;
-                }
-                const fallback = `Failed to get response (${response.status})`;
-                try {
-                    const text = await response.text();
-                    if (!text) {
-                        throw new Error(fallback);
-                    }
-                    let message = text.trim() || fallback;
-                    try {
-                        const payload = JSON.parse(text) as Record<string, unknown>;
-                        message = normalizeResponseErrorPayload(payload, message);
-                    } catch {
-                        // Non-JSON error body, use text as-is.
-                    }
-                    throw new Error(message);
-                } catch (error) {
-                    throw new Error(normalizeTransportError(error));
-                }
-            },
-            onmessage(message) {
-                try {
-                    handleMessage(message);
-                } catch (error) {
-                    streamError = error instanceof Error ? error : new Error('Failed to parse stream message');
-                    throw streamError;
-                }
-            },
-            onclose() {
-                streamDone = true;
-                enqueue({ type: 'done' });
-            },
-            onerror(error) {
-                const normalized = new Error(normalizeTransportError(error));
-                streamError = normalized;
-                enqueue({ type: 'error', error: normalized });
-                throw normalized;
-            },
-        }).catch((error) => {
-            if (signal?.aborted) {
-                return;
-            }
-            if (!streamError) {
-                const normalized = new Error(normalizeTransportError(error));
-                streamError = normalized;
-                enqueue({ type: 'error', error: normalized });
-            }
-        }).finally(() => {
-            streamDone = true;
-            enqueue({ type: 'done' });
-        });
+        let attempts = 0;
+        let resumeByteOffset = 0;
 
         while (true) {
-            await waitForQueue();
-            while (queue.length > 0) {
-                const entry = queue.shift() as StreamQueueEntry;
-                if (entry.type === 'chunk') {
-                    yield entry.chunk;
-                    continue;
-                }
-                if (entry.type === 'error') {
-                    throw entry.error;
-                }
-                if (entry.type === 'done') {
-                    await streamPromise;
-                    if (streamError) {
-                        throw streamError;
-                    }
-                    return;
-                }
-            }
-        }
-    }
-
-    private async *streamChatWithTransport({
-        messages,
-        model,
-        reasoningEffort,
-        systemPrompt,
-        search,
-        signal,
-    }: ChatStreamParams): AsyncGenerator<StreamChunk, void, unknown> {
-        const streamId = createIdempotencyKey('chat');
-        let stream: ReadableStream<UIMessageChunk>;
-        try {
-            stream = await transport.sendMessages({
-                trigger: 'submit-message',
-                chatId: 'pluto-chat',
-                messageId: undefined,
-                messages: [],
-                body: {
-                    messagesPayload: messages,
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Idempotency-Key': streamId,
+                    ...(resumeByteOffset > 0 ? { 'X-Chat-Resume-Offset': String(resumeByteOffset) } : {}),
+                },
+                body: JSON.stringify({
+                    messages,
                     model,
                     reasoningEffort,
                     systemPrompt,
                     search,
-                },
-                headers: {
-                    'X-Idempotency-Key': streamId,
-                },
-                abortSignal: signal,
+                }),
+                signal,
             });
-        } catch (error) {
-            throw new Error(normalizeTransportError(error));
-        }
 
-        const reader = stream.getReader();
-        try {
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                const chunk = value as UIMessageChunk;
-                const mapped = mapUiChunkToStreamChunk(chunk);
-                if (mapped) {
-                    yield mapped;
+            if (!response.ok) {
+                let message = `Failed to get response (${response.status})`;
+                try {
+                    const payload = await response.json() as Record<string, unknown>;
+                    const errorText = typeof payload.error === 'string' ? payload.error : '';
+                    const detailsText = typeof payload.details === 'string' ? payload.details : '';
+                    if (errorText) {
+                        message = detailsText ? `${errorText}: ${detailsText}` : errorText;
+                    }
+                } catch {
+                    // Ignore parse failures and keep fallback status message.
                 }
+                throw new Error(message);
             }
-        } finally {
-            reader.releaseLock();
+
+            const reader = response.body?.getReader();
+            if (!reader) return;
+
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let warnedLargeBuffer = false;
+
+            try {
+                while (true) {
+                    let readResult: ReadableStreamReadResult<Uint8Array<ArrayBufferLike>>;
+                    try {
+                        readResult = await reader.read();
+                    } catch (readError) {
+                        const message = readError instanceof Error ? readError.message : 'stream read failure';
+                        throw new Error(`RESUMEABLE_STREAM_READ:${message}`);
+                    }
+
+                    const { done, value } = readResult;
+                    if (done) {
+                        return;
+                    }
+
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // indexOf-based line scanner — avoids split() array allocation.
+                    let searchFrom = 0;
+                    while (true) {
+                        const nlIdx = buffer.indexOf('\n', searchFrom);
+                        if (nlIdx === -1) break;
+
+                        const line = buffer.substring(searchFrom, nlIdx);
+                        searchFrom = nlIdx + 1;
+
+                        if (!line.startsWith('data: ')) continue;
+                        const data = line.substring(6);
+                        // Track acknowledged bytes by complete SSE data events so resume
+                        // offsets stay aligned with replay semantics and avoid decode
+                        // boundary drift from partial UTF-8 chunks.
+                        resumeByteOffset += sharedTextEncoder.encode(`data: ${data}\n\n`).byteLength;
+
+                        if (data === '[DONE]') continue;
+
+                        try {
+                            // Fast path: check for error responses first (rare).
+                            if (data.includes('"error"')) {
+                                const parsed = JSON.parse(data) as Record<string, unknown>;
+                                const streamError = typeof parsed.error === 'string' ? parsed.error.trim() : '';
+                                if (streamError) {
+                                    const streamDetails = typeof parsed.details === 'string' ? parsed.details.trim() : '';
+                                    const normalizedStreamError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
+                                    throw new Error(`STREAM_ERROR:${normalizedStreamError}`);
+                                }
+                            }
+
+                            const usage = parseUsageEvent(data);
+                            if (usage) {
+                                yield { type: 'usage', value: usage };
+                            }
+
+                            // Hot path: extract delta fields directly via indexOf
+                            // instead of JSON.parse to avoid allocating a full object.
+                            const reasoningContent =
+                                extractJsonStringField(data, 'r') ||
+                                extractJsonStringField(data, 'reasoning_content') ||
+                                extractJsonStringField(data, 'thinking');
+
+                            // Empty-string chunks are intentionally treated as no-op.
+                            if (reasoningContent) {
+                                yield { type: 'reasoning', value: reasoningContent };
+                            }
+
+                            const content =
+                                extractJsonStringField(data, 'c') ||
+                                extractJsonStringField(data, 'content');
+                            // Empty-string chunks are intentionally treated as no-op.
+                            if (content) {
+                                yield { type: 'content', value: content };
+                            }
+                        } catch (streamChunkError) {
+                            if (
+                                streamChunkError instanceof Error
+                                && streamChunkError.message.startsWith('STREAM_ERROR:')
+                            ) {
+                                throw new Error(streamChunkError.message.slice('STREAM_ERROR:'.length));
+                            }
+                            // Skip malformed JSON
+                        }
+                    }
+
+                    // Keep only the unconsumed remainder in the buffer.
+                    buffer = searchFrom > 0 ? buffer.substring(searchFrom) : buffer;
+                    if (!warnedLargeBuffer && buffer.length > STREAM_BUFFER_WARN_CHARS) {
+                        warnedLargeBuffer = true;
+                        if (IS_DEV) {
+                            console.warn(`[chat-service] Large pending SSE buffer (${buffer.length} chars)`);
+                        }
+                    }
+                    if (buffer.length > STREAM_BUFFER_MAX_CHARS) {
+                        throw new Error('Stream buffer overflow while parsing SSE response');
+                    }
+                }
+            } catch (error) {
+                const isResumeableReadError =
+                    error instanceof Error
+                    && error.message.startsWith('RESUMEABLE_STREAM_READ:');
+
+                if (!isResumeableReadError || signal?.aborted || attempts >= MAX_STREAM_RESUME_ATTEMPTS) {
+                    if (isResumeableReadError) {
+                        throw new Error(error.message.slice('RESUMEABLE_STREAM_READ:'.length));
+                    }
+                    throw error;
+                }
+
+                attempts += 1;
+            }
         }
     }
 }
