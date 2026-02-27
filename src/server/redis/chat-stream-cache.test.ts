@@ -22,9 +22,4 @@ describe('buildSseReplayResponse', () => {
         assert.ok(!body.includes(`data: ${events[0]}\n\n`));
         assert.ok(body.endsWith('data: [DONE]\n\n'));
     });
-
-    test('includes AI SDK stream header for replay responses', async () => {
-        const response = buildSseReplayResponse(['{"type":"finish"}'], 0);
-        assert.strictEqual(response.headers.get('X-Vercel-AI-UI-Message-Stream'), 'v1');
-    });
 });

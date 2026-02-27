@@ -37,7 +37,6 @@ export function buildSseReplayResponse(events: string[], byteOffset: number = 0)
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
-            'X-Vercel-AI-UI-Message-Stream': 'v1',
             'X-Accel-Buffering': 'no',
         },
     });
