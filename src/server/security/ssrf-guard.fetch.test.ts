@@ -7,9 +7,6 @@ process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'dummy-key';
 process.env.CHUTES_MEDIA_FETCH_ALLOWED_HOSTS = 'example.com';
 
-// Import the function under test and the setter
-const { fetchWithSsrfGuard, _setFetchImplementation } = await import('./ssrf-guard');
-
 function createMockResponse(status: number, location: string | null = null): Response {
     return {
         status,
@@ -26,6 +23,7 @@ const mockFetch = mock.fn<
 >(async () => createMockResponse(200));
 
 test('fetchWithSsrfGuard', async (t) => {
+    const { fetchWithSsrfGuard, _setFetchImplementation } = await import('./ssrf-guard');
     t.beforeEach(() => {
         mockFetch.mock.resetCalls();
         // Inject the mock fetch

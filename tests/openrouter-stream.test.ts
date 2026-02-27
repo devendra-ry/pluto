@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import type { PreparedChatMessage } from '../src/lib/chat-attachments';
+import type { PreparedChatMessage } from '../src/features/chat/lib/chat-attachments';
 
 test('getOpenRouterStream', async (t) => {
     // Mock environment variables before importing modules that use them
@@ -11,7 +11,7 @@ test('getOpenRouterStream', async (t) => {
     process.env.NEXT_PUBLIC_APP_URL = 'http://test-app';
 
     // Import dynamically to ensure env vars are set before module evaluation
-    const { getOpenRouterStream } = await import('../src/lib/providers/chat-streams');
+    const { getOpenRouterStream } = await import('../src/server/providers/chat-streams');
 
     await t.test('should call OpenRouter API with correct parameters', async (t) => {
         const mockFetch = t.mock.method(global, 'fetch', async (url, options) => {

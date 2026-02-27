@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { ImageGenerateRequestSchema, VideoGenerateRequestSchema } from '../src/lib/request-validation';
+import { ImageGenerateRequestSchema, VideoGenerateRequestSchema } from '../src/shared/validation/request-validation';
 import { z } from 'zod';
 
 test('ImageGenerateRequestSchema', async (t) => {

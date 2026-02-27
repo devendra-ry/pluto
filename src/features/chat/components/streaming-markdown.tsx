@@ -55,7 +55,9 @@ function StreamingMarkdownInner({
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Always keep the ref in sync with the prop.
-    latestContentRef.current = content;
+    useEffect(() => {
+        latestContentRef.current = content;
+    }, [content]);
 
     useEffect(() => {
         if (!isStreaming) {

@@ -6,10 +6,9 @@ process.env.GEMINI_API_KEY = 'dummy-key';
 process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'dummy-key';
 
-// Dynamic import to ensure environment variables are picked up
-const { assertSafeRemoteUrl } = await import('./ssrf-guard');
-
 test('assertSafeRemoteUrl', async (t) => {
+    // Dynamic import to ensure environment variables are picked up
+    const { assertSafeRemoteUrl } = await import('./ssrf-guard');
     await t.test('accepts valid HTTPS URLs with allowed hostnames', async () => {
         const allowed = ['example.com'];
         const url = 'https://example.com/image.png';
@@ -58,9 +57,9 @@ test('assertSafeRemoteUrl', async (t) => {
     });
 
     await t.test('accepts exact matches in allowed patterns', async () => {
-        const allowed = ['example.com', 'sub.domain.com'];
+        const allowed = ['example.com', 'example.org'];
         const url1 = 'https://example.com/image.png';
-        const url2 = 'https://sub.domain.com/image.png';
+        const url2 = 'https://example.org/image.png';
 
         const parsed1 = await assertSafeRemoteUrl(url1, allowed);
         assert.strictEqual(parsed1.href, url1);
@@ -70,23 +69,23 @@ test('assertSafeRemoteUrl', async (t) => {
     });
 
     await t.test('accepts wildcard matches in allowed patterns', async () => {
-        const allowed = ['*.example.com'];
+        const allowed = ['*.cloudflare.com'];
 
         // Exact suffix match
-        const url1 = 'https://sub.example.com/image.png';
+        const url1 = 'https://www.cloudflare.com/image.png';
         const parsed1 = await assertSafeRemoteUrl(url1, allowed);
         assert.strictEqual(parsed1.href, url1);
 
         // Nested subdomain match (implementation check: likely allows it based on suffix check)
-        const url2 = 'https://deep.sub.example.com/image.png';
+        const url2 = 'https://blog.cloudflare.com/image.png';
         const parsed2 = await assertSafeRemoteUrl(url2, allowed);
         assert.strictEqual(parsed2.href, url2);
 
         // Base domain match?
         // The implementation: `host === suffix || host.endsWith(`.${suffix}`)`
-        // pattern `*.example.com` -> suffix `example.com`
-        // host `example.com` === suffix `example.com` -> true
-        const url3 = 'https://example.com/image.png';
+        // pattern `*.cloudflare.com` -> suffix `cloudflare.com`
+        // host `cloudflare.com` === suffix `cloudflare.com` -> true
+        const url3 = 'https://cloudflare.com/image.png';
         const parsed3 = await assertSafeRemoteUrl(url3, allowed);
         assert.strictEqual(parsed3.href, url3);
     });

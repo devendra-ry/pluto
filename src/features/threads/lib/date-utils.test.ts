@@ -90,7 +90,7 @@ test('groupThreadsByDate', async (t) => {
         // will NOT be in this group if the week starts on Sunday.
 
         const threads = [
-             createThread('6', '2023-10-07T23:59:59Z'), // Saturday (Last Week) -> This Month
+             createThread('6', '2023-10-05T12:00:00Z'), // Thursday (Last Week) -> This Month
         ];
 
         const result = groupThreadsByDate(threads);

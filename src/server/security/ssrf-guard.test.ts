@@ -6,9 +6,8 @@ process.env.GEMINI_API_KEY = 'dummy-key';
 process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'dummy-key';
 
-const { isPrivateIpAddress } = await import('./ssrf-guard');
-
 test('isPrivateIpAddress', async (t) => {
+    const { isPrivateIpAddress } = await import('./ssrf-guard');
     await t.test('returns true for IPv4 private ranges', () => {
         const privateIPv4s = [
             '0.0.0.0', // "this" network

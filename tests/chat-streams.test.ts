@@ -1,7 +1,18 @@
-import { test } from 'node:test';
+import { test, before } from 'node:test';
 import assert from 'node:assert';
-import { buildOpenAICompatibleMessages, buildGoogleContents } from '../src/lib/providers/chat-streams';
-import type { PreparedChatMessage } from '../src/lib/chat-attachments';
+
+let buildOpenAICompatibleMessages: any;
+let buildGoogleContents: any;
+
+before(async () => {
+    process.env.GEMINI_API_KEY = 'dummy';
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'dummy';
+    const mod = await import('../src/server/providers/chat-streams');
+    buildOpenAICompatibleMessages = mod.buildOpenAICompatibleMessages;
+    buildGoogleContents = mod.buildGoogleContents;
+});
+import type { PreparedChatMessage } from '../src/features/chat/lib/chat-attachments';
 
 test('buildGoogleContents', async (t) => {
     await t.test('should format simple text messages correctly', () => {

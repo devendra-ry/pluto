@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { cn } from '../src/lib/utils';
+import { cn } from '../src/shared/core/utils';
 
 test('cn utility', async (t) => {
     await t.test('should merge class names correctly', () => {

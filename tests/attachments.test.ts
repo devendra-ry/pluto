@@ -5,7 +5,7 @@ import {
     isPdfAttachment,
     isTextAttachment,
     isSupportedAttachmentMimeType,
-} from '../src/lib/attachments';
+} from '../src/features/attachments/lib/attachments';
 
 test('isImageAttachment', async (t) => {
     await t.test('should return true for supported image mime types', () => {

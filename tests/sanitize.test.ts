@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { sanitizeThreadTitle } from '../src/lib/sanitize';
+import { sanitizeThreadTitle } from '../src/features/threads/lib/sanitize-thread-title';
 
 test('sanitizeThreadTitle', async (t) => {
     await t.test('should trim and collapse spaces', () => {
