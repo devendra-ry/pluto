@@ -22,7 +22,7 @@ interface CachedAttachment {
     byteLength: number;
 }
 
-const attachmentCache = new AttachmentCache<CachedAttachment>();
+const attachmentCache = new AttachmentCache<CachedAttachment>(2);
 
 export interface PreparedAttachment {
     name: string;

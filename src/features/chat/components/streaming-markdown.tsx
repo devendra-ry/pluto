@@ -11,6 +11,9 @@ import { preprocessLaTeX } from '@/features/chat/lib/latex-utils';
 const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex];
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
 
+// Regex to fix markdown headings without space after #.
+const HEADING_FIX_REGEX = /^(#{1,6})([^#\s])/gm;
+
 /**
  * How often (ms) to re-parse markdown while streaming.
  * Lower = more responsive but heavier; higher = smoother but chunkier updates.
@@ -116,7 +119,7 @@ const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
             remarkPlugins={REMARK_PLUGINS}
             components={components}
         >
-            {preprocessLaTeX(content)}
+            {preprocessLaTeX(content).replace(HEADING_FIX_REGEX, '$1 $2')}
         </ReactMarkdown>
     );
 });

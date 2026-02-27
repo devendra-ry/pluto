@@ -20,9 +20,6 @@ interface ChatMessageListProps {
     onRetry: (messageId: string) => void;
 }
 
-// Regex to fix markdown headings without space after #.
-const HEADING_FIX_REGEX = /^(#{1,6})([^#\s])/gm;
-
 // Pre-render items well outside the viewport to avoid layout
 // jumps when scrolling into unmeasured territory.
 const OVERSCAN = { top: 1200, bottom: 400 };
@@ -58,7 +55,7 @@ export function ChatMessageList({
                         key={message.id}
                         id={message.id}
                         role={message.role}
-                        content={message.content.replace(HEADING_FIX_REGEX, '$1 $2')}
+                        content={message.content}
                         attachments={message.attachments}
                         reasoning={message.reasoning}
                         stats={message.stats}

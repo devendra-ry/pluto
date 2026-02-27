@@ -92,16 +92,6 @@ export async function processAndTransformStream(
                     continue;
                 }
 
-                const requiresTransform = isThinking
-                    || pendingTagFragment.length > 0
-                    || dataStr.includes(THINK_START_TAG)
-                    || dataStr.includes(THINK_END_TAG);
-                if (!requiresTransform) {
-                    safeEnqueue(`data: ${dataStr}\n\n`);
-                    onEvent?.(dataStr);
-                    continue;
-                }
-
                 try {
                     const parsed = JSON.parse(dataStr);
                     const choice = parsed.choices?.[0];
