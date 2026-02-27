@@ -255,6 +255,7 @@ export function useChatStream({
 
         const requestStartedAt = performance.now();
         let firstTokenAt: number | null = null;
+        let lastTokenAt: number | null = null;
         let fullContent = '';
         let fullReasoning = '';
         let providerUsage: { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' } | null = null;
@@ -267,7 +268,8 @@ export function useChatStream({
 
         const buildReplyStats = (): ChatResponseStats | undefined => {
             if (firstTokenAt === null) return undefined;
-            const seconds = Math.max((performance.now() - firstTokenAt) / 1000, 0.001);
+            const endTime = lastTokenAt ?? performance.now();
+            const seconds = Math.max((endTime - firstTokenAt) / 1000, 0.001);
             const outputTokens = providerUsage?.outputTokens ?? estimateOutputTokens(fullContent, fullReasoning);
             const tokensPerSecond = outputTokens / seconds;
             const ttfbSeconds = Math.max((firstTokenAt - requestStartedAt) / 1000, 0);
@@ -439,18 +441,22 @@ export function useChatStream({
             for await (const chunk of stream) {
                 if (chunk.type === 'reasoning') {
                     if (supportsReasoning) {
+                        const now = performance.now();
                         if (chunk.value && firstTokenAt === null) {
-                            firstTokenAt = performance.now();
+                            firstTokenAt = now;
                         }
+                        lastTokenAt = now;
                         fullReasoning += chunk.value;
                         hasPendingAssistantUpdate = true;
                         await waitForFrameFlush();
                         dispatch({ type: 'SET_THINKING', thinking: true });
                     }
                 } else if (chunk.type === 'content') {
+                    const now = performance.now();
                     if (chunk.value && firstTokenAt === null) {
-                        firstTokenAt = performance.now();
+                        firstTokenAt = now;
                     }
+                    lastTokenAt = now;
                     dispatch({ type: 'SET_THINKING', thinking: false });
                     fullContent += chunk.value;
                     hasPendingAssistantUpdate = true;
@@ -462,6 +468,7 @@ export function useChatStream({
                 }
             }
 
+            if (lastTokenAt === null) lastTokenAt = performance.now();
             flushAssistantUpdate();
             const persisted = await persistAssistantMessage(fullContent, fullReasoning, [], buildReplyStats());
             if (!persisted) {
