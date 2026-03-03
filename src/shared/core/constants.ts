@@ -27,6 +27,7 @@ export interface ImageGenerationModel {
 }
 
 export const PROVIDERS: Provider[] = [
+    { id: 'ollama', name: 'Ollama', color: '#111111' },
     { id: 'deepseek-ai', name: 'DeepSeek', color: '#4A90D9' },
     { id: 'openai', name: 'OpenAI', color: '#10A37F' },
     { id: 'moonshotai', name: 'Moonshot', color: '#FFB800' },
@@ -37,7 +38,6 @@ export const PROVIDERS: Provider[] = [
 
     { id: 'google', name: 'Google', color: '#4285F4' },
     { id: 'openrouter', name: 'OpenRouter', color: '#6563FF' },
-    { id: 'ollama', name: 'Ollama', color: '#111111' },
 ];
 
 export const CAPABILITY_INFO: Record<Capability, { label: string; icon: string }> = {
@@ -66,7 +66,7 @@ export function isImageGenerationModel(modelId: string | null | undefined): bool
     return IMAGE_GENERATION_MODEL_SET.has(modelId);
 }
 
-export const DEFAULT_MODEL = 'deepseek-r1:latest';
+export const DEFAULT_MODEL = 'deepseek-v3.1:671b-cloud';
 export const DEFAULT_REASONING_EFFORT = 'high';
 export const IMAGE_GENERATION_MODEL = IMAGE_GENERATION_MODELS[0]?.id ?? 'zai-org/z-image-turbo';
 export const VIDEO_GENERATION_MODEL = 'Qwen/WAN-2.2-I2V-14B-Fast';

@@ -197,9 +197,9 @@
         ]
     },
     {
-        "id": "deepseek-r1:latest",
-        "name": "DeepSeek R1 (Ollama)",
-        "description": "Ollama cloud model (API key required)",
+        "id": "deepseek-v3.1:671b-cloud",
+        "name": "DeepSeek V3.1 671B Cloud",
+        "description": "DeepSeek V3.1 671B via Ollama cloud (API key required)",
         "provider": "ollama",
         "supportsReasoning": true,
         "capabilities": [
