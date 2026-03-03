@@ -8,7 +8,7 @@ Architecture details: see `ARCHITECTURE.md`.
 
 ## What Makes It Good
 
-- One model selector, multiple providers: Google, Chutes, OpenRouter.
+- One model selector, multiple providers: Google, Chutes, OpenRouter, Ollama.
 - Mode-driven UX:
   - `Chat`
   - `Search` (Gemini 2.5 Flash / Flash Lite only)
@@ -47,7 +47,7 @@ The UI auto-populates this list inside the existing mode dropdown submenu.
 Client (chat page)
   -> optimistic message/update
   -> API route (/api/chat | /api/images | /api/videos)
-  -> provider call (Google/Chutes/OpenRouter)
+  -> provider call (Google/Chutes/OpenRouter/Ollama)
   -> stream or generated asset
   -> persist (Supabase DB/Storage)
   -> realtime fanout (Supabase Realtime)
@@ -86,6 +86,8 @@ GEMINI_API_KEY=...
 CHUTES_API_KEY=...
 CHUTES_API_TOKEN=...
 OPENROUTER_API_KEY=...
+OLLAMA_BASE_URL=https://ollama.com
+OLLAMA_API_KEY=
 UPSTASH_REDIS_REST_URL=...
 UPSTASH_REDIS_REST_TOKEN=...
 REDIS_KEY_PREFIX=pluto:dev
@@ -107,6 +109,13 @@ CHUTES_MEDIA_FETCH_ALLOWED_HOSTS=
 
 # Optional WAN i2v default negative prompt
 CHUTES_WAN_I2V_NEGATIVE_PROMPT=
+```
+
+For Ollama (cloud only), set:
+
+```env
+OLLAMA_BASE_URL=https://ollama.com
+OLLAMA_API_KEY=...
 ```
 
 ## Extending Image Models (Minimal UI Changes)

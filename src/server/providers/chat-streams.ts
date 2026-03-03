@@ -15,6 +15,12 @@ function toNonNegativeInt(value: unknown): number | undefined {
     return Math.floor(value);
 }
 
+function normalizeOllamaBaseUrl(baseUrl: string) {
+    const trimmed = baseUrl.trim();
+    if (!trimmed) return 'https://ollama.com';
+    return trimmed.replace(/\/+$/, '');
+}
+
 export function buildGoogleContents(messages: PreparedChatMessage[]) {
     return messages.map((message) => {
         const parts: Array<Record<string, unknown>> = [];
@@ -100,6 +106,27 @@ export function buildOpenAICompatibleMessages(messages: PreparedChatMessage[], s
     return prepared;
 }
 
+function buildOllamaMessages(messages: PreparedChatMessage[], systemPrompt?: string) {
+    const payload = messages.map((message) => {
+        const imagePayloads = message.attachments
+            .filter((attachment) => isImageAttachment(attachment.mimeType))
+            .map((attachment) => attachment.base64Data);
+        const mapped: Record<string, unknown> = {
+            role: message.role,
+            content: message.content || ' ',
+        };
+        if (imagePayloads.length > 0) {
+            mapped.images = imagePayloads;
+        }
+        return mapped;
+    });
+
+    if (systemPrompt && systemPrompt.trim().length > 0) {
+        return [{ role: 'system', content: systemPrompt.trim() }, ...payload];
+    }
+    return payload;
+}
+
 export async function getChutesStream(
     model: string,
     messages: PreparedChatMessage[],
@@ -152,6 +179,154 @@ export async function getChutesStream(
         throw new Error(`Chutes API error ${response.status}: ${responseText || response.statusText}`);
     }
     return response.body as ReadableStream;
+}
+
+export async function getOllamaStream(
+    model: string,
+    messages: PreparedChatMessage[],
+    reasoningEffort: ReasoningEffort = 'low',
+    maxOutputTokens?: number | null,
+    systemPrompt?: string,
+    tokenEstimates?: RequestTokenEstimates,
+    signal?: AbortSignal
+) {
+    const baseUrl = normalizeOllamaBaseUrl(serverEnv.OLLAMA_BASE_URL || 'https://ollama.com');
+    const ollamaApiKey = serverEnv.OLLAMA_API_KEY;
+    if (!ollamaApiKey) {
+        throw new Error('Ollama API key missing');
+    }
+    const requestBody: Record<string, unknown> = {
+        model,
+        messages: buildOllamaMessages(messages, systemPrompt),
+        stream: true,
+        think: reasoningEffort !== 'low',
+    };
+    const requestNumPredict = resolveOutputTokenCap(maxOutputTokens);
+    if (requestNumPredict > 0) {
+        requestBody.options = { num_predict: requestNumPredict };
+    }
+
+    logModelLimits('ollama-request', {
+        model,
+        baseUrl,
+        reasoningEffort,
+        resolvedMaxOutputTokens: maxOutputTokens,
+        requestNumPredict: requestNumPredict > 0 ? requestNumPredict : undefined,
+        messageCount: messages.length,
+        estimatedInputTokens: tokenEstimates?.estimatedInputTokens,
+        estimatedInputTokensWithSystemPrompt: tokenEstimates?.estimatedInputTokensWithSystemPrompt,
+    });
+
+    const response = await fetch(`${baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...(ollamaApiKey ? { 'Authorization': `Bearer ${ollamaApiKey}` } : {}),
+        },
+        body: JSON.stringify(requestBody),
+        signal,
+    });
+
+    if (!response.ok) {
+        const responseText = await response.text().catch(() => '');
+        throw new Error(`Ollama API error ${response.status}: ${responseText || response.statusText}`);
+    }
+
+    const source = response.body;
+    if (!source) throw new Error('Ollama API returned an empty response body');
+
+    return new ReadableStream<Uint8Array>({
+        async start(controller) {
+            const reader = source.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let doneSent = false;
+
+            const enqueueSseData = (payload: Record<string, unknown> | '[DONE]') => {
+                if (signal?.aborted || doneSent) return;
+                const data = payload === '[DONE]' ? '[DONE]' : JSON.stringify(payload);
+                controller.enqueue(sharedTextEncoder.encode(`data: ${data}\n\n`));
+                if (payload === '[DONE]') {
+                    doneSent = true;
+                }
+            };
+
+            try {
+                while (true) {
+                    if (signal?.aborted) break;
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    let lineStart = 0;
+                    let nlIdx: number;
+                    while ((nlIdx = buffer.indexOf('\n', lineStart)) !== -1) {
+                        const line = buffer.substring(lineStart, nlIdx).trim();
+                        lineStart = nlIdx + 1;
+                        if (!line) continue;
+
+                        let parsed: Record<string, unknown>;
+                        try {
+                            parsed = JSON.parse(line) as Record<string, unknown>;
+                        } catch {
+                            continue;
+                        }
+
+                        const message = (parsed.message && typeof parsed.message === 'object')
+                            ? parsed.message as Record<string, unknown>
+                            : null;
+                        const content = message && typeof message.content === 'string'
+                            ? message.content
+                            : '';
+                        const thinking = message && typeof message.thinking === 'string'
+                            ? message.thinking
+                            : '';
+                        if (thinking) {
+                            enqueueSseData({ r: thinking });
+                        }
+                        if (content) {
+                            enqueueSseData({ c: content });
+                        }
+
+                        const isDone = parsed.done === true;
+                        if (isDone) {
+                            const inputTokens = toNonNegativeInt(parsed.prompt_eval_count);
+                            const outputTokens = toNonNegativeInt(parsed.eval_count);
+                            const totalTokens = inputTokens !== undefined && outputTokens !== undefined
+                                ? inputTokens + outputTokens
+                                : undefined;
+                            if (outputTokens !== undefined || inputTokens !== undefined) {
+                                enqueueSseData({
+                                    meta: 'usage',
+                                    usage: {
+                                        source: 'provider',
+                                        inputTokens,
+                                        outputTokens,
+                                        totalTokens,
+                                    }
+                                });
+                            }
+                            enqueueSseData('[DONE]');
+                            controller.close();
+                            return;
+                        }
+                    }
+                    buffer = lineStart > 0 ? buffer.substring(lineStart) : buffer;
+                }
+
+                if (!doneSent && !signal?.aborted) {
+                    enqueueSseData('[DONE]');
+                    controller.close();
+                }
+            } catch (error) {
+                if (!doneSent && !signal?.aborted) {
+                    controller.error(error);
+                }
+            } finally {
+                reader.releaseLock();
+            }
+        }
+    });
 }
 
 export async function getGoogleStream(

@@ -33,6 +33,8 @@ export const serverEnv = Object.freeze({
     OPENROUTER_API_KEY: optionalServerEnv(process.env.OPENROUTER_API_KEY),
     CHUTES_API_KEY: optionalServerEnv(process.env.CHUTES_API_KEY),
     CHUTES_API_TOKEN: optionalServerEnv(process.env.CHUTES_API_TOKEN),
+    OLLAMA_BASE_URL: optionalServerEnv(process.env.OLLAMA_BASE_URL),
+    OLLAMA_API_KEY: optionalServerEnv(process.env.OLLAMA_API_KEY),
     APP_URL: optionalServerEnv(process.env.APP_URL),
     VERCEL_URL: optionalServerEnv(process.env.VERCEL_URL),
     SUPABASE_ATTACHMENTS_BUCKET: optionalServerEnv(process.env.SUPABASE_ATTACHMENTS_BUCKET),
