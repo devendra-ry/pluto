@@ -195,5 +195,46 @@
             "effortControl",
             "fast"
         ]
+    },
+    {
+        "id": "deepseek-r1:latest",
+        "name": "DeepSeek R1 (Ollama)",
+        "description": "Ollama cloud model (API key required)",
+        "provider": "ollama",
+        "supportsReasoning": true,
+        "capabilities": [
+            "reasoning"
+        ]
+    },
+    {
+        "id": "gpt-oss:120b-cloud",
+        "name": "GPT-OSS 120B Cloud",
+        "description": "Open source GPT OSS 120B via Ollama cloud",
+        "provider": "ollama",
+        "supportsReasoning": true,
+        "capabilities": [
+            "reasoning"
+        ]
+    },
+    {
+        "id": "gpt-oss:20b-cloud",
+        "name": "GPT-OSS 20B Cloud",
+        "description": "Open source GPT OSS 20B via Ollama cloud",
+        "provider": "ollama",
+        "supportsReasoning": true,
+        "capabilities": [
+            "reasoning",
+            "fast"
+        ]
+    },
+    {
+        "id": "minimax-m2:cloud",
+        "name": "MiniMax M2 Cloud",
+        "description": "MiniMax M2 via Ollama cloud",
+        "provider": "ollama",
+        "supportsReasoning": true,
+        "capabilities": [
+            "reasoning"
+        ]
     }
 ]
