@@ -184,6 +184,19 @@
         ]
     },
     {
+        "id": "gemini-3.1-flash-lite-preview",
+        "name": "Gemini 3.1 Flash Lite",
+        "description": "Google's latest lightweight preview model",
+        "provider": "google",
+        "supportsReasoning": true,
+        "capabilities": [
+            "reasoning",
+            "vision",
+            "toolCalling",
+            "fast"
+        ]
+    },
+    {
         "id": "XiaomiMiMo/MiMo-V2-Flash-TEE",
         "name": "MiMo V2 Flash",
         "description": "Xiaomi's fast reasoning model with TEE",
