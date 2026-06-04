@@ -130,6 +130,32 @@
         ]
     },
     {
+        "id": "gemini-3.5-flash",
+        "name": "Gemini 3.5 Flash",
+        "description": "Google's fast multimodal reasoning model",
+        "provider": "google",
+        "supportsReasoning": true,
+        "capabilities": [
+            "reasoning",
+            "vision",
+            "toolCalling",
+            "fast"
+        ]
+    },
+    {
+        "id": "gemini-3.1-flash-lite",
+        "name": "Gemini 3.1 Flash Lite",
+        "description": "Google's lightweight high-speed reasoning model",
+        "provider": "google",
+        "supportsReasoning": true,
+        "capabilities": [
+            "reasoning",
+            "vision",
+            "toolCalling",
+            "fast"
+        ]
+    },
+    {
         "id": "gemini-3.1-flash-lite-preview",
         "name": "Gemini 3.1 Flash Lite",
         "description": "Google's latest lightweight preview model",
@@ -210,16 +236,6 @@
         ]
     },
     {
-        "id": "deepseek-v3.1:671b-cloud",
-        "name": "DeepSeek V3.1 671B Cloud",
-        "description": "DeepSeek V3.1 671B via Ollama cloud (API key required)",
-        "provider": "ollama",
-        "supportsReasoning": true,
-        "capabilities": [
-            "reasoning"
-        ]
-    },
-    {
         "id": "gpt-oss:120b-cloud",
         "name": "GPT-OSS 120B Cloud",
         "description": "Open source GPT OSS 120B via Ollama cloud",
@@ -244,6 +260,16 @@
         "id": "minimax-m2:cloud",
         "name": "MiniMax M2 Cloud",
         "description": "MiniMax M2 via Ollama cloud",
+        "provider": "ollama",
+        "supportsReasoning": true,
+        "capabilities": [
+            "reasoning"
+        ]
+    },
+    {
+        "id": "minimax-m3:cloud",
+        "name": "MiniMax M3 Cloud",
+        "description": "MiniMax M3 via Ollama cloud",
         "provider": "ollama",
         "supportsReasoning": true,
         "capabilities": [
