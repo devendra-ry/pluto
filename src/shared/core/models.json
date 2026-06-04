@@ -156,19 +156,6 @@
         ]
     },
     {
-        "id": "gemini-3.1-flash-lite-preview",
-        "name": "Gemini 3.1 Flash Lite",
-        "description": "Google's latest lightweight preview model",
-        "provider": "google",
-        "supportsReasoning": true,
-        "capabilities": [
-            "reasoning",
-            "vision",
-            "toolCalling",
-            "fast"
-        ]
-    },
-    {
         "id": "stepfun/step-3.5-flash:free",
         "name": "Step 3.5 Flash (Free)",
         "description": "High-speed reasoning model from Stepfun",
