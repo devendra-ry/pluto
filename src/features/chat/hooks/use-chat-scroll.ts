@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { type VirtuosoHandle } from 'react-virtuoso';
 
 import { scheduleFrame } from '@/shared/lib/animation-frame';
@@ -9,7 +9,7 @@ interface UseChatScrollParams {
     chatId: string;
     messagesReady: boolean;
     messageCount: number;
-    virtuosoRef: MutableRefObject<VirtuosoHandle | null>;
+    virtuosoRef: RefObject<VirtuosoHandle | null>;
 }
 
 export function useChatScroll({ chatId, messagesReady, messageCount, virtuosoRef }: UseChatScrollParams) {

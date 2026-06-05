@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type MutableRefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 
 import { type ChatInputHandle } from '@/features/chat/components/chat-input';
 import { claimPendingGenerationJob, completeGenerationJob } from '@/features/chat/hooks/use-generation-jobs';
@@ -15,7 +15,7 @@ interface UsePendingGenerationParams {
     isLoading: boolean;
     isThinking: boolean;
     lastRequestFailed: boolean;
-    chatInputRef: MutableRefObject<ChatInputHandle | null>;
+    chatInputRef: RefObject<ChatInputHandle | null>;
     applyPendingReasoningEffort: (effort: ReasoningEffort) => void;
     generateResponse: (
         currentMessages: ChatViewMessage[],

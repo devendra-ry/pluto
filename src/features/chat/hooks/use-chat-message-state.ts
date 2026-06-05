@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { useCallback, useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
 
 import { type Message } from '@/features/messages/hooks/use-messages';
 import { type ChatResponseStats, type ChatViewMessage } from '@/features/chat/lib/chat-view';
@@ -78,8 +78,8 @@ interface UseChatMessageStateParams {
     storedMessages: Message[] | null;
     isLoading: boolean;
     isThinking: boolean;
-    justAddedMessageIdRef: MutableRefObject<string | null>;
-    locallyDeletedMessageIdsRef: MutableRefObject<Set<string>>;
+    justAddedMessageIdRef: RefObject<string | null>;
+    locallyDeletedMessageIdsRef: RefObject<Set<string>>;
 }
 
 export function useChatMessageState({

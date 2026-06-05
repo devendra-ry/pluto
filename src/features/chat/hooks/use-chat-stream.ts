@@ -6,7 +6,7 @@ import {
     useReducer,
     useRef,
     type Dispatch,
-    type MutableRefObject,
+    type RefObject,
     type SetStateAction,
 } from 'react';
 
@@ -136,11 +136,11 @@ function streamReducer(state: StreamState, action: StreamAction): StreamState {
 interface UseChatStreamParams {
     chatId: string;
     model: string;
-    reasoningEffortRef: MutableRefObject<ReasoningEffort>;
+    reasoningEffortRef: RefObject<ReasoningEffort>;
     systemPrompt: string;
     setMessages: Dispatch<SetStateAction<ChatViewMessage[]>>;
-    justAddedMessageIdRef: MutableRefObject<string | null>;
-    persistRetryModeHintRef: MutableRefObject<((userMessageId: string, mode: RetryMode) => void) | null>;
+    justAddedMessageIdRef: RefObject<string | null>;
+    persistRetryModeHintRef: RefObject<((userMessageId: string, mode: RetryMode) => void) | null>;
     showToast: (message: string, type?: ToastType) => void;
 }
 

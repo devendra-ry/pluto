@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react';
 
 import { type ChatSubmitMode } from '@/features/chat/components/chat-input';
 import { deleteMessagesByIds, getThreadMessages, type RefreshMessagesResult } from '@/features/messages/hooks/use-messages';
@@ -130,7 +130,7 @@ interface UseRetryLogicParams {
         forceSearchMode?: boolean
     ) => Promise<boolean>;
     refreshStoredMessages: () => Promise<RefreshMessagesResult>;
-    locallyDeletedMessageIdsRef: MutableRefObject<Set<string>>;
+    locallyDeletedMessageIdsRef: RefObject<Set<string>>;
     confirmDestructiveDelete: (context: {
         action: 'retry';
         deleteCount: number;
