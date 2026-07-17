@@ -19,8 +19,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "dev Chat",
-  description: "Local-first AI chat interface powered by Chutes API",
+  title: "Pluto",
+  description: "A secure multi-provider AI workspace for chat, search, images, and video.",
 };
 
 export default async function RootLayout({

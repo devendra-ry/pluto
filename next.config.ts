@@ -30,12 +30,35 @@ function getSupabaseStorageRemotePatterns(): NonNullable<NextConfig['images']>['
   }
 }
 
+function getSupabaseCspSources() {
+  const httpSources = new Set(['https://*.supabase.co']);
+  const websocketSources = new Set(['wss://*.supabase.co']);
+  const rawSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+
+  if (rawSupabaseUrl) {
+    try {
+      const parsed = new URL(rawSupabaseUrl);
+      httpSources.add(parsed.origin);
+      const websocketProtocol = parsed.protocol === 'http:' ? 'ws:' : 'wss:';
+      websocketSources.add(`${websocketProtocol}//${parsed.host}`);
+    } catch {
+      // Environment validation reports malformed URLs; keep safe hosted defaults here.
+    }
+  }
+
+  return {
+    http: Array.from(httpSources).join(' '),
+    websocket: Array.from(websocketSources).join(' '),
+  };
+}
+
 const nextConfig: NextConfig = {
   images: {
     remotePatterns: getSupabaseStorageRemotePatterns(),
   },
   async headers() {
     const isProd = process.env.NODE_ENV === 'production';
+    const supabaseSources = getSupabaseCspSources();
 
     // Construct CSP header
     const cspHeader = `
@@ -43,9 +66,9 @@ const nextConfig: NextConfig = {
       script-src 'self' 'unsafe-inline' ${isProd ? '' : "'unsafe-eval'"} https://va.vercel-scripts.com https://vercel.live;
       style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
       font-src 'self' data: https://fonts.gstatic.com;
-      img-src 'self' blob: data: https://*.supabase.co;
-      media-src 'self' blob: data: https://*.supabase.co;
-      connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com https://*.vercel-insights.com https://*.vercel-scripts.com;
+      img-src 'self' blob: data: ${supabaseSources.http};
+      media-src 'self' blob: data: ${supabaseSources.http};
+      connect-src 'self' ${supabaseSources.http} ${supabaseSources.websocket} https://vitals.vercel-insights.com https://*.vercel-insights.com https://*.vercel-scripts.com;
       frame-src 'self' https://vercel.live;
       worker-src 'self' blob:;
       object-src 'none';
@@ -73,6 +96,10 @@ const nextConfig: NextConfig = {
           {
             key: 'Referrer-Policy',
             value: 'strict-origin-when-cross-origin',
+          },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=()',
           },
         ],
       },

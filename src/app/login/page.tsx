@@ -36,7 +36,7 @@ export default function LoginPage() {
                         transition={{ delay: 0.1 }}
                         className="text-2xl font-bold text-white tracking-tight"
                     >
-                        Sign in to dev Chat
+                        Sign in to Pluto
                     </motion.h1>
                 </div>
 

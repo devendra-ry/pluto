@@ -149,6 +149,7 @@ No extra settings panel is needed; the mode dropdown submenu picks it up automat
 - `npm run dev`
 - `npm run build`
 - `npm run lint`
+- `npm run typecheck`
 - `npm test`
 - `npm run test:e2e` (installs/runs Chromium through Playwright)
 - `npm run db:types`
