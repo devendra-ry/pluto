@@ -1,8 +1,7 @@
 import { processAndTransformStream } from '@/shared/streaming/stream-transform';
-import { parseProviderUsage, type ProviderUsage } from '@/features/chat/lib/provider-usage';
+import { readSseDataLine, SseLineDecoder } from '@/shared/streaming/sse-line-decoder';
+import { parseProviderUsage, type ProviderUsage } from './provider-usage';
 
-const STREAM_BUFFER_WARN_CHARS = 256 * 1024;
-const STREAM_BUFFER_MAX_CHARS = 2 * 1024 * 1024;
 const IS_DEV = process.env.NODE_ENV !== 'production';
 
 export interface ParsedProviderSseEvent {
@@ -73,27 +72,19 @@ export async function* parseProviderSseToUiEvents({
 }): AsyncGenerator<ParsedProviderSseEvent, void, unknown> {
     const normalizedSourceStream = await getNormalizedSourceStream(sourceStream, needsThinkTagTransform, signal);
     const reader = normalizedSourceStream.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let warnedLargeBuffer = false;
+    const lineDecoder = new SseLineDecoder({
+        label: 'provider-sse',
+        onWarning: IS_DEV ? (message) => console.warn(message) : undefined,
+    });
 
     try {
         while (true) {
             if (signal?.aborted) break;
             const { done, value } = await reader.read();
             if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-
-            let searchFrom = 0;
-            while (true) {
-                const nlIdx = buffer.indexOf('\n', searchFrom);
-                if (nlIdx === -1) break;
-                const line = buffer.substring(searchFrom, nlIdx);
-                searchFrom = nlIdx + 1;
-                const trimmed = line.trim();
-                if (!trimmed.startsWith('data: ')) continue;
-
-                const data = trimmed.slice(6);
+            for (const line of lineDecoder.push(value)) {
+                const data = readSseDataLine(line);
+                if (data === null) continue;
                 if (data === '[DONE]') continue;
 
                 let parsed: Record<string, unknown>;
@@ -128,17 +119,6 @@ export async function* parseProviderSseToUiEvents({
                 if (contentDelta) {
                     yield { contentDelta };
                 }
-            }
-
-            buffer = searchFrom > 0 ? buffer.substring(searchFrom) : buffer;
-            if (!warnedLargeBuffer && buffer.length > STREAM_BUFFER_WARN_CHARS) {
-                warnedLargeBuffer = true;
-                if (IS_DEV) {
-                    console.warn(`[provider-sse] Large pending SSE buffer (${buffer.length} chars)`);
-                }
-            }
-            if (buffer.length > STREAM_BUFFER_MAX_CHARS) {
-                throw new Error('Stream buffer overflow while parsing provider SSE response');
             }
         }
     } finally {

@@ -3,9 +3,9 @@
 import { type RefObject, useCallback } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
-import { ChatMessage } from '@/features/chat/components/chat-message';
+import { ChatMessage } from './chat-message';
 import { AVAILABLE_MODELS } from '@/shared/core/constants';
-import { type ChatViewMessage } from '@/features/chat/lib/chat-view';
+import { type ChatViewMessage } from '../lib/chat-view';
 import { cn } from '@/shared/core/utils';
 
 interface ChatMessageListProps {

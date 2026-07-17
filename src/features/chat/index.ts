@@ -2,6 +2,7 @@ export * from './components/chat-destructive-confirm-dialog';
 export * from './components/chat-empty-state';
 export * from './components/chat-header';
 export * from './components/chat-input';
+export * from './components/chat-input/chat-input-types';
 export * from './components/chat-message-list';
 export * from './hooks/use-chat-message-state';
 export * from './hooks/use-chat-scroll';

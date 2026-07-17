@@ -1,6 +1,6 @@
 'use client';
 
-import { type ChatSubmitMode } from '@/features/chat/components/chat-input';
+import { type ChatSubmitMode } from '../components/chat-input/chat-input-types';
 import { createClient } from '@/utils/supabase/client';
 
 import { type ReasoningEffort } from '@/shared/core/types';

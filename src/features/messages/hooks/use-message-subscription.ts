@@ -7,7 +7,7 @@ import {
     mergeMessagesSorted,
     removeMessagesById,
     toMessage
-} from '@/features/messages/lib/message-helpers';
+} from '../lib/message-helpers';
 
 export function useMessageSubscription(threadId: string | null) {
     const queryClient = useQueryClient();

@@ -20,10 +20,10 @@ import { type User as SupabaseUser } from '@supabase/supabase-js';
 import { List, type RowComponentProps } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useThreads } from '@/features/threads/hooks/use-threads';
-import { deleteThread, toggleThreadPin } from '@/features/threads/lib/thread-mutations';
+import { useThreads } from '../hooks/use-threads';
+import { deleteThread, toggleThreadPin } from '../lib/thread-mutations';
 import { type Thread } from '@/shared/contracts/thread';
-import { groupThreadsByDate } from '@/features/threads/lib/date-utils';
+import { groupThreadsByDate } from '../lib/date-utils';
 import { useDebouncedValue } from '@/shared/hooks/use-debounce';
 import { cn } from '@/shared/core/utils';
 import { useToast } from '@/components/ui/toast';
@@ -330,7 +330,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         >
                             <PanelLeftClose className="h-5 w-5" />
                         </Button>
-                        <span className="font-bold text-zinc-100 text-2xl px-1">dev Chat</span>
+                        <span className="font-bold text-zinc-100 text-2xl px-1">Pluto</span>
                         <div className="w-9" />
                     </div>
 

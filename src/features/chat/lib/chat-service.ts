@@ -1,6 +1,7 @@
 import { type Attachment, type ChatMessage, type ReasoningEffort } from '@/shared/core/types';
 import { createIdempotencyKey } from '@/shared/lib/idempotency';
 import { sharedTextEncoder } from '@/shared/lib/text-encoder';
+import { readSseDataLine, SseLineDecoder } from '@/shared/streaming/sse-line-decoder';
 
 /**
  * Extract a string-typed field value from a JSON string using indexOf,
@@ -73,8 +74,6 @@ export interface GenerationResult {
 }
 
 const MAX_STREAM_RESUME_ATTEMPTS = 2;
-const STREAM_BUFFER_WARN_CHARS = 256 * 1024;
-const STREAM_BUFFER_MAX_CHARS = 2 * 1024 * 1024;
 const IS_DEV = process.env.NODE_ENV !== 'production';
 
 function isAttachment(value: unknown): value is Attachment {
@@ -264,9 +263,10 @@ export class ChatService {
             const reader = response.body?.getReader();
             if (!reader) return;
 
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let warnedLargeBuffer = false;
+            const lineDecoder = new SseLineDecoder({
+                label: 'chat-service',
+                onWarning: IS_DEV ? (message) => console.warn(message) : undefined,
+            });
 
             try {
                 while (true) {
@@ -283,19 +283,9 @@ export class ChatService {
                         return;
                     }
 
-                    buffer += decoder.decode(value, { stream: true });
-
-                    // indexOf-based line scanner — avoids split() array allocation.
-                    let searchFrom = 0;
-                    while (true) {
-                        const nlIdx = buffer.indexOf('\n', searchFrom);
-                        if (nlIdx === -1) break;
-
-                        const line = buffer.substring(searchFrom, nlIdx);
-                        searchFrom = nlIdx + 1;
-
-                        if (!line.startsWith('data: ')) continue;
-                        const data = line.substring(6);
+                    for (const line of lineDecoder.push(value)) {
+                        const data = readSseDataLine(line);
+                        if (data === null) continue;
                         // Track acknowledged bytes by complete SSE data events so resume
                         // offsets stay aligned with replay semantics and avoid decode
                         // boundary drift from partial UTF-8 chunks.
@@ -348,18 +338,6 @@ export class ChatService {
                             }
                             // Skip malformed JSON
                         }
-                    }
-
-                    // Keep only the unconsumed remainder in the buffer.
-                    buffer = searchFrom > 0 ? buffer.substring(searchFrom) : buffer;
-                    if (!warnedLargeBuffer && buffer.length > STREAM_BUFFER_WARN_CHARS) {
-                        warnedLargeBuffer = true;
-                        if (IS_DEV) {
-                            console.warn(`[chat-service] Large pending SSE buffer (${buffer.length} chars)`);
-                        }
-                    }
-                    if (buffer.length > STREAM_BUFFER_MAX_CHARS) {
-                        throw new Error('Stream buffer overflow while parsing SSE response');
                     }
                 }
             } catch (error) {

@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
-import { DEFAULT_ATTACHMENTS_BUCKET } from '@/features/attachments/lib/attachments';
+import { DEFAULT_ATTACHMENTS_BUCKET } from '@/features/attachments';
 import { getMessagesQueryKey, getQueryClient, MESSAGE_QUERY_KEY_PREFIX } from '@/shared/lib/query-client';
 import { type Attachment, type ChatResponseStats } from '@/shared/core/types';
 import { createClient } from '@/utils/supabase/client';
@@ -15,12 +15,9 @@ import {
     mapMessageRowToMessage,
     mergeMessagesSorted,
     removeMessagesById
-} from '@/features/messages/lib/message-helpers';
-import { useMessageSubscription } from '@/features/messages/hooks/use-message-subscription';
-import { canonicalizeAttachmentUrls } from '@/features/messages/lib/attachment-url-refresh';
-
-// Re-export Message type for backward compatibility
-export type { Message };
+} from '../lib/message-helpers';
+import { useMessageSubscription } from './use-message-subscription';
+import { canonicalizeAttachmentUrls } from '../lib/attachment-url-refresh';
 
 export type RefreshMessagesResult =
     | { ok: true }

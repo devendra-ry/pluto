@@ -1,4 +1,4 @@
-import { buildAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
+import { buildAttachmentProxyUrl } from '@/features/attachments';
 import type { Attachment } from '@/shared/core/types';
 
 type MessageWithAttachments = {

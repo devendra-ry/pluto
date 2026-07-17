@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, type RefObject } from 'react';
 
-import { type ChatInputHandle } from '@/features/chat/components/chat-input';
-import { claimPendingGenerationJob, completeGenerationJob } from '@/features/chat/hooks/use-generation-jobs';
+import { type ChatInputHandle } from '../components/chat-input/chat-input-types';
+import { claimPendingGenerationJob, completeGenerationJob } from './use-generation-jobs';
 import { isImageGenerationModel } from '@/shared/core/constants';
-import { type ChatViewMessage } from '@/features/chat/lib/chat-view';
+import { type ChatViewMessage } from '../lib/chat-view';
 import { type ReasoningEffort } from '@/shared/core/types';
 
 interface UsePendingGenerationParams {

@@ -1,4 +1,4 @@
-# Performance Improvement: Optimize Messages RLS
+# Database performance: optimized message RLS
 
 ## Objective
 Optimize the Row Level Security (RLS) policies for the `messages` table to improve query performance, particularly for read operations.

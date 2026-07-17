@@ -2,7 +2,7 @@
 
 import { memo } from 'react';
 import { type Attachment } from '@/shared/core/types';
-import { type ChatResponseStats } from '@/features/chat/lib/chat-view';
+import { type ChatResponseStats } from '../lib/chat-view';
 import { UserMessage } from './chat-message-user';
 import { AssistantMessage } from './chat-message-assistant';
 

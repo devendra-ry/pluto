@@ -6,7 +6,7 @@ import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { preprocessLaTeX } from '@/features/chat/lib/latex-utils';
+import { preprocessLaTeX } from '../lib/latex-utils';
 
 const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex];
 const REMARK_PLUGINS = [remarkGfm, remarkMath];

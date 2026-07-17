@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { REFRESH_THREADS_EVENT } from '@/features/threads/lib/thread-events';
+import { REFRESH_THREADS_EVENT } from '../lib/thread-events';
 import {
     mapThreadRowToThread,
     mergeThreadsSorted,
@@ -10,7 +10,7 @@ import {
     THREADS_PAGE_SIZE,
     toThread,
     upsertThreadSorted,
-} from '@/features/threads/lib/thread-model';
+} from '../lib/thread-model';
 import type { Thread } from '@/shared/contracts/thread';
 import { createClient } from '@/utils/supabase/client';
 

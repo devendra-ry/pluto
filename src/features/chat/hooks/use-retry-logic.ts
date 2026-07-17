@@ -2,10 +2,10 @@
 
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react';
 
-import { type ChatSubmitMode } from '@/features/chat/components/chat-input';
-import { deleteMessagesByIds, getThreadMessages, type RefreshMessagesResult } from '@/features/messages/hooks/use-messages';
+import { type ChatSubmitMode } from '../components/chat-input/chat-input-types';
+import { deleteMessagesByIds, getThreadMessages, type RefreshMessagesResult } from '@/features/messages';
 import { IMAGE_GENERATION_MODEL, isImageGenerationModel, SEARCH_ENABLED_MODELS, VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
-import { type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
+import { type ChatViewMessage, type RetryMode } from '../lib/chat-view';
 
 type ToastType = 'success' | 'error' | 'info';
 

@@ -1,7 +1,7 @@
 import 'server-only';
 
-import { DEFAULT_ATTACHMENTS_BUCKET } from '@/features/attachments/lib/attachments';
-import { buildAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
+import { DEFAULT_ATTACHMENTS_BUCKET } from './attachments';
+import { buildAttachmentProxyUrl } from './attachment-url';
 import { readFirstOptionalServerEnv } from '@/shared/config/server';
 
 export function getAttachmentsBucketName() {

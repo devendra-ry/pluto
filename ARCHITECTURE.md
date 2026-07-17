@@ -28,4 +28,4 @@ This repo uses a layered structure with explicit dependency direction:
 - Server infra is organized under `src/server/chat`, `generation`, `http`, `providers`, `security`, `threads`, and `uploads`.
 - Shared primitives and cross-layer data shapes are under `src/shared/core`, `contracts`, `streaming`, and `validation`.
 
-ESLint enforces the important dependency edges: client/shared modules cannot import `src/server`, and app/server/shared code cannot reach through a feature's private folders.
+ESLint enforces the important dependency edges: client/shared modules cannot import `src/server`, and code outside a feature cannot reach through that feature's private folders. Feature internals use relative imports; cross-feature imports go through each feature's public entry point.

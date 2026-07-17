@@ -4,6 +4,7 @@
  */
 
 import { sharedTextEncoder } from '@/shared/lib/text-encoder';
+import { readSseDataLine, SseLineDecoder } from './sse-line-decoder';
 
 export async function processAndTransformStream(
     sourceStream: ReadableStream,
@@ -12,11 +13,13 @@ export async function processAndTransformStream(
     onEvent?: (event: string) => void,
 ) {
     const reader = sourceStream.getReader();
-    const decoder = new TextDecoder();
     const isDev = process.env.NODE_ENV !== 'production';
     let isThinking = false;
-    let buffer = '';
     let pendingTagFragment = '';
+    const lineDecoder = new SseLineDecoder({
+        label: 'stream-transform',
+        onWarning: isDev ? (message) => console.warn(message) : undefined,
+    });
 
     const THINK_START_TAG = '<think>';
     const THINK_END_TAG = '</think>';
@@ -68,23 +71,18 @@ export async function processAndTransformStream(
             const { done, value } = await reader.read();
             if (done) break;
 
-            buffer += decoder.decode(value, { stream: true });
-            let lineStart = 0;
-            let nlIdx: number;
-            while ((nlIdx = buffer.indexOf('\n', lineStart)) !== -1) {
-                const line = buffer.substring(lineStart, nlIdx);
-                lineStart = nlIdx + 1;
+            for (const line of lineDecoder.push(value)) {
                 if (signal?.aborted) break;
 
                 const trimmedLine = line.trim();
                 if (!trimmedLine) continue;
 
-                if (!trimmedLine.startsWith('data: ')) {
+                const dataStr = readSseDataLine(trimmedLine);
+                if (dataStr === null) {
                     safeEnqueue(line + '\n');
                     continue;
                 }
 
-                const dataStr = trimmedLine.slice(6);
                 if (dataStr === '[DONE]') {
                     flushPendingTagFragment();
                     safeEnqueue('data: [DONE]\n\n');
@@ -158,9 +156,6 @@ export async function processAndTransformStream(
                     safeEnqueue(line + '\n');
                 }
             }
-
-            // Keep the last partial line in the buffer.
-            buffer = lineStart > 0 ? buffer.substring(lineStart) : buffer;
         }
 
         // Flush any unresolved trailing fragment so no model text is dropped at stream end.

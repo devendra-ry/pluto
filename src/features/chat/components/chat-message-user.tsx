@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/shared/core/utils';
 import { type Attachment } from '@/shared/core/types';
-import { isLegacyAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
+import { isLegacyAttachmentProxyUrl } from '@/features/attachments';
 import { ActionIcon } from './chat-action-icon';
 import { ChatVideoPlayer } from './chat-video-player';
 

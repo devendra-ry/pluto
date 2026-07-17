@@ -3,7 +3,7 @@ import {
     isPdfAttachment,
     isSupportedAttachmentMimeType,
     isTextAttachment,
-} from '@/features/attachments/lib/attachments';
+} from '@/features/attachments';
 import type { ChatSubmitMode } from '../components/chat-input/chat-input-types';
 
 export interface AttachmentCapabilities {

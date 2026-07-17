@@ -5,20 +5,17 @@ import { Button } from '@/components/ui/button';
 import { ArrowUp, Square, Paperclip } from 'lucide-react';
 import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, SEARCH_ENABLED_MODELS, isImageGenerationModel } from '@/shared/core/constants';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
-import { ModelSelector } from '@/features/chat/components/model-selector';
-import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment } from '@/features/attachments/lib/attachments';
-import { startUploadFileForThread } from '@/features/uploads/lib/uploads';
+import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment } from '@/features/attachments';
+import { startUploadFileForThread } from '@/features/uploads';
 import { useToast } from '@/components/ui/toast';
 import { scheduleFrame } from '@/shared/lib/animation-frame';
-import { ChatSubmitMode, ChatSubmitOptions, LocalAttachmentItem, ChatInputHandle, LocalAttachmentStatus } from './chat-input/chat-input-types';
+import { ChatSubmitMode, ChatSubmitOptions, LocalAttachmentItem, ChatInputHandle } from './chat-input/chat-input-types';
 import { AttachmentList } from './chat-input/attachment-list';
 import { ModeSelector } from './chat-input/mode-selector';
 import { ReasoningSelector } from './chat-input/reasoning-selector';
 import { SystemPromptSelector } from './chat-input/system-prompt-selector';
-import { isFileAllowedForChatInput, validateChatSubmission } from '@/features/chat/lib/chat-input-policy';
-
-// Re-export types for backward compatibility
-export type { ChatSubmitMode, ChatSubmitOptions, LocalAttachmentItem, ChatInputHandle, LocalAttachmentStatus };
+import { ModelSelector } from './model-selector';
+import { isFileAllowedForChatInput, validateChatSubmission } from '../lib/chat-input-policy';
 
 interface ChatInputProps {
     initialValue?: string;

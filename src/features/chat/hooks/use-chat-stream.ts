@@ -10,20 +10,20 @@ import {
     type SetStateAction,
 } from 'react';
 
-import { addMessage } from '@/features/messages/hooks/use-messages';
+import { addMessage } from '@/features/messages';
 import { touchThread, updateThreadTitleIfNewChat } from '@/features/threads';
 import { scheduleFrame } from '@/shared/lib/animation-frame';
-import { chatService } from '@/features/chat/lib/chat-service';
+import { chatService } from '../lib/chat-service';
 import { AVAILABLE_MODELS, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
-import { type ChatResponseStats, type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
-import { sanitizeThreadTitle } from '@/features/threads/lib/sanitize-thread-title';
+import { type ChatResponseStats, type ChatViewMessage, type RetryMode } from '../lib/chat-view';
+import { sanitizeThreadTitle } from '@/features/threads';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
 import {
     INITIAL_STREAM_STATE,
     areStatsEqual,
     estimateOutputTokens,
     streamReducer,
-} from '@/features/chat/lib/chat-stream-state';
+} from '../lib/chat-stream-state';
 
 type ToastType = 'success' | 'error' | 'info';
 

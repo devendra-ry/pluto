@@ -2,9 +2,9 @@ import {
     buildBranchMessageRows,
     buildBranchTitle,
     selectMessagesThroughBranch,
-} from '@/features/threads/lib/branch-plan';
-import { triggerThreadRefresh } from '@/features/threads/lib/thread-events';
-import { mapThreadRowToThread } from '@/features/threads/lib/thread-model';
+} from './branch-plan';
+import { triggerThreadRefresh } from './thread-events';
+import { mapThreadRowToThread } from './thread-model';
 import type { ChatViewMessage } from '@/shared/contracts/chat';
 import type { Thread } from '@/shared/contracts/thread';
 import { createClient } from '@/utils/supabase/client';

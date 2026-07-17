@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
 
-import { type Message } from '@/features/messages/hooks/use-messages';
-import { type ChatResponseStats, type ChatViewMessage } from '@/features/chat/lib/chat-view';
+import { type Message } from '@/features/messages';
+import { type ChatResponseStats, type ChatViewMessage } from '../lib/chat-view';
 import { type Attachment } from '@/shared/core/types';
 
 function areAttachmentListsEqual(left: Attachment[] | undefined, right: Attachment[] | undefined) {
