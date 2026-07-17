@@ -12,7 +12,7 @@ before(async () => {
     buildOpenAICompatibleMessages = mod.buildOpenAICompatibleMessages;
     buildGoogleContents = mod.buildGoogleContents;
 });
-import type { PreparedChatMessage } from '../src/features/chat/lib/chat-attachments';
+import type { PreparedChatMessage } from '../src/shared/contracts/chat';
 
 test('buildGoogleContents', async (t) => {
     await t.test('should format simple text messages correctly', () => {

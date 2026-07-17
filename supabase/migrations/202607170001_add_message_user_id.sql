@@ -1,5 +1,4 @@
--- Migration: Add user_id to messages and optimize RLS
--- Run this in the Supabase SQL Editor
+-- Add user_id to messages and optimize RLS.
 
 -- 1. Add user_id column (nullable first, with default auth.uid() for new inserts)
 alter table public.messages

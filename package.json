@@ -7,13 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node tests/run-tests.mjs",
+    "test:e2e": "playwright test",
     "db:types": "npx supabase gen types typescript --linked --schema public > src/utils/supabase/database.types.ts"
   },
   "dependencies": {
     "@google/genai": "^1.42.0",
-    "@lobehub/icons": "^4.2.0",
     "@microsoft/fetch-event-source": "^2.0.1",
-    "@openrouter/sdk": "^0.8.0",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.95.3",
@@ -45,10 +45,10 @@
     "remark-math": "^6.0.0",
     "server-only": "^0.0.1",
     "tailwind-merge": "^3.4.0",
-    "undici": "^7.22.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -64,7 +64,7 @@
     "typescript": "^5"
   },
   "overrides": {
-    "qs": "6.14.2",
+    "qs": "6.15.3",
     "minimatch": "^10.2.1",
     "postcss": "^8.5.15",
     "@chevrotain/cst-dts-gen": {

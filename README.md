@@ -61,7 +61,7 @@ Client (chat page)
 - Tailwind CSS v4 + shadcn/ui
 - Supabase (auth, DB, storage, realtime)
 - `@tanstack/react-query`
-- Google GenAI SDK, OpenRouter SDK, Chutes APIs
+- Google GenAI SDK, OpenRouter HTTP API, Chutes APIs
 
 ## Quick Start
 
@@ -74,7 +74,16 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-### 2. Configure `.env.local`
+### 2. Apply database migrations
+
+```bash
+supabase link --project-ref <project-ref>
+supabase db push
+```
+
+The ordered migration history is in `supabase/migrations`. For a local Supabase stack, run `supabase start` and `supabase db reset`.
+
+### 3. Configure `.env.local`
 
 ```env
 # Required
@@ -88,6 +97,8 @@ CHUTES_API_TOKEN=...
 OPENROUTER_API_KEY=...
 OLLAMA_BASE_URL=https://ollama.com
 OLLAMA_API_KEY=
+
+# Required in production for distributed rate limits, locks, and abuse protection
 UPSTASH_REDIS_REST_URL=...
 UPSTASH_REDIS_REST_TOKEN=...
 REDIS_KEY_PREFIX=pluto:dev
@@ -124,7 +135,7 @@ To add another Chutes image model, update three places:
 
 1. Add model to `src/shared/core/constants.ts` -> `IMAGE_GENERATION_MODELS`.
 2. Add endpoint candidates in `src/server/providers/chutes.ts`.
-3. Add payload mapping in `src/app/api/images/route.ts` -> `getImageRequestAttempts(...)` if required.
+3. Add payload mapping in `src/server/generation/image-handler.ts` -> `getImageRequestAttempts(...)` if required.
 
 No extra settings panel is needed; the mode dropdown submenu picks it up automatically.
 
@@ -138,7 +149,23 @@ No extra settings panel is needed; the mode dropdown submenu picks it up automat
 - `npm run dev`
 - `npm run build`
 - `npm run lint`
+- `npm test`
+- `npm run test:e2e` (installs/runs Chromium through Playwright)
 - `npm run db:types`
+
+## Attachment URL lifecycle
+
+The database stores stable, authenticated `/api/uploads` proxy URLs, never expiring signed URLs. Message loading requests short-lived Supabase signed URLs for display and opportunistically migrates older stored URLs back to the canonical proxy shape. Every upload read, write, and delete rechecks the authenticated user's thread ownership.
+
+## Deployment checklist
+
+- Apply `supabase/migrations` before deploying application code.
+- Configure both Supabase public variables and all provider keys used by enabled models.
+- Configure Upstash Redis in production; generation locks, rate limits, and abuse protection intentionally fail closed when it is unavailable.
+- Set `APP_URL` or `NEXT_PUBLIC_APP_URL` to the canonical HTTPS origin.
+- Keep the attachments bucket private and confirm its name matches both bucket environment variables.
+- Run `npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run test:e2e`, and `npm run build`.
+- Review `npm audit --omit=dev` and `THIRD_PARTY_NOTICES.md` before release.
 
 ## Uptime Monitor Targets
 

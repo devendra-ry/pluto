@@ -4,7 +4,6 @@ import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { DEFAULT_ATTACHMENTS_BUCKET } from '@/features/attachments/lib/attachments';
-import { isLegacyAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
 import { getMessagesQueryKey, getQueryClient, MESSAGE_QUERY_KEY_PREFIX } from '@/shared/lib/query-client';
 import { type Attachment, type ChatResponseStats } from '@/shared/core/types';
 import { createClient } from '@/utils/supabase/client';
@@ -18,6 +17,7 @@ import {
     removeMessagesById
 } from '@/features/messages/lib/message-helpers';
 import { useMessageSubscription } from '@/features/messages/hooks/use-message-subscription';
+import { canonicalizeAttachmentUrls } from '@/features/messages/lib/attachment-url-refresh';
 
 // Re-export Message type for backward compatibility
 export type { Message };
@@ -26,24 +26,23 @@ export type RefreshMessagesResult =
     | { ok: true }
     | { ok: false; error: string };
 
-const SIGNED_ATTACHMENT_URL_TTL_SECONDS = 60 * 60 * 24 * 365 * 10; // 10 years
+const SIGNED_ATTACHMENT_URL_TTL_SECONDS = 60 * 60; // 1 hour
 const SIGNED_ATTACHMENT_URL_BATCH_SIZE = 100;
 const ATTACHMENTS_BUCKET = process.env.NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET?.trim() || DEFAULT_ATTACHMENTS_BUCKET;
 
-async function migrateLegacyAttachmentUrls(
+async function refreshAttachmentUrls(
     supabase: ReturnType<typeof createClient>,
-    messages: Message[]
+    messages: Message[],
+    threadId: string
 ) {
-    const legacyPaths = new Set<string>();
+    const attachmentPaths = new Set<string>();
     for (const message of messages) {
         for (const attachment of message.attachments ?? []) {
-            if (isLegacyAttachmentProxyUrl(attachment.url)) {
-                legacyPaths.add(attachment.path);
-            }
+            attachmentPaths.add(attachment.path);
         }
     }
 
-    const uniquePaths = Array.from(legacyPaths);
+    const uniquePaths = Array.from(attachmentPaths);
     if (uniquePaths.length === 0) {
         return messages;
     }
@@ -59,7 +58,7 @@ async function migrateLegacyAttachmentUrls(
 
         if (error || !data) {
             if (process.env.NODE_ENV !== 'production') {
-                console.warn('[messages] Failed to create signed attachment URLs for migration', error);
+                console.warn('[messages] Failed to refresh signed attachment URLs', error);
             }
             continue;
         }
@@ -72,46 +71,11 @@ async function migrateLegacyAttachmentUrls(
         }
     }
 
-    if (signedUrlByPath.size === 0) {
-        return messages;
-    }
-
-    const messagesToPersist: Array<{ id: string; attachments: Attachment[] }> = [];
-    const migratedMessages = messages.map((message) => {
-        const currentAttachments = message.attachments ?? [];
-        if (currentAttachments.length === 0) {
-            return message;
-        }
-
-        let changed = false;
-        const nextAttachments = currentAttachments.map((attachment) => {
-            if (!isLegacyAttachmentProxyUrl(attachment.url)) {
-                return attachment;
-            }
-
-            const signedUrl = signedUrlByPath.get(attachment.path);
-            if (!signedUrl || signedUrl === attachment.url) {
-                return attachment;
-            }
-
-            changed = true;
-            return { ...attachment, url: signedUrl };
-        });
-
-        if (!changed) {
-            return message;
-        }
-
-        messagesToPersist.push({
-            id: message.id,
-            attachments: nextAttachments,
-        });
-
-        return {
-            ...message,
-            attachments: nextAttachments,
-        };
-    });
+    const { messages: refreshedMessages, messagesToPersist } = canonicalizeAttachmentUrls(
+        messages,
+        threadId,
+        signedUrlByPath,
+    );
 
     if (messagesToPersist.length > 0) {
         void Promise.all(
@@ -122,7 +86,7 @@ async function migrateLegacyAttachmentUrls(
                     .eq('id', id);
 
                 if (error && process.env.NODE_ENV !== 'production') {
-                    console.warn('[messages] Failed to persist migrated attachment URL', {
+                    console.warn('[messages] Failed to persist canonical attachment URL', {
                         messageId: id,
                         error: error.message,
                     });
@@ -131,7 +95,7 @@ async function migrateLegacyAttachmentUrls(
         );
     }
 
-    return migratedMessages;
+    return refreshedMessages;
 }
 
 async function fetchThreadMessagesWithClient(
@@ -148,7 +112,7 @@ async function fetchThreadMessagesWithClient(
 
     if (error) throw error;
     const messages = (data ?? []).map(mapMessageRowToMessage);
-    return migrateLegacyAttachmentUrls(supabase, messages);
+    return refreshAttachmentUrls(supabase, messages, threadId);
 }
 
 function updateCachedThreadMessages(
@@ -285,7 +249,7 @@ export async function deleteMessagesByIds(ids: string[], options?: DeleteMessage
         p_anchor_message_id: options?.anchorMessageId ?? null,
     });
     if (error) {
-        throw new Error(`Soft-delete failed (${error.message}). Run db/message-soft-delete-audit.sql and retry.`);
+        throw new Error(`Soft-delete failed (${error.message}). Apply the Supabase migrations and retry.`);
     }
 
     if (options?.threadId) {

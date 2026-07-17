@@ -1,7 +1,16 @@
+import 'server-only';
+
 import { type SupabaseClient, type User } from '@supabase/supabase-js';
-import { assertJsonRequest, assertValidPostOrigin, requireUser, toJsonErrorResponse } from '@/utils/api-security';
-import { assertRateLimit, type SimpleRateLimiter } from '@/utils/rate-limit';
+import {
+    assertContentLengthWithinLimit,
+    assertJsonRequest,
+    assertValidPostOrigin,
+    requireUser,
+    toJsonErrorResponse,
+} from '@/server/http/api-security';
+import { assertRateLimit, type SimpleRateLimiter } from '@/server/http/rate-limit';
 import { assertNotTemporarilyBlocked, recordAbuseSignal } from '@/server/security/abuse-protection';
+import { MAX_JSON_REQUEST_BYTES } from '@/shared/validation/request-limits';
 
 export interface AuthenticatedContext {
     user: User;
@@ -17,6 +26,7 @@ export async function withSecureContext(
     try {
         assertValidPostOrigin(req);
         assertJsonRequest(req);
+        assertContentLengthWithinLimit(req, MAX_JSON_REQUEST_BYTES);
 
         const { user, supabase } = await requireUser();
         userId = user.id;

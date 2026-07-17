@@ -1,6 +1,6 @@
-import { handleChatRequest } from '@/features/chat/server';
-import { withSecureContext } from '@/utils/route-handler';
-import { chatRateLimiter } from '@/utils/rate-limit';
+import { handleChatRequest } from '@/server/chat/chat-controller';
+import { withSecureContext } from '@/server/http/route-handler';
+import { chatRateLimiter } from '@/server/http/rate-limit';
 
 export const runtime = 'edge';
 

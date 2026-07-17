@@ -22,6 +22,9 @@ export async function acquireScopedSlotsLock(
 ): Promise<RedisLockHandle | null> {
     const redis = getRedisClient();
     if (!redis) {
+        if (process.env.NODE_ENV === 'production') {
+            throw new Error('Distributed generation locking is unavailable');
+        }
         return {
             slot: 1,
             release: async () => {},
@@ -30,6 +33,7 @@ export async function acquireScopedSlotsLock(
 
     const normalizedSlots = Math.max(1, maxSlots);
     const token = randomUUID();
+    let redisFailure: unknown = null;
 
     for (let slot = 1; slot <= normalizedSlots; slot++) {
         const lockKey = redisKey('lock', scope, key, slot);
@@ -51,8 +55,13 @@ export async function acquireScopedSlotsLock(
                 },
             };
         } catch (error) {
+            redisFailure = error;
             console.warn(`[locks] failed to reserve key=${lockKey}`, error);
         }
+    }
+
+    if (redisFailure && process.env.NODE_ENV === 'production') {
+        throw new Error('Distributed generation locking is unavailable');
     }
 
     return null;

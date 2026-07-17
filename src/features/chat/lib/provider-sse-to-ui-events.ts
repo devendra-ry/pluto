@@ -1,4 +1,4 @@
-import { processAndTransformStream } from '@/features/chat/lib/stream-transform';
+import { processAndTransformStream } from '@/shared/streaming/stream-transform';
 import { parseProviderUsage, type ProviderUsage } from '@/features/chat/lib/provider-usage';
 
 const STREAM_BUFFER_WARN_CHARS = 256 * 1024;

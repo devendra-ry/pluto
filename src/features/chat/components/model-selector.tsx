@@ -1,7 +1,7 @@
 'use client';
 
-import { Minimax, Qwen, Zhipu, Gemini, OpenRouter, OpenAI, Kimi, DeepSeek, XiaomiMiMo, Ollama } from '@lobehub/icons';
 import { useState, useMemo, memo } from 'react';
+import { ProviderIcon, type ProviderIconName } from '@/components/provider-icon';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -56,19 +56,27 @@ const CAPABILITY_ICONS: Record<Capability, React.ElementType> = {
 
 // Provider icons mapping
 // Added pointer-events-none to prevent default tooltips
-const PROVIDER_LOGOS: Record<string, React.ComponentType<{ className?: string }>> = {
-    'deepseek-ai': ({ className }) => <div className={cn(className, "pointer-events-none")}><DeepSeek.Color size={20} /></div>,
-    'openai': ({ className }) => <div className={cn(className, "pointer-events-none")}><OpenAI size={20} /></div>,
-    'moonshotai': ({ className }) => <div className={cn(className, "pointer-events-none")}><Kimi size={20} /></div>,
-    'MiniMaxAI': ({ className }) => <div className={cn(className, "pointer-events-none")}><Minimax.Color size={20} /></div>,
-    'zai-org': ({ className }) => <div className={cn(className, "pointer-events-none")}><Zhipu.Color size={20} /></div>,
-    'Qwen': ({ className }) => <div className={cn(className, "pointer-events-none")}><Qwen.Color size={20} /></div>,
-
-    'google': ({ className }) => <div className={cn(className, "pointer-events-none")}><Gemini.Color size={20} /></div>,
-    'openrouter': ({ className }) => <div className={cn(className, "pointer-events-none")}><OpenRouter size={20} /></div>,
-    'XiaomiMiMo': ({ className }) => <div className={cn(className, "pointer-events-none")}><XiaomiMiMo size={20} /></div>,
-    'ollama': ({ className }) => <div className={cn(className, "pointer-events-none")}><Ollama size={20} /></div>,
+const PROVIDER_ICON_NAMES: Record<string, ProviderIconName> = {
+    'deepseek-ai': 'DeepSeek',
+    openai: 'OpenAI',
+    moonshotai: 'Kimi',
+    MiniMaxAI: 'Minimax',
+    'zai-org': 'Zhipu',
+    Qwen: 'Qwen',
+    google: 'Gemini',
+    openrouter: 'OpenRouter',
+    XiaomiMiMo: 'XiaomiMiMo',
+    ollama: 'Ollama',
 };
+
+const PROVIDER_LOGOS: Record<string, React.ComponentType<{ className?: string }>> = Object.fromEntries(
+    Object.entries(PROVIDER_ICON_NAMES).map(([provider, name]) => [
+        provider,
+        ({ className }: { className?: string }) => (
+            <div className={cn(className, 'pointer-events-none')}><ProviderIcon name={name} /></div>
+        ),
+    ]),
+);
 
 export const ModelSelector = memo(function ModelSelector({ currentModel, onModelChange }: ModelSelectorProps) {
     const [isOpen, setIsOpen] = useState(false);

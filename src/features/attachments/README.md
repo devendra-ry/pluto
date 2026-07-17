@@ -7,7 +7,6 @@ Current modules:
 - `lib/attachments.ts`
 - `lib/attachment-url.ts`
 - `lib/attachment-route-utils.ts`
-- `lib/attachment-signed-url.ts`
 - `lib/attachment-cache.ts`
 
 Guideline:

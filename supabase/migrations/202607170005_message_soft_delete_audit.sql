@@ -1,4 +1,4 @@
--- Message soft-delete + audit trail (run in Supabase SQL editor)
+-- Message soft-delete and audit trail.
 
 alter table public.messages
   add column if not exists deleted_at timestamptz null,

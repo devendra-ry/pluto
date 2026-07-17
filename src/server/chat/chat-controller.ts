@@ -1,4 +1,6 @@
-import { prepareMessageAttachments } from '@/features/chat/lib/chat-attachments';
+import 'server-only';
+
+import { prepareMessageAttachments } from '@/server/chat/chat-attachments';
 import {
     CONTEXT_RETRY_SCALE,
     estimatePreparedConversationTokens,
@@ -7,11 +9,11 @@ import {
     resolveOutputTokenPlan,
     trimMessagesToInputBudget,
     type TrimmedContext,
-} from '@/features/chat/lib/context-budget';
+} from '@/server/chat/context-budget';
 import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/shared/core/constants';
 import { resolveModelLimits } from '@/server/providers/model-limits';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
-import { processAndTransformStream } from '@/features/chat/lib/stream-transform';
+import { processAndTransformStream } from '@/shared/streaming/stream-transform';
 import { ChatRequestSchema } from '@/shared/core/types';
 import {
     buildSseReplayResponse,
@@ -25,7 +27,8 @@ import {
 } from '@/server/redis/chat-stream-cache';
 import { recordAbuseSignal } from '@/server/security/abuse-protection';
 import { sharedTextEncoder } from '@/shared/lib/text-encoder';
-import type { AuthenticatedContext } from '@/utils/route-handler';
+import { ApiRequestError, parseJsonRequest } from '@/server/http/api-security';
+import type { AuthenticatedContext } from '@/server/http/route-handler';
 
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
 const GENERIC_CHAT_ERROR_MESSAGE = 'Unable to complete request right now. Please try again.';
@@ -99,7 +102,15 @@ export async function handleChatRequest(
             if (signal.aborted) return;
 
             try {
-                const body = await req.json();
+                let body: unknown;
+                try {
+                    body = await parseJsonRequest(req);
+                } catch (error) {
+                    const message = error instanceof ApiRequestError ? error.message : 'Invalid request';
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: message })}\n\n`);
+                    safeClose(controller);
+                    return;
+                }
                 const parseResult = ChatRequestSchema.safeParse(body);
                 if (!parseResult.success) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid request' })}\n\n`);

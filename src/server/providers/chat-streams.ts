@@ -4,7 +4,7 @@ import { isImageAttachment } from '@/features/attachments';
 import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/server/providers/chutes';
 import { AVAILABLE_MODELS, type ModelConfig } from '@/shared/core/constants';
 import { serverEnv } from '@/shared/config/server';
-import type { PreparedChatMessage } from '@/features/chat/server';
+import type { PreparedChatMessage } from '@/shared/contracts/chat';
 import { logModelLimits, resolveOutputTokenCap } from '@/server/providers/limits-utils';
 import type { RequestTokenEstimates } from '@/server/providers/provider-types';
 import type { ReasoningEffort } from '@/shared/core/types';

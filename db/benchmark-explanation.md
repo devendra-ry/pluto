@@ -81,6 +81,6 @@ explain analyze select * from messages where content ilike '%search%';
 **After**: Scans `messages` and checks `user_id` on the row itself. This is significantly faster for large datasets.
 
 ## Implementation Details
-1.  **Migration**: `db/migration-add-user-id-to-messages.sql` adds the column, backfills data, adds `NOT NULL`, and indexes it.
-2.  **Hardening**: `db/supabase-hardening.sql` is updated to reflect the new schema and policies.
+1.  **Migration**: `supabase/migrations/202607170001_add_message_user_id.sql` adds the column, backfills data, adds `NOT NULL`, and indexes it.
+2.  **Hardening**: `supabase/migrations/202607170002_harden_rls_and_indexes.sql` reflects the new schema and policies.
 3.  **Types**: `src/utils/supabase/database.types.ts` is updated to include `user_id`.

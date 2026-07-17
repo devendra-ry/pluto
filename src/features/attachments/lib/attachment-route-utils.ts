@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { DEFAULT_ATTACHMENTS_BUCKET } from '@/features/attachments/lib/attachments';
+import { buildAttachmentProxyUrl } from '@/features/attachments/lib/attachment-url';
 import { readFirstOptionalServerEnv } from '@/shared/config/server';
 
 export function getAttachmentsBucketName() {
@@ -12,8 +13,7 @@ export function getAttachmentsBucketName() {
 }
 
 export function buildAttachmentUrl(threadId: string, path: string) {
-    const query = new URLSearchParams({ threadId, path });
-    return `/api/uploads?${query.toString()}`;
+    return buildAttachmentProxyUrl(threadId, path);
 }
 
 export function jsonResponse(payload: Record<string, unknown>, status: number = 200) {

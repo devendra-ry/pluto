@@ -1,8 +1,13 @@
+import 'server-only';
+
 import type { ModelConfig } from '@/shared/core/constants';
 import type { ChatMessage } from '@/shared/core/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/utils/supabase/database.types';
 import { getAttachmentsBucketName, AttachmentCache } from '@/features/attachments/server';
+import type { PreparedAttachment, PreparedChatMessage } from '@/shared/contracts/chat';
+
+export type { PreparedAttachment, PreparedChatMessage } from '@/shared/contracts/chat';
 
 import {
     MAX_ATTACHMENTS_PER_MESSAGE,
@@ -23,18 +28,6 @@ interface CachedAttachment {
 }
 
 const attachmentCache = new AttachmentCache<CachedAttachment>(2);
-
-export interface PreparedAttachment {
-    name: string;
-    mimeType: string;
-    base64Data: string;
-}
-
-export interface PreparedChatMessage {
-    role: 'user' | 'assistant';
-    content: string;
-    attachments: PreparedAttachment[];
-}
 
 function supportsImageInputs(modelConfig: ModelConfig) {
     return modelConfig.provider !== 'openrouter' && modelConfig.capabilities.includes('vision');

@@ -1,5 +1,4 @@
--- Migration: Persist assistant reply performance stats on messages
--- Run this in the Supabase SQL Editor before deploying app changes.
+-- Persist assistant reply performance stats on messages.
 
 alter table public.messages
   add column if not exists reply_stats jsonb null;

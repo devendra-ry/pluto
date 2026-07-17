@@ -1,4 +1,4 @@
--- Durable generation handoff jobs (run in Supabase SQL editor)
+-- Durable generation handoff jobs.
 
 create table if not exists public.generation_jobs (
   id uuid primary key default gen_random_uuid(),

@@ -26,3 +26,12 @@ jobs:
 
       - name: Typecheck
         run: npx tsc --noEmit --pretty false
+
+      - name: Test
+        run: npm test
+
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser smoke test
+        run: npm run test:e2e

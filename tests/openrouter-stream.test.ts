@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import type { PreparedChatMessage } from '../src/features/chat/lib/chat-attachments';
+import type { PreparedChatMessage } from '../src/shared/contracts/chat';
 
 test('getOpenRouterStream', async (t) => {
     // Mock environment variables before importing modules that use them

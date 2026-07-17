@@ -1,4 +1,4 @@
--- Pluto DB hardening (run in Supabase SQL editor)
+-- Pluto database hardening.
 
 -- 1) RLS policies with initplan-friendly auth checks.
 -- Threads

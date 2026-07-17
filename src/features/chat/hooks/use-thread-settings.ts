@@ -7,7 +7,7 @@ import {
     updateThreadModel,
     updateThreadSystemPrompt,
     type Thread,
-} from '@/features/threads/hooks/use-threads';
+} from '@/features/threads';
 import { AVAILABLE_MODELS, DEFAULT_MODEL, DEFAULT_REASONING_EFFORT } from '@/shared/core/constants';
 import { type ReasoningEffort } from '@/shared/core/types';
 

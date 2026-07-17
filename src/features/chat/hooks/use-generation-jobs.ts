@@ -58,7 +58,7 @@ export async function enqueueGenerationJob(input: EnqueueGenerationJobInput): Pr
         });
 
     if (error) {
-        throw new Error(`Failed to enqueue generation job (${error.message}). Run db/migration-generation-jobs.sql and retry.`);
+        throw new Error(`Failed to enqueue generation job (${error.message}). Apply the Supabase migrations and retry.`);
     }
 }
 
@@ -72,7 +72,7 @@ export async function claimPendingGenerationJob(threadId: string, userMessageId?
     });
 
     if (error) {
-        throw new Error(`Failed to claim generation job (${error.message}). Run db/migration-generation-jobs.sql and retry.`);
+        throw new Error(`Failed to claim generation job (${error.message}). Apply the Supabase migrations and retry.`);
     }
 
     const row = Array.isArray(data) ? data[0] : null;

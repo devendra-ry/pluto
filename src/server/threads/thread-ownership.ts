@@ -1,3 +1,5 @@
+import 'server-only';
+
 import { createClient } from '@/utils/supabase/server';
 import { getRedisClient, redisKey } from '@/server/redis/client';
 import { readPositiveInt } from '@/shared/lib/read-positive-int';

@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/playwright-report/
+/test-results/
 
 # next.js
 /.next/
@@ -42,6 +44,7 @@ next-env.d.ts
 
 # local tool caches
 .npm-cache/
+.vs/
 
 # Supabase CLI local state
 supabase/.temp/

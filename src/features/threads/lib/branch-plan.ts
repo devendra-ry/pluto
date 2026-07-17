@@ -9,7 +9,7 @@ export function selectMessagesThroughBranch(messages: ChatViewMessage[], message
 }
 
 export function buildBranchTitle(parentTitle: string) {
-    return parentTitle === 'New Chat' ? 'New Chat' : sanitizeThreadTitle(`Branch of ${parentTitle}`);
+    return parentTitle === 'New Chat' ? 'New Chat' : sanitizeThreadTitle(`Branch of ${parentTitle}`, 47);
 }
 
 export function buildBranchMessageRows(

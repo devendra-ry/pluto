@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { ApiRequestError } from '@/utils/api-security';
+import { ApiRequestError } from '@/server/http/api-security';
 import { getRedisClient, redisKey } from '@/server/redis/client';
 import { readPositiveInt } from '@/shared/lib/read-positive-int';
 

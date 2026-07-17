@@ -1,4 +1,4 @@
-import type { PreparedChatMessage } from '@/features/chat/server';
+import type { PreparedChatMessage } from '@/shared/contracts/chat';
 import type { ModelConfig } from '@/shared/core/constants';
 import type { ReasoningEffort } from '@/shared/core/types';
 

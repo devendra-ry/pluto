@@ -11,127 +11,21 @@ import {
 } from 'react';
 
 import { addMessage } from '@/features/messages/hooks/use-messages';
-import { touchThread, updateThreadTitleIfNewChat } from '@/features/threads/hooks/use-threads';
+import { touchThread, updateThreadTitleIfNewChat } from '@/features/threads';
 import { scheduleFrame } from '@/shared/lib/animation-frame';
 import { chatService } from '@/features/chat/lib/chat-service';
 import { AVAILABLE_MODELS, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
 import { type ChatResponseStats, type ChatViewMessage, type RetryMode } from '@/features/chat/lib/chat-view';
 import { sanitizeThreadTitle } from '@/features/threads/lib/sanitize-thread-title';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
+import {
+    INITIAL_STREAM_STATE,
+    areStatsEqual,
+    estimateOutputTokens,
+    streamReducer,
+} from '@/features/chat/lib/chat-stream-state';
 
 type ToastType = 'success' | 'error' | 'info';
-type StreamPhase = 'idle' | 'preparing' | 'requesting' | 'streaming' | 'persisting';
-
-interface StreamState {
-    phase: StreamPhase;
-    isThinking: boolean;
-    activeUserMessageId: string | null;
-    lastRequestFailed: boolean;
-}
-
-type StreamAction =
-    | { type: 'SET_LOADING'; loading: boolean }
-    | { type: 'BEGIN'; messageId: string; thinking: boolean }
-    | { type: 'STREAMING' }
-    | { type: 'SET_THINKING'; thinking: boolean }
-    | { type: 'PERSISTING' }
-    | { type: 'COMPLETE'; failed: boolean }
-    | { type: 'CLEAR_FAILURE' }
-    | { type: 'RESET' };
-
-const INITIAL_STATE: StreamState = {
-    phase: 'idle',
-    isThinking: false,
-    activeUserMessageId: null,
-    lastRequestFailed: false,
-};
-
-function estimateOutputTokens(content: string, reasoning: string): number {
-    const totalChars = content.length + reasoning.length;
-    if (totalChars <= 0) return 0;
-    return Math.ceil(totalChars / 3.5);
-}
-
-function areStatsEqual(left: ChatResponseStats | undefined, right: ChatResponseStats | undefined): boolean {
-    if (!left && !right) return true;
-    if (!left || !right) return false;
-    return (
-        left.outputTokens === right.outputTokens
-        && left.seconds === right.seconds
-        && left.tokensPerSecond === right.tokensPerSecond
-        && left.ttfbSeconds === right.ttfbSeconds
-        && left.inputTokens === right.inputTokens
-        && left.totalTokens === right.totalTokens
-        && left.source === right.source
-    );
-}
-
-function streamReducer(state: StreamState, action: StreamAction): StreamState {
-    switch (action.type) {
-        case 'SET_LOADING':
-            if (action.loading) {
-                if (state.phase !== 'idle') {
-                    return state;
-                }
-                return {
-                    ...state,
-                    phase: 'preparing',
-                    isThinking: false,
-                    activeUserMessageId: null,
-                    lastRequestFailed: false,
-                };
-            }
-            return {
-                ...state,
-                phase: 'idle',
-                isThinking: false,
-                activeUserMessageId: null,
-            };
-        case 'BEGIN':
-            return {
-                ...state,
-                phase: 'requesting',
-                activeUserMessageId: action.messageId,
-                isThinking: action.thinking,
-                lastRequestFailed: false,
-            };
-        case 'STREAMING':
-            if (state.phase === 'idle') return state;
-            return {
-                ...state,
-                phase: 'streaming',
-            };
-        case 'SET_THINKING':
-            return {
-                ...state,
-                isThinking: action.thinking,
-            };
-        case 'PERSISTING':
-            if (state.phase === 'idle') return state;
-            return {
-                ...state,
-                phase: 'persisting',
-            };
-        case 'COMPLETE':
-            return {
-                ...state,
-                phase: 'idle',
-                isThinking: false,
-                activeUserMessageId: null,
-                lastRequestFailed: action.failed,
-            };
-        case 'CLEAR_FAILURE':
-            if (!state.lastRequestFailed) return state;
-            return {
-                ...state,
-                lastRequestFailed: false,
-            };
-        case 'RESET':
-            return INITIAL_STATE;
-        default:
-            return state;
-    }
-}
 
 interface UseChatStreamParams {
     chatId: string;
@@ -154,7 +48,7 @@ export function useChatStream({
     persistRetryModeHintRef,
     showToast,
 }: UseChatStreamParams) {
-    const [state, dispatch] = useReducer(streamReducer, INITIAL_STATE);
+    const [state, dispatch] = useReducer(streamReducer, INITIAL_STREAM_STATE);
     const stateRef = useRef(state);
     const abortControllerRef = useRef<AbortController | null>(null);
 

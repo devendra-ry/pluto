@@ -6,7 +6,7 @@ import { ArrowUp, Square, Paperclip } from 'lucide-react';
 import { AVAILABLE_MODELS, IMAGE_GENERATION_MODEL, SEARCH_ENABLED_MODELS, isImageGenerationModel } from '@/shared/core/constants';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
 import { ModelSelector } from '@/features/chat/components/model-selector';
-import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment, isPdfAttachment, isSupportedAttachmentMimeType, isTextAttachment } from '@/features/attachments/lib/attachments';
+import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment } from '@/features/attachments/lib/attachments';
 import { startUploadFileForThread } from '@/features/uploads/lib/uploads';
 import { useToast } from '@/components/ui/toast';
 import { scheduleFrame } from '@/shared/lib/animation-frame';
@@ -15,6 +15,7 @@ import { AttachmentList } from './chat-input/attachment-list';
 import { ModeSelector } from './chat-input/mode-selector';
 import { ReasoningSelector } from './chat-input/reasoning-selector';
 import { SystemPromptSelector } from './chat-input/system-prompt-selector';
+import { isFileAllowedForChatInput, validateChatSubmission } from '@/features/chat/lib/chat-input-policy';
 
 // Re-export types for backward compatibility
 export type { ChatSubmitMode, ChatSubmitOptions, LocalAttachmentItem, ChatInputHandle, LocalAttachmentStatus };
@@ -242,20 +243,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
     const handleSubmit = async () => {
         const submitMode = getSubmitMode();
-        if (submitMode === 'image-edit' && uploadedAttachments.length === 0) {
-            showToast('Attach at least one image for Image Edit mode', 'error');
-            return;
-        }
-        if (submitMode === 'image-edit' && !value.trim()) {
-            showToast('Enter an edit prompt for Image Edit mode', 'error');
-            return;
-        }
-        if (submitMode === 'video' && uploadedAttachments.length === 0) {
-            showToast('Attach an image for Image to Video mode', 'error');
-            return;
-        }
-        if (submitMode === 'video' && !value.trim()) {
-            showToast('Enter an animation prompt for Image to Video mode', 'error');
+        const validationError = validateChatSubmission(submitMode, value, uploadedAttachments.length);
+        if (validationError) {
+            showToast(validationError, 'error');
             return;
         }
         if ((!value.trim() && uploadedAttachments.length === 0) || hasUploadingAttachments || hasFailedAttachments || isLoading) {
@@ -398,17 +388,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         const nextItems: LocalAttachmentItem[] = selectedFiles.map((file) => {
             const localId = crypto.randomUUID();
             const mimeType = file.type || '';
-            const isKnownType = isSupportedAttachmentMimeType(mimeType);
-            const isAllowedType =
-                (isImageEditModeRef.current || isVideoModeRef.current)
-                    ? isImageAttachment(mimeType)
-                    : (
-                        (isImageAttachment(mimeType) && supportsImages) ||
-                        (isPdfAttachment(mimeType) && supportsPdfs) ||
-                        (isTextAttachment(mimeType) && supportsTexts)
-                    );
+            const isAllowedType = isFileAllowedForChatInput(
+                mimeType,
+                isImageEditModeRef.current || isVideoModeRef.current,
+                { images: supportsImages, pdfs: supportsPdfs, texts: supportsTexts },
+            );
 
-            if (!isKnownType || !isAllowedType) {
+            if (!isAllowedType) {
                 return {
                     localId,
                     file,

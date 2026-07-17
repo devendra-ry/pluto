@@ -1,4 +1,6 @@
-import { ApiRequestError } from './api-security';
+import 'server-only';
+
+import { ApiRequestError } from '@/server/http/api-security';
 import type { Redis } from '@upstash/redis';
 import { getRedisClient, redisKey } from '@/server/redis/client';
 
@@ -6,6 +8,9 @@ interface FixedWindowEntry {
     count: number;
     resetAt: number;
 }
+
+const REQUIRE_DISTRIBUTED_PROTECTION = process.env.NODE_ENV === 'production';
+const PROTECTION_UNAVAILABLE_MESSAGE = 'Request protection is temporarily unavailable. Please try again later.';
 
 export class SimpleRateLimiter {
     private storage = new Map<string, FixedWindowEntry>();
@@ -41,7 +46,14 @@ export class SimpleRateLimiter {
                 return await this.checkRedis(redis, key);
             } catch (error) {
                 console.warn(`[rate-limit] redis check failed for scope=${this.scope}`, error);
+                if (REQUIRE_DISTRIBUTED_PROTECTION) {
+                    throw new ApiRequestError(503, PROTECTION_UNAVAILABLE_MESSAGE);
+                }
             }
+        }
+
+        if (REQUIRE_DISTRIBUTED_PROTECTION) {
+            throw new ApiRequestError(503, PROTECTION_UNAVAILABLE_MESSAGE);
         }
 
         return this.checkMemory(key);
