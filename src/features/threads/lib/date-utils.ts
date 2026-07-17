@@ -5,7 +5,7 @@ import {
     isThisMonth,
     format,
 } from 'date-fns';
-import type { Thread } from '@/features/threads/hooks/use-threads';
+import type { Thread } from '@/shared/contracts/thread';
 
 export interface GroupedThreads {
     label: string;

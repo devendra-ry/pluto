@@ -18,6 +18,7 @@ interface ChatMessageListProps {
     setIsAtBottom: (isAtBottom: boolean) => void;
     onEdit: (messageId: string, newContent: string) => void;
     onRetry: (messageId: string) => void;
+    onBranch: (messageId: string) => void;
 }
 
 // Pre-render items well outside the viewport to avoid layout
@@ -34,6 +35,7 @@ export function ChatMessageList({
     setIsAtBottom,
     onEdit,
     onRetry,
+    onBranch,
 }: ChatMessageListProps) {
     const followOutput = useCallback(
         (isAtBottom: boolean) => (shouldAutoFollow && isAtBottom ? 'auto' : false),
@@ -64,11 +66,12 @@ export function ChatMessageList({
                         modelName={message.role === 'assistant' ? selectedModel?.name : undefined}
                         onEdit={message.role === 'user' ? onEdit : undefined}
                         onRetry={onRetry}
+                        onBranch={onBranch}
                     />
                 </div>
             );
         },
-        [model, isLoading, isThinking, messages.length, onEdit, onRetry],
+        [model, isLoading, isThinking, messages.length, onEdit, onRetry, onBranch],
     );
 
     return (

@@ -17,6 +17,7 @@ interface UserMessageProps {
     attachments?: Attachment[];
     onEdit?: (id: string, newContent: string) => void;
     onRetry?: (id: string) => void;
+    onBranch?: (id: string) => void;
 }
 
 export function UserMessage({
@@ -25,6 +26,7 @@ export function UserMessage({
     attachments = [],
     onEdit,
     onRetry,
+    onBranch,
 }: UserMessageProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [editContent, setEditContent] = useState(content);
@@ -156,6 +158,7 @@ export function UserMessage({
                         <ActionIcon
                             icon={GitBranch}
                             title="Branch"
+                            onClick={() => onBranch?.(id)}
                         />
                         {onEdit && (
                             <ActionIcon

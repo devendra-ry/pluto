@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { format } from 'date-fns';
 import { groupThreadsByDate, formatThreadDate } from './date-utils';
-import type { Thread } from '@/features/threads/hooks/use-threads';
+import type { Thread } from '@/shared/contracts/thread';
 
 // Helper to create a partial Thread object cast to Thread
 // We only need updated_at for the grouping logic.

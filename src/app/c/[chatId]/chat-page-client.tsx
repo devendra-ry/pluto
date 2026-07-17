@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type VirtuosoHandle } from 'react-virtuoso';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 
 import { ChatDestructiveConfirmDialog } from '@/features/chat';
 import { ChatEmptyState } from '@/features/chat';
@@ -17,7 +18,7 @@ import { useDestructiveDeleteConfirm } from '@/features/chat';
 import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages } from '@/features/messages';
 import { usePendingGeneration } from '@/features/chat';
 import { useRetryLogic } from '@/features/chat';
-import { useThread } from '@/features/threads';
+import { useThread, branchThread } from '@/features/threads';
 import { useThreadSettings } from '@/features/chat';
 import {
     IMAGE_GENERATION_MODEL,
@@ -129,6 +130,7 @@ function inferEditGenerationMode(
 }
 
 export function ChatPageClient({ chatId }: ChatPageClientProps) {
+    const router = useRouter();
     const thread = useThread(chatId);
     const { messages: storedMessages, refreshMessages: refreshStoredMessages } = useMessages(chatId);
     const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -398,6 +400,22 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         modelRef,
     ]);
 
+    const handleBranch = useCallback(async (messageId: string) => {
+        if (!thread) return;
+        setIsLoading(true);
+        showToast('Branching conversation...', 'info');
+        try {
+            const newThread = await branchThread(chatId, messageId, thread, messages);
+            showToast('Conversation branched successfully!', 'success');
+            router.push(`/c/${newThread.id}`);
+        } catch (error) {
+            console.error('Failed to branch conversation:', error);
+            showToast('Failed to branch conversation. Please try again.', 'error');
+        } finally {
+            setIsLoading(false);
+        }
+    }, [chatId, thread, messages, showToast, router, setIsLoading]);
+
     const shouldShowEmptyState = messagesReady && visibleMessages.length === 0 && !isThinking;
     // Keep Virtuoso permanently mounted so it never loses scroll position or
     // measured item sizes across thread switches. Hide it with CSS when we
@@ -445,6 +463,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
                             setIsAtBottom={handleAtBottomStateChange}
                             onEdit={handleEdit}
                             onRetry={handleRetry}
+                            onBranch={handleBranch}
                         />
                     </div>
                 </ErrorBoundary>

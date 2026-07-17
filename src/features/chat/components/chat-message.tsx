@@ -18,6 +18,7 @@ interface ChatMessageProps {
     stats?: ChatResponseStats;
     onEdit?: (id: string, newContent: string) => void;
     onRetry?: (id: string) => void;
+    onBranch?: (id: string) => void;
 }
 
 export const ChatMessage = memo(function ChatMessage({
@@ -32,6 +33,7 @@ export const ChatMessage = memo(function ChatMessage({
     stats,
     onEdit,
     onRetry,
+    onBranch,
 }: ChatMessageProps) {
     const isUser = role === 'user';
 
@@ -43,6 +45,7 @@ export const ChatMessage = memo(function ChatMessage({
                 attachments={attachments}
                 onEdit={onEdit}
                 onRetry={onRetry}
+                onBranch={onBranch}
             />
         );
     }
@@ -58,6 +61,7 @@ export const ChatMessage = memo(function ChatMessage({
             reasoning={reasoning}
             stats={stats}
             onRetry={onRetry}
+            onBranch={onBranch}
         />
     );
 });

@@ -46,6 +46,7 @@ interface AssistantMessageProps {
     reasoning?: string;
     stats?: ChatResponseStats;
     onRetry?: (id: string) => void;
+    onBranch?: (id: string) => void;
 }
 
 export function AssistantMessage({
@@ -58,6 +59,7 @@ export function AssistantMessage({
     reasoning,
     stats,
     onRetry,
+    onBranch,
 }: AssistantMessageProps) {
     // Collapsed by default
     const [reasoningExpanded, setReasoningExpanded] = useState(false);
@@ -264,6 +266,7 @@ export function AssistantMessage({
                         <ActionIcon
                             icon={GitBranch}
                             title="Branch"
+                            onClick={() => onBranch?.(id)}
                         />
                         <ActionIcon
                             icon={copied ? Check : Copy}
