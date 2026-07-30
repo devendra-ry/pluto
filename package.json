@@ -13,7 +13,7 @@
     "db:types": "npx supabase gen types typescript --linked --schema public > src/utils/supabase/database.types.ts"
   },
   "dependencies": {
-    "@google/genai": "^1.42.0",
+    "@google/genai": "^1.52.0",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.95.3",
@@ -30,7 +30,7 @@
     "hls.js": "^1.6.15",
     "katex": "^0.16.28",
     "lucide-react": "^0.563.0",
-    "next": "^16.2.6",
+    "next": "^16.2.12",
     "radix-ui": "^1.4.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -52,8 +52,8 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "^16.2.6",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.2.12",
     "shadcn": "^3.8.4",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
@@ -62,8 +62,9 @@
   },
   "overrides": {
     "qs": "6.15.3",
-    "minimatch": "^10.2.1",
-    "postcss": "^8.5.15",
+    "minimatch": "^10.2.6",
+    "postcss": "^8.5.18",
+    "sharp": "0.35.3",
     "@chevrotain/cst-dts-gen": {
       "lodash-es": "4.17.23"
     },
