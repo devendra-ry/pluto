@@ -4,7 +4,6 @@ import { useEffect, useRef, type RefObject } from 'react';
 
 import { type ChatInputHandle } from '../components/chat-input/chat-input-types';
 import { claimPendingGenerationJob, completeGenerationJob } from './use-generation-jobs';
-import { isImageGenerationModel } from '@/shared/core/constants';
 import { type ChatViewMessage } from '../lib/chat-view';
 import { type ReasoningEffort } from '@/shared/core/types';
 
@@ -76,14 +75,6 @@ export function usePendingGeneration({
                 applyPendingReasoningEffort(claimedJob.reasoningEffort);
             }
             chatInputRef.current?.setMode(claimedJob.mode);
-
-            if (
-                (claimedJob.mode === 'image' || claimedJob.mode === 'image-edit')
-                && claimedJob.modelId
-                && isImageGenerationModel(claimedJob.modelId)
-            ) {
-                chatInputRef.current?.setImageModelId(claimedJob.modelId);
-            }
 
             let succeeded = false;
             try {

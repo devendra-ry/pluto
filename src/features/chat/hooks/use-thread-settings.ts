@@ -22,7 +22,7 @@ interface UseThreadSettingsParams {
 function isSelectableChatModel(modelId: string): boolean {
     const modelConfig = AVAILABLE_MODELS.find((m) => m.id === modelId);
     if (!modelConfig) return false;
-    return !modelConfig.hidden && !modelConfig.capabilities.includes('imageGen');
+    return !modelConfig.hidden;
 }
 
 export function useThreadSettings({ chatId, thread, showToast }: UseThreadSettingsParams) {

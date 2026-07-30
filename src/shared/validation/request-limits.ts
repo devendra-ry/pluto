@@ -3,8 +3,6 @@ export const MAX_MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
 
 export const MAX_THREAD_ID_CHARS = 128;
 export const MAX_MODEL_ID_CHARS = 256;
-export const MAX_PROMPT_CHARS = 20_000;
-export const MAX_NEGATIVE_PROMPT_CHARS = 20_000;
 export const MAX_CHAT_MESSAGE_CHARS = 100_000;
 export const MAX_CHAT_MESSAGES = 200;
 export const MAX_CHAT_REQUEST_TEXT_CHARS = 1_000_000;

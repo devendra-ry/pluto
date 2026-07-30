@@ -108,16 +108,12 @@ export class SimpleRateLimiter {
 // Export pre-configured limiters for different endpoint types
 // Limits are per user per minute
 export const chatRateLimiter = new SimpleRateLimiter(20, 60 * 1000, { scope: 'chat' });
-export const imageRateLimiter = new SimpleRateLimiter(5, 60 * 1000, { scope: 'image' });
-export const videoRateLimiter = new SimpleRateLimiter(2, 60 * 1000, { scope: 'video' });
 export const uploadRateLimiter = new SimpleRateLimiter(10, 60 * 1000, { scope: 'upload' });
 
 // Set up periodic cleanup every 5 minutes
 if (typeof setInterval !== 'undefined') {
     setInterval(() => {
         chatRateLimiter.cleanup();
-        imageRateLimiter.cleanup();
-        videoRateLimiter.cleanup();
         uploadRateLimiter.cleanup();
     }, 5 * 60 * 1000).unref?.();
 }

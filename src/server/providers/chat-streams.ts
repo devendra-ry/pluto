@@ -1,8 +1,7 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 import { isImageAttachment } from '@/features/attachments';
-import { CHUTES_MISSING_API_KEY_MESSAGE, getChutesApiKey } from '@/server/providers/chutes';
-import { AVAILABLE_MODELS, type ModelConfig } from '@/shared/core/constants';
+import { AVAILABLE_MODELS } from '@/shared/core/constants';
 import { serverEnv } from '@/shared/config/server';
 import type { PreparedChatMessage } from '@/shared/contracts/chat';
 import { logModelLimits, resolveOutputTokenCap } from '@/server/providers/limits-utils';
@@ -125,60 +124,6 @@ function buildOllamaMessages(messages: PreparedChatMessage[], systemPrompt?: str
         return [{ role: 'system', content: systemPrompt.trim() }, ...payload];
     }
     return payload;
-}
-
-export async function getChutesStream(
-    model: string,
-    messages: PreparedChatMessage[],
-    reasoningEffort: ReasoningEffort = 'low',
-    modelConfig: ModelConfig,
-    maxOutputTokens?: number | null,
-    systemPrompt?: string,
-    tokenEstimates?: RequestTokenEstimates,
-    signal?: AbortSignal
-) {
-    const apiKey = getChutesApiKey();
-    if (!apiKey) throw new Error(CHUTES_MISSING_API_KEY_MESSAGE);
-
-    const requestBody: Record<string, unknown> = {
-        model,
-        messages: buildOpenAICompatibleMessages(messages, systemPrompt),
-        stream: true,
-        stream_options: { include_usage: true },
-        temperature: 1.0,
-        top_p: 0.95,
-        max_tokens: resolveOutputTokenCap(maxOutputTokens),
-    };
-
-    logModelLimits('chutes-request', {
-        model,
-        resolvedMaxOutputTokens: maxOutputTokens,
-        requestMaxTokens: requestBody.max_tokens,
-        messageCount: messages.length,
-        estimatedInputTokens: tokenEstimates?.estimatedInputTokens,
-        estimatedInputTokensWithSystemPrompt: tokenEstimates?.estimatedInputTokensWithSystemPrompt,
-    });
-
-    if (reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
-    if (modelConfig?.usesThinkingParam) {
-        requestBody.chat_template_kwargs = { thinking: reasoningEffort !== 'low' };
-    }
-
-    const response = await fetch('https://llm.chutes.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-        signal,
-    });
-
-    if (!response.ok) {
-        const responseText = await response.text().catch(() => '');
-        throw new Error(`Chutes API error ${response.status}: ${responseText || response.statusText}`);
-    }
-    return response.body as ReadableStream;
 }
 
 export async function getOllamaStream(

@@ -130,12 +130,6 @@ export async function handleChatRequest(
                 const normalizedSystemPrompt = systemPrompt?.trim() ?? '';
                 const chatProvider = resolveChatProvider(modelConfig);
 
-                if (modelConfig.capabilities.includes('imageGen')) {
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Selected model is image-generation only. Use image generation flow.' })}\n\n`);
-                    safeClose(controller);
-                    return;
-                }
-
                 if (useSearch && (chatProvider.id !== 'google' || !SEARCH_ENABLED_MODEL_SET.has(model))) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Search is supported only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite.' })}\n\n`);
                     safeClose(controller);
@@ -234,7 +228,7 @@ export async function handleChatRequest(
                     : undefined;
 
                 if (chatProvider.needsThinkTagTransform) {
-                    // Chutes/OpenRouter: SSE content may embed <think> tags that need
+                    // OpenRouter SSE content may embed <think> tags that need
                     // to be parsed and mapped to reasoning_content fields.
                     await processAndTransformStream(sourceStream, controller, signal, captureEvent);
                 } else {

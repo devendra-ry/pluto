@@ -16,7 +16,7 @@ create table if not exists public.generation_jobs (
   error text null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint generation_jobs_mode_check check (mode in ('chat', 'image', 'image-edit', 'video', 'search')),
+  constraint generation_jobs_mode_check check (mode in ('chat', 'search')),
   constraint generation_jobs_reasoning_effort_check check (
     reasoning_effort in ('low', 'medium', 'high') or reasoning_effort is null
   ),

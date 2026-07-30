@@ -4,7 +4,7 @@ import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 
 
 import { type ChatSubmitMode } from '../components/chat-input/chat-input-types';
 import { deleteMessagesByIds, getThreadMessages, type RefreshMessagesResult } from '@/features/messages';
-import { IMAGE_GENERATION_MODEL, isImageGenerationModel, SEARCH_ENABLED_MODELS, VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
+import { SEARCH_ENABLED_MODELS } from '@/shared/core/constants';
 import { type ChatViewMessage, type RetryMode } from '../lib/chat-view';
 
 type ToastType = 'success' | 'error' | 'info';
@@ -12,14 +12,6 @@ type ToastType = 'success' | 'error' | 'info';
 const RETRY_MODE_HINTS_KEY = 'retry-mode-hints';
 const MAX_RETRY_MODE_HINTS_PER_THREAD = 300;
 const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
-
-function hasImageAttachment(message: ChatViewMessage): boolean {
-    return (message.attachments ?? []).some((attachment) => attachment.mimeType.startsWith('image/'));
-}
-
-function hasVideoAttachment(message: ChatViewMessage): boolean {
-    return (message.attachments ?? []).some((attachment) => attachment.mimeType.startsWith('video/'));
-}
 
 function readRetryModeHints(): Record<string, Record<string, RetryMode>> {
     if (typeof window === 'undefined') return {};
@@ -72,49 +64,6 @@ function inferRetrySearchMode(
     return looksLikeSearchResponse(candidateAssistant.content);
 }
 
-function inferRetryModelId(
-    localMessages: ChatViewMessage[],
-    clickedMessageIndex: number,
-    anchorUserIndex: number
-): string | undefined {
-    const clickedMessage = localMessages[clickedMessageIndex];
-    if (!clickedMessage) return undefined;
-
-    if (
-        clickedMessage.role === 'assistant'
-        && (clickedMessage.model_id === VIDEO_GENERATION_MODEL || hasVideoAttachment(clickedMessage))
-    ) {
-        return VIDEO_GENERATION_MODEL;
-    }
-
-    if (
-        clickedMessage.role === 'assistant'
-        && (isImageGenerationModel(clickedMessage.model_id) || hasImageAttachment(clickedMessage))
-    ) {
-        return isImageGenerationModel(clickedMessage.model_id) ? clickedMessage.model_id : IMAGE_GENERATION_MODEL;
-    }
-
-    const nextAssistantMessage = localMessages
-        .slice(anchorUserIndex + 1)
-        .find((message) => message.role === 'assistant');
-
-    if (
-        nextAssistantMessage
-        && (nextAssistantMessage.model_id === VIDEO_GENERATION_MODEL || hasVideoAttachment(nextAssistantMessage))
-    ) {
-        return VIDEO_GENERATION_MODEL;
-    }
-
-    if (
-        nextAssistantMessage
-        && (isImageGenerationModel(nextAssistantMessage.model_id) || hasImageAttachment(nextAssistantMessage))
-    ) {
-        return isImageGenerationModel(nextAssistantMessage.model_id) ? nextAssistantMessage.model_id : IMAGE_GENERATION_MODEL;
-    }
-
-    return undefined;
-}
-
 interface UseRetryLogicParams {
     chatId: string;
     messages: ChatViewMessage[];
@@ -122,7 +71,6 @@ interface UseRetryLogicParams {
     setIsLoading: Dispatch<SetStateAction<boolean>>;
     showToast: (message: string, type?: ToastType) => void;
     getInputMode: () => ChatSubmitMode | undefined;
-    getInputImageModelId: () => string | undefined;
     generateResponse: (
         currentMessages: ChatViewMessage[],
         forcedModelId?: string,
@@ -144,7 +92,6 @@ export function useRetryLogic({
     setIsLoading,
     showToast,
     getInputMode,
-    getInputImageModelId,
     generateResponse,
     refreshStoredMessages,
     locallyDeletedMessageIdsRef,
@@ -193,14 +140,7 @@ export function useRetryLogic({
         let forcedModelId: string | undefined;
         let forceSearchMode = false;
 
-        if (inputMode === 'image' || inputMode === 'image-edit') {
-            const selectedImageModelId = getInputImageModelId();
-            forcedModelId = isImageGenerationModel(selectedImageModelId)
-                ? selectedImageModelId
-                : IMAGE_GENERATION_MODEL;
-        } else if (inputMode === 'video') {
-            forcedModelId = VIDEO_GENERATION_MODEL;
-        } else if (inputMode === 'search') {
+        if (inputMode === 'search') {
             forcedModelId = undefined;
             forceSearchMode = true;
         } else if (inputMode === 'chat') {
@@ -208,10 +148,8 @@ export function useRetryLogic({
             forceSearchMode = false;
         } else {
             // Fallback when input mode is temporarily unavailable.
-            forcedModelId = inferRetryModelId(localMessages, clickedMessageIndex, msgIndex);
-            forceSearchMode = !isImageGenerationModel(forcedModelId)
-                && forcedModelId !== VIDEO_GENERATION_MODEL
-                && inferRetrySearchMode(localMessages, clickedMessageIndex, msgIndex, chatId);
+            forcedModelId = undefined;
+            forceSearchMode = inferRetrySearchMode(localMessages, clickedMessageIndex, msgIndex, chatId);
         }
 
         try {
@@ -268,7 +206,6 @@ export function useRetryLogic({
         setIsLoading,
         messages,
         getInputMode,
-        getInputImageModelId,
         chatId,
         showToast,
         locallyDeletedMessageIdsRef,

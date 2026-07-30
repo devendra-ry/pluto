@@ -15,7 +15,7 @@ function toReasoningEffort(value: unknown): ReasoningEffort | null {
 }
 
 function toSubmitMode(value: unknown): ChatSubmitMode | null {
-    if (value === 'chat' || value === 'image' || value === 'image-edit' || value === 'video' || value === 'search') {
+    if (value === 'chat' || value === 'search') {
         return value;
     }
     return null;

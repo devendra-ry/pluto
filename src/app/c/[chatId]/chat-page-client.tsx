@@ -20,13 +20,7 @@ import { usePendingGeneration } from '@/features/chat';
 import { useRetryLogic } from '@/features/chat';
 import { useThread, branchThread } from '@/features/threads';
 import { useThreadSettings } from '@/features/chat';
-import {
-    IMAGE_GENERATION_MODEL,
-    isImageGenerationModel,
-    SEARCH_ENABLED_MODELS,
-    VIDEO_GENERATION_MODEL,
-} from '@/shared/core/constants';
-import { isImageAttachment } from '@/features/attachments';
+import { SEARCH_ENABLED_MODELS } from '@/shared/core/constants';
 import { type ChatViewMessage, type RetryMode } from '@/features/chat';
 import { type Attachment } from '@/shared/core/types';
 
@@ -61,14 +55,6 @@ function getRetryModeHint(threadId: string, userMessageId: string): RetryMode | 
     return hints[threadId]?.[userMessageId];
 }
 
-function hasImageAttachment(message: ChatViewMessage): boolean {
-    return (message.attachments ?? []).some((attachment) => isImageAttachment(attachment.mimeType));
-}
-
-function hasVideoAttachment(message: ChatViewMessage): boolean {
-    return (message.attachments ?? []).some((attachment) => attachment.mimeType.startsWith('video/'));
-}
-
 function looksLikeSearchResponse(content: string): boolean {
     return /\[\d+\]\(https?:\/\/[^\s)]+\)/.test(content);
 }
@@ -84,15 +70,6 @@ function inferEditGenerationMode(
     }
 
     const hint = getRetryModeHint(threadId, anchorUser.id);
-    if (hint === 'image') {
-        return {
-            forcedModelId: isImageGenerationModel(anchorUser.model_id) ? anchorUser.model_id : IMAGE_GENERATION_MODEL,
-            forceSearchMode: false,
-        };
-    }
-    if (hint === 'video') {
-        return { forcedModelId: VIDEO_GENERATION_MODEL, forceSearchMode: false };
-    }
     if (hint === 'search') {
         return { forcedModelId: undefined as string | undefined, forceSearchMode: true };
     }
@@ -102,20 +79,6 @@ function inferEditGenerationMode(
         .find((message) => message.role === 'assistant');
     if (!nextAssistantMessage) {
         return { forcedModelId: undefined as string | undefined, forceSearchMode: false };
-    }
-
-    if (
-        nextAssistantMessage.model_id === VIDEO_GENERATION_MODEL
-        || hasVideoAttachment(nextAssistantMessage)
-    ) {
-        return { forcedModelId: VIDEO_GENERATION_MODEL, forceSearchMode: false };
-    }
-
-    if (
-        isImageGenerationModel(nextAssistantMessage.model_id)
-        || hasImageAttachment(nextAssistantMessage)
-    ) {
-        return { forcedModelId: nextAssistantMessage.model_id || IMAGE_GENERATION_MODEL, forceSearchMode: false };
     }
 
     if (
@@ -204,8 +167,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
     } = useDestructiveDeleteConfirm();
 
     const getInputMode = useCallback(() => chatInputRef.current?.getMode(), []);
-    const getInputImageModelId = useCallback(() => chatInputRef.current?.getImageModelId(), []);
-
     const { handleRetry, persistRetryModeHint } = useRetryLogic({
         chatId,
         messages,
@@ -213,7 +174,6 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         setIsLoading,
         showToast,
         getInputMode,
-        getInputImageModelId,
         generateResponse,
         refreshStoredMessages,
         locallyDeletedMessageIdsRef,
@@ -257,12 +217,7 @@ export function ChatPageClient({ chatId }: ChatPageClientProps) {
         setIsLoading(true);
         // Reset the failure flag when user manually sends a message.
         clearLastRequestFailure();
-        const isImageMode = options.mode === 'image' || options.mode === 'image-edit';
-        const isVideoMode = options.mode === 'video';
-        const selectedImageModelId = options.imageModelId && isImageGenerationModel(options.imageModelId)
-            ? options.imageModelId
-            : IMAGE_GENERATION_MODEL;
-        const targetModel = isImageMode ? selectedImageModelId : (isVideoMode ? VIDEO_GENERATION_MODEL : modelRef.current);
+        const targetModel = modelRef.current;
         const useSearch = options.mode === 'search';
 
         const userMsg: ChatViewMessage = {

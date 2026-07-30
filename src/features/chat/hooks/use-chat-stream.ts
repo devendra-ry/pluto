@@ -14,7 +14,7 @@ import { addMessage } from '@/features/messages';
 import { touchThread, updateThreadTitleIfNewChat } from '@/features/threads';
 import { scheduleFrame } from '@/shared/lib/animation-frame';
 import { chatService } from '../lib/chat-service';
-import { AVAILABLE_MODELS, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
+import { AVAILABLE_MODELS } from '@/shared/core/constants';
 import { type ChatResponseStats, type ChatViewMessage, type RetryMode } from '../lib/chat-view';
 import { sanitizeThreadTitle } from '@/features/threads';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
@@ -102,17 +102,14 @@ export function useChatStream({
         const activeModelId = forcedModelId || model;
         const effectiveReasoningEffort = reasoningEffortRef.current;
         const selectedModel = AVAILABLE_MODELS.find(m => m.id === activeModelId);
-        const isImageGenModel = isImageGenerationModel(activeModelId);
-        const isVideoGenModel = activeModelId === VIDEO_GENERATION_MODEL;
-        const isMediaGenModel = isImageGenModel || isVideoGenModel;
-        const useSearch = !isMediaGenModel && forceSearchMode;
-        const supportsReasoning = isMediaGenModel ? false : (selectedModel?.supportsReasoning ?? true);
-        const retryMode: RetryMode = isImageGenModel ? 'image' : (isVideoGenModel ? 'video' : (useSearch ? 'search' : 'chat'));
+        const useSearch = forceSearchMode;
+        const supportsReasoning = selectedModel?.supportsReasoning ?? true;
+        const retryMode: RetryMode = useSearch ? 'search' : 'chat';
         persistRetryModeHintRef.current?.(lastMsg.id, retryMode);
 
         const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && effectiveReasoningEffort === 'low');
 
-        dispatch({ type: 'BEGIN', messageId: lastMsg.id, thinking: !isMediaGenModel && willThink });
+        dispatch({ type: 'BEGIN', messageId: lastMsg.id, thinking: willThink });
         abortControllerRef.current = new AbortController();
 
         const assistantMsgId = crypto.randomUUID();
@@ -283,48 +280,6 @@ export function useChatStream({
         };
 
         try {
-            if (isImageGenModel || isVideoGenModel) {
-                const userImageAttachments = (lastMsg.attachments ?? []).filter((attachment) =>
-                    attachment.mimeType.startsWith('image/')
-                );
-
-                const { content, attachment, operation } = await chatService.generateImageOrVideo({
-                    threadId: chatId,
-                    model: activeModelId,
-                    prompt: lastMsg.content,
-                    attachments: userImageAttachments,
-                    isVideo: isVideoGenModel,
-                    signal: abortControllerRef.current.signal,
-                });
-
-                const isEditOperation = !isVideoGenModel && (operation === 'edit' || userImageAttachments.length > 0);
-
-                setMessages((prev) => {
-                    const updated = [...prev];
-                    const msgIdx = updated.findIndex(m => m.id === assistantMsgId);
-                    if (msgIdx !== -1) {
-                        updated[msgIdx] = {
-                            ...updated[msgIdx],
-                            content: content,
-                            attachments: [attachment],
-                            model_id: activeModelId,
-                        };
-                    }
-                    return updated;
-                });
-
-                const persisted = await persistAssistantMessage(content, undefined, [attachment]);
-                if (!persisted) {
-                    throw new Error(
-                        isVideoGenModel
-                            ? 'Failed to persist generated video'
-                            : (isEditOperation ? 'Failed to persist edited image' : 'Failed to persist generated image')
-                    );
-                }
-                requestSucceeded = true;
-                return true;
-            }
-
             dispatch({ type: 'STREAMING' });
             const effectiveSystemPrompt = (forcedSystemPrompt ?? systemPrompt).trim();
 
@@ -338,7 +293,7 @@ export function useChatStream({
                 messages,
                 model: activeModelId,
                 reasoningEffort: effectiveReasoningEffort,
-                systemPrompt: !isMediaGenModel && effectiveSystemPrompt ? effectiveSystemPrompt : undefined,
+                systemPrompt: effectiveSystemPrompt || undefined,
                 search: useSearch,
                 signal: abortControllerRef.current.signal,
             });
@@ -387,11 +342,6 @@ export function useChatStream({
         } catch (error) {
 
             if (error instanceof Error && error.name === 'AbortError') {
-                if (isMediaGenModel) {
-                    hasPendingAssistantUpdate = false;
-                    setMessages(currentMessages);
-                    return false;
-                }
                 flushAssistantUpdate();
                 const persisted = await persistAssistantMessage(fullContent, fullReasoning, [], buildReplyStats());
                 if (!persisted) {

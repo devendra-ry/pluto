@@ -97,7 +97,7 @@ export function SystemPromptSelector({ systemPrompt, onSystemPromptChange }: Sys
                         className="w-full min-h-[120px] max-h-[260px] resize-y rounded-xl bg-[#120f18] border border-[#3a3045]/70 p-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-[#7a58a3]/70"
                     />
                     <p className="text-[11px] text-zinc-500">
-                        Applied to chat responses only. Ignored in Image, Image Edit, and Image to Video modes.
+                        Applied to responses in this thread.
                     </p>
                     <div className="flex items-center justify-end gap-2">
                         <Button

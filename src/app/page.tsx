@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/features/threads';
 import { addMessage } from '@/features/messages';
 import { enqueueGenerationJob } from '@/features/chat';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, IMAGE_GENERATION_MODEL, isImageGenerationModel, VIDEO_GENERATION_MODEL } from '@/shared/core/constants';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT } from '@/shared/core/constants';
 import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/features/chat';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
 import { Button } from '@/components/ui/button';
@@ -135,14 +135,7 @@ export default function HomePage() {
   ) => {
     if (!value.trim() && attachments.length === 0) return false;
     const effectiveModel = modelRef.current;
-    const isImageMode = options.mode === 'image' || options.mode === 'image-edit';
-    const isVideoMode = options.mode === 'video';
     const isSearchMode = options.mode === 'search';
-    const selectedImageModelId = options.imageModelId && isImageGenerationModel(options.imageModelId)
-      ? options.imageModelId
-      : IMAGE_GENERATION_MODEL;
-    const targetModel = isImageMode ? selectedImageModelId : (isVideoMode ? VIDEO_GENERATION_MODEL : effectiveModel);
-    const messageModel = isImageMode ? selectedImageModelId : (isVideoMode ? VIDEO_GENERATION_MODEL : effectiveModel);
 
     setIsLoading(true);
     try {
@@ -150,17 +143,17 @@ export default function HomePage() {
       const threadId = await ensureThread();
 
       // 2. Add the user message
-      const userMessage = await addMessage(threadId, 'user', value.trim(), undefined, messageModel, attachments);
+      const userMessage = await addMessage(threadId, 'user', value.trim(), undefined, effectiveModel, attachments);
 
       // 3. Persist durable generation context for chat-page handoff.
       await enqueueGenerationJob({
         threadId,
         userMessageId: userMessage.id,
         mode: options.mode,
-        modelId: targetModel,
-        useSearch: isSearchMode && !isImageMode && !isVideoMode,
-        reasoningEffort: !isImageMode && !isVideoMode ? reasoningEffortRef.current : null,
-        systemPrompt: systemPrompt.trim().length > 0 && !isImageMode && !isVideoMode
+        modelId: effectiveModel,
+        useSearch: isSearchMode,
+        reasoningEffort: reasoningEffortRef.current,
+        systemPrompt: systemPrompt.trim().length > 0
           ? systemPrompt.trim()
           : null,
       });

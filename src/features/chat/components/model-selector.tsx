@@ -28,7 +28,6 @@ import {
     Brain,
     SlidersHorizontal,
     Wrench,
-    ImagePlus,
     FileText,
     Folder,
     Check,
@@ -48,7 +47,6 @@ const CAPABILITY_ICONS: Record<Capability, React.ElementType> = {
     reasoning: Brain,
     effortControl: SlidersHorizontal,
     toolCalling: Wrench,
-    imageGen: ImagePlus,
     pdf: FileText,
 };
 
@@ -111,14 +109,14 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
     };
 
     const selectableModels = useMemo(
-        () => AVAILABLE_MODELS.filter((model) => !model.hidden && !model.capabilities.includes('imageGen')),
+        () => AVAILABLE_MODELS.filter((model) => !model.hidden),
         []
     );
     const selectedModel = selectableModels.find((m) => m.id === currentModel) ?? selectableModels[0] ?? AVAILABLE_MODELS[0];
 
     const filteredModels = useMemo(() => {
         return AVAILABLE_MODELS.filter((model) => {
-            if (model.hidden || model.capabilities.includes('imageGen')) return false;
+            if (model.hidden) return false;
 
             // 1. Search Query (Always apply)
             if (searchQuery) {

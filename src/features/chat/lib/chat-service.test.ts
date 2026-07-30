@@ -13,38 +13,6 @@ describe('ChatService', () => {
         mock.reset();
     });
 
-    test('generateImageOrVideo returns correct result', async () => {
-        const mockResponse = {
-            ok: true,
-            json: async () => ({
-                attachment: {
-                    id: '123',
-                    name: 'test.png',
-                    mimeType: 'image/png',
-                    size: 100,
-                    path: 'path/to/test.png',
-                    url: 'http://example.com/test.png'
-                },
-                revisedPrompt: 'revised prompt',
-                operation: 'generate'
-            })
-        };
-
-        fetchMock.mock.mockImplementation(async () => mockResponse);
-
-        const result = await chatService.generateImageOrVideo({
-            threadId: 't1',
-            model: 'm1',
-            prompt: 'p1',
-            attachments: [],
-            isVideo: false
-        });
-
-        assert.strictEqual(result.attachment.id, '123');
-        assert.ok(result.content.includes('Generated image.'));
-        assert.ok(result.content.includes('revised prompt'));
-    });
-
     test('streamChat yields chunks correctly', async () => {
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
@@ -124,7 +92,7 @@ describe('ChatService', () => {
         });
     });
 
-    test('streamChat infers output tokens for Chutes usage when completion_tokens is null', async () => {
+    test('streamChat infers output tokens when completion_tokens is null', async () => {
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
             start(controller) {

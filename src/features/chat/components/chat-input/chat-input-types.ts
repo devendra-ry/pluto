@@ -1,10 +1,9 @@
 import { Attachment } from '@/shared/core/types';
 
-export type ChatSubmitMode = 'chat' | 'image' | 'image-edit' | 'video' | 'search';
+export type ChatSubmitMode = 'chat' | 'search';
 
 export interface ChatSubmitOptions {
     mode: ChatSubmitMode;
-    imageModelId?: string;
 }
 
 export type LocalAttachmentStatus = 'uploading' | 'uploaded' | 'failed';
@@ -22,7 +21,5 @@ export interface ChatInputHandle {
     setValue: (value: string) => void;
     focus: () => void;
     setMode: (mode: ChatSubmitMode) => void;
-    setImageModelId: (modelId: string) => void;
     getMode: () => ChatSubmitMode;
-    getImageModelId: () => string;
 }

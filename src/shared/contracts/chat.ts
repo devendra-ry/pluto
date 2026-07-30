@@ -10,7 +10,7 @@ export interface ChatViewMessage {
     stats?: ChatResponseStats;
 }
 
-export type RetryMode = 'chat' | 'search' | 'image' | 'video';
+export type RetryMode = 'chat' | 'search';
 
 export interface PreparedAttachment {
     name: string;

@@ -1,4 +1,4 @@
-import { type Attachment, type ChatMessage, type ReasoningEffort } from '@/shared/core/types';
+import { type ChatMessage, type ReasoningEffort } from '@/shared/core/types';
 import { createIdempotencyKey } from '@/shared/lib/idempotency';
 import { sharedTextEncoder } from '@/shared/lib/text-encoder';
 import { readSseDataLine, SseLineDecoder } from '@/shared/streaming/sse-line-decoder';
@@ -50,15 +50,6 @@ export interface ChatStreamParams {
     signal?: AbortSignal;
 }
 
-export interface ImageVideoGenerationParams {
-    threadId: string;
-    model: string;
-    prompt: string;
-    attachments: Attachment[];
-    isVideo: boolean;
-    signal?: AbortSignal;
-}
-
 export type StreamChunk =
     | { type: 'content'; value: string }
     | { type: 'reasoning'; value: string }
@@ -66,28 +57,8 @@ export type StreamChunk =
     | { type: 'error'; value: string }
     | { type: 'done' };
 
-export interface GenerationResult {
-    attachment: Attachment;
-    content: string;
-    operation: string;
-    revisedPrompt?: string;
-}
-
 const MAX_STREAM_RESUME_ATTEMPTS = 2;
 const IS_DEV = process.env.NODE_ENV !== 'production';
-
-function isAttachment(value: unknown): value is Attachment {
-    if (!value || typeof value !== 'object') return false;
-    const record = value as Record<string, unknown>;
-    return (
-        typeof record.id === 'string' &&
-        typeof record.name === 'string' &&
-        typeof record.mimeType === 'string' &&
-        typeof record.size === 'number' &&
-        typeof record.path === 'string' &&
-        typeof record.url === 'string'
-    );
-}
 
 function readNonNegativeInt(value: unknown): number | undefined {
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
@@ -151,70 +122,6 @@ function parseUsageEvent(data: string): { outputTokens: number; inputTokens?: nu
 }
 
 export class ChatService {
-    async generateImageOrVideo({
-        threadId,
-        model,
-        prompt,
-        attachments,
-        isVideo,
-        signal,
-    }: ImageVideoGenerationParams): Promise<GenerationResult> {
-        const endpoint = isVideo ? '/api/videos' : '/api/images';
-
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Idempotency-Key': createIdempotencyKey(isVideo ? 'video' : 'image'),
-            },
-            body: JSON.stringify({
-                threadId,
-                model,
-                prompt,
-                attachments,
-            }),
-            signal,
-        });
-
-        const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-
-        if (!response.ok) {
-            const errorMessage =
-                typeof payload.error === 'string'
-                    ? payload.error
-                    : (
-                        isVideo
-                            ? 'Failed to generate video'
-                            : (attachments.length > 0 ? 'Failed to edit image' : 'Failed to generate image')
-                    );
-            throw new Error(errorMessage);
-        }
-
-        const attachment = isAttachment(payload.attachment) ? payload.attachment : null;
-        if (!attachment) {
-            throw new Error(isVideo
-                ? 'Video generation did not return a valid attachment'
-                : 'Image generation did not return a valid attachment');
-        }
-
-        const revisedPrompt = typeof payload.revisedPrompt === 'string'
-            ? payload.revisedPrompt.trim()
-            : '';
-        const operation = typeof payload.operation === 'string' ? payload.operation : '';
-        const isEditOperation = !isVideo && (operation === 'edit' || attachments.length > 0);
-
-        const assistantContent = revisedPrompt
-            ? `${isVideo ? 'Generated video.' : (isEditOperation ? 'Edited image.' : 'Generated image.')}\nPrompt rewrite: ${revisedPrompt}`
-            : (isVideo ? 'Generated video.' : (isEditOperation ? 'Edited image.' : 'Generated image.'));
-
-        return {
-            attachment,
-            content: assistantContent,
-            operation,
-            revisedPrompt,
-        };
-    }
-
     async *streamChat({
         messages,
         model,
