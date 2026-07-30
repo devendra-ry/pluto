@@ -9,7 +9,6 @@ import { cn } from '@/shared/core/utils';
 import { type Attachment } from '@/shared/core/types';
 import { isLegacyAttachmentProxyUrl } from '@/features/attachments';
 import { ActionIcon } from './chat-action-icon';
-import { ChatVideoPlayer } from './chat-video-player';
 
 interface UserMessageProps {
     id: string;
@@ -97,7 +96,6 @@ export function UserMessage({
                             <div className={cn("space-y-2", content ? "mt-3" : "")}>
                                 {attachments.map((attachment) => {
                                     const isImage = attachment.mimeType.startsWith('image/');
-                                    const isVideo = attachment.mimeType.startsWith('video/');
                                     return (
                                         <div
                                             key={attachment.id}
@@ -119,15 +117,6 @@ export function UserMessage({
                                                         unoptimized={isLegacyAttachmentProxyUrl(attachment.url)}
                                                     />
                                                 </a>
-                                            )}
-                                            {isVideo && (
-                                                <div className="mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/30">
-                                                    <ChatVideoPlayer
-                                                        url={attachment.url}
-                                                        mimeType={attachment.mimeType}
-                                                        className="h-auto w-full"
-                                                    />
-                                                </div>
                                             )}
                                             <a
                                                 href={attachment.url}

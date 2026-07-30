@@ -79,7 +79,7 @@ GEMINI_API_KEY=...
 # Optional provider keys
 OPENROUTER_API_KEY=...
 
-# Required in production for distributed rate limits, locks, and abuse protection
+# Required in production for distributed rate limits, request deduplication, and abuse protection
 UPSTASH_REDIS_REST_URL=...
 UPSTASH_REDIS_REST_TOKEN=...
 REDIS_KEY_PREFIX=pluto:dev
@@ -116,7 +116,7 @@ The database stores stable, authenticated `/api/uploads` proxy URLs, never expir
 
 - Apply `supabase/migrations` before deploying application code.
 - Configure both Supabase public variables and all provider keys used by enabled models.
-- Configure Upstash Redis in production; request locks, rate limits, and abuse protection intentionally fail closed when it is unavailable.
+- Configure Upstash Redis in production; request deduplication, rate limits, and abuse protection intentionally fail closed when it is unavailable.
 - Set `APP_URL` or `NEXT_PUBLIC_APP_URL` to the canonical HTTPS origin.
 - Keep the attachments bucket private and confirm its name matches both bucket environment variables.
 - Run `npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run test:e2e`, and `npm run build`.
