@@ -2,7 +2,7 @@ import type { PreparedChatMessage } from '@/shared/contracts/chat';
 import type { ModelConfig } from '@/shared/core/constants';
 import type { ReasoningEffort } from '@/shared/core/types';
 
-export type LimitsSource = 'google' | 'openrouter' | 'ollama' | 'fallback';
+export type LimitsSource = 'google' | 'openrouter' | 'fallback';
 
 export interface ResolvedModelLimits {
     contextWindowTokens: number;
@@ -33,7 +33,7 @@ export interface ProviderResolveLimitsParams {
 }
 
 export interface ChatProvider {
-    id: 'google' | 'openrouter' | 'ollama';
+    id: 'google' | 'openrouter';
     /**
      * Whether the provider's stream may contain `<think>` tags that need to be
      * parsed and transformed into `reasoning_content` fields. Providers that

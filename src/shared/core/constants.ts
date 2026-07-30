@@ -21,7 +21,6 @@ export interface Provider {
 }
 
 export const PROVIDERS: Provider[] = [
-    { id: 'ollama', name: 'Ollama', color: '#111111' },
     { id: 'google', name: 'Google', color: '#4285F4' },
     { id: 'openrouter', name: 'OpenRouter', color: '#6563FF' },
 ];

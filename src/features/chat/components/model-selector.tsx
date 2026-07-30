@@ -55,16 +55,8 @@ const CAPABILITY_ICONS: Record<Capability, React.ElementType> = {
 // Provider icons mapping
 // Added pointer-events-none to prevent default tooltips
 const PROVIDER_ICON_NAMES: Record<string, ProviderIconName> = {
-    'deepseek-ai': 'DeepSeek',
-    openai: 'OpenAI',
-    moonshotai: 'Kimi',
-    MiniMaxAI: 'Minimax',
-    'zai-org': 'Zhipu',
-    Qwen: 'Qwen',
     google: 'Gemini',
     openrouter: 'OpenRouter',
-    XiaomiMiMo: 'XiaomiMiMo',
-    ollama: 'Ollama',
 };
 
 const PROVIDER_LOGOS: Record<string, React.ComponentType<{ className?: string }>> = Object.fromEntries(

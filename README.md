@@ -8,7 +8,7 @@ Architecture details: see `ARCHITECTURE.md`.
 
 ## What Makes It Good
 
-- One model selector, multiple providers: Google, OpenRouter, Ollama.
+- One model selector, multiple providers: Google and OpenRouter.
 - Mode-driven UX:
   - `Chat`
   - `Search` (Gemini 2.5 Flash / Flash Lite only)
@@ -32,7 +32,7 @@ Architecture details: see `ARCHITECTURE.md`.
 Client (chat page)
   -> optimistic message/update
   -> API route (/api/chat)
-  -> provider call (Google/OpenRouter/Ollama)
+  -> provider call (Google/OpenRouter)
   -> streamed response
   -> persist (Supabase DB/Storage)
   -> realtime fanout (Supabase Realtime)
@@ -46,7 +46,7 @@ Client (chat page)
 - Tailwind CSS v4 + shadcn/ui
 - Supabase (auth, DB, storage, realtime)
 - `@tanstack/react-query`
-- Google GenAI SDK, OpenRouter HTTP API, Ollama HTTP API
+- Google GenAI SDK and OpenRouter HTTP API
 
 ## Quick Start
 
@@ -78,8 +78,6 @@ GEMINI_API_KEY=...
 
 # Optional provider keys
 OPENROUTER_API_KEY=...
-OLLAMA_BASE_URL=https://ollama.com
-OLLAMA_API_KEY=
 
 # Required in production for distributed rate limits, locks, and abuse protection
 UPSTASH_REDIS_REST_URL=...
@@ -98,13 +96,6 @@ NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET=chat-attachments
 # Optional model limits cache TTL in milliseconds (default: 1800000)
 CHAT_LIMITS_CACHE_TTL_MS=1800000
 
-```
-
-For Ollama (cloud only), set:
-
-```env
-OLLAMA_BASE_URL=https://ollama.com
-OLLAMA_API_KEY=...
 ```
 
 ## Useful Scripts

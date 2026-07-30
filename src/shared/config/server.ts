@@ -31,8 +31,6 @@ export const serverEnv = Object.freeze({
     ...publicEnv,
     GEMINI_API_KEY: requireServerEnv('GEMINI_API_KEY', process.env.GEMINI_API_KEY),
     OPENROUTER_API_KEY: optionalServerEnv(process.env.OPENROUTER_API_KEY),
-    OLLAMA_BASE_URL: optionalServerEnv(process.env.OLLAMA_BASE_URL),
-    OLLAMA_API_KEY: optionalServerEnv(process.env.OLLAMA_API_KEY),
     APP_URL: optionalServerEnv(process.env.APP_URL),
     VERCEL_URL: optionalServerEnv(process.env.VERCEL_URL),
     SUPABASE_ATTACHMENTS_BUCKET: optionalServerEnv(process.env.SUPABASE_ATTACHMENTS_BUCKET),
