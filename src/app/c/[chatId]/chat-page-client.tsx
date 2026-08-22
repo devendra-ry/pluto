@@ -18,7 +18,7 @@ import { useDestructiveDeleteConfirm } from '@/features/chat';
 import { addMessage, deleteMessagesByIds, getThreadMessages, useMessages } from '@/features/messages';
 import { usePendingGeneration } from '@/features/chat';
 import { useRetryLogic } from '@/features/chat';
-import { useThread, branchThread } from '@/features/threads';
+import { useThread, branchThread, type Thread } from '@/features/threads';
 import { useThreadSettings } from '@/features/chat';
 import { SEARCH_ENABLED_MODELS } from '@/shared/core/constants';
 import { type ChatViewMessage, type RetryMode } from '@/features/chat';
@@ -26,6 +26,7 @@ import { type Attachment } from '@/shared/core/types';
 
 interface ChatPageClientProps {
     chatId: string;
+    initialThread?: Thread;
 }
 
 const ChatMessageList = dynamic(
@@ -92,9 +93,9 @@ function inferEditGenerationMode(
     return { forcedModelId: undefined as string | undefined, forceSearchMode: false };
 }
 
-export function ChatPageClient({ chatId }: ChatPageClientProps) {
+export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
     const router = useRouter();
-    const thread = useThread(chatId);
+    const thread = useThread(chatId, initialThread);
     const { messages: storedMessages, refreshMessages: refreshStoredMessages } = useMessages(chatId);
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const chatInputRef = useRef<ChatInputHandle>(null);

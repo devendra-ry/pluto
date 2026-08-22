@@ -2,11 +2,7 @@
 
 import { QueryClient } from '@tanstack/react-query';
 
-export const MESSAGE_QUERY_KEY_PREFIX = 'messages';
-
-export function getMessagesQueryKey(threadId: string) {
-    return [MESSAGE_QUERY_KEY_PREFIX, threadId] as const;
-}
+export { getMessagesQueryKey, MESSAGE_QUERY_KEY_PREFIX } from './query-keys';
 
 function createQueryClient() {
     return new QueryClient({

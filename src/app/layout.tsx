@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { cookies } from "next/headers";
 import "./globals.css";
-import "highlight.js/styles/github-dark.css";
-import "katex/dist/katex.min.css";
 import { QueryProvider } from "@/shared/providers/query-provider";
 import { ToastProvider } from "@/components/ui/toast";
 import { Analytics } from "@vercel/analytics/next";

@@ -195,21 +195,23 @@ export function useThreads() {
     return { threads, refreshThreads };
 }
 
-export function useThread(id: string | null) {
-    const [thread, setThread] = useState<Thread | undefined>(undefined);
+export function useThread(id: string | null, initialThread?: Thread) {
+    const [thread, setThread] = useState<Thread | undefined>(initialThread);
     const [supabase] = useState(() => createClient());
 
     useEffect(() => {
         if (!id) return;
+        let cancelled = false;
         const fetchThread = async () => {
             const { data } = await supabase
                 .from('threads')
                 .select(THREAD_SELECT_COLUMNS)
                 .eq('id', id)
                 .single();
-            if (data) setThread(mapThreadRowToThread(data));
+            if (data && !cancelled) setThread(mapThreadRowToThread(data));
         };
         void fetchThread();
+        return () => { cancelled = true; };
     }, [id, supabase]);
 
     return thread;

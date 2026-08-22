@@ -14,6 +14,28 @@ const REMARK_PLUGINS = [remarkGfm, remarkMath];
 // Regex to fix markdown headings without space after #.
 const HEADING_FIX_REGEX = /^(#{1,6})([^#\s])/gm;
 
+// Code/math markers used to lazy-load their stylesheets on demand instead of
+// shipping katex + highlight.js CSS globally on every route.
+const CODE_BLOCK_MARKER = /```/;
+const MATH_MARKER = /\$\$|\$[^\s$]/;
+
+/**
+ * Injects the highlight.js and KaTeX stylesheets the first time rendered
+ * content actually contains a code fence or math, respectively. Dynamic CSS
+ * imports are deduped by the bundler module cache.
+ */
+function useLazyMarkdownStylesheets(content: string) {
+    useEffect(() => {
+        const preprocessed = preprocessLaTeX(content);
+        if (CODE_BLOCK_MARKER.test(preprocessed)) {
+            void import('highlight.js/styles/github-dark.css');
+        }
+        if (MATH_MARKER.test(preprocessed)) {
+            void import('katex/dist/katex.min.css');
+        }
+    }, [content]);
+}
+
 /**
  * How often (ms) to re-parse markdown while streaming.
  * Lower = more responsive but heavier; higher = smoother but chunkier updates.
@@ -61,6 +83,8 @@ function StreamingMarkdownInner({
     useEffect(() => {
         latestContentRef.current = content;
     }, [content]);
+
+    useLazyMarkdownStylesheets(renderedContent);
 
     useEffect(() => {
         if (!isStreaming) {

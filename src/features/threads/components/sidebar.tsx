@@ -19,7 +19,6 @@ import { createClient } from '@/shared/lib/supabase/client';
 import { type User as SupabaseUser } from '@supabase/supabase-js';
 import { List, type RowComponentProps } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
-import { motion, AnimatePresence } from 'framer-motion';
 import { useThreads } from '../hooks/use-threads';
 import { deleteThread, toggleThreadPin } from '../lib/thread-mutations';
 import { type Thread } from '@/shared/contracts/thread';
@@ -281,41 +280,25 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
     return (
         <>
             {/* Mobile Backdrop */}
-            <AnimatePresence>
-                {isMobileSize && !isCollapsed && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        onClick={collapseSidebar}
-                        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30"
-                    />
-                )}
-            </AnimatePresence>
+            {isMobileSize && (
+                <div
+                    onClick={collapseSidebar}
+                    className={cn(
+                        'fixed inset-0 bg-black/60 backdrop-blur-sm z-30 transition-opacity duration-300 ease-out',
+                        isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'
+                    )}
+                />
+            )}
 
             {/* Animated Sidebar */}
-            <motion.aside
-                initial={isCollapsed ? "collapsed" : "expanded"}
-                animate={isCollapsed ? "collapsed" : "expanded"}
-                variants={{
-                    expanded: {
-                        width: 260,
-                        opacity: 1,
-                        x: 0,
-                        borderRightWidth: 1,
-                        transition: { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
-                    },
-                    collapsed: {
-                        width: isMobileSize ? 0 : 0,
-                        opacity: isMobileSize ? 1 : 0,
-                        x: isMobileSize ? -260 : 0,
-                        borderRightWidth: 0,
-                        transition: { duration: 0.3, ease: [0.22, 1, 0.36, 1] }
-                    }
-                }}
+            <aside
                 className={cn(
-                    "h-screen flex flex-col bg-[#0f0a12] border-[#2a1f2f] overflow-hidden whitespace-nowrap z-40 transition-shadow",
-                    isMobileSize ? "fixed left-0 top-0 shadow-2xl" : "relative"
+                    'h-screen flex flex-col bg-[#0f0a12] border-[#2a1f2f] overflow-hidden whitespace-nowrap z-40 border-r',
+                    'transition-[width,transform,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+                    isMobileSize ? 'fixed left-0 top-0 shadow-2xl' : 'relative',
+                    isCollapsed
+                        ? (isMobileSize ? 'w-0 -translate-x-full' : 'w-0 opacity-0 border-r-0')
+                        : 'w-[260px]'
                 )}
             >
 
@@ -415,100 +398,87 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         )}
                     </div>
                 </div>
-            </motion.aside>
+            </aside>
 
             {/* Floating Pill for Collapsed State */}
-            <AnimatePresence mode="wait">
-                {isCollapsed && (
-                    <motion.div
-                        initial={{ x: -20, opacity: 0 }}
-                        animate={{ x: 0, opacity: 1 }}
-                        exit={{ x: -20, opacity: 0 }}
-                        transition={{ duration: 0.2, ease: "easeOut" }}
-                        className="fixed top-3 left-3 z-[100] flex items-center gap-0.5 bg-[#1a1121]/90 backdrop-blur-xl p-1.5 rounded-xl border border-pink-500/20 shadow-2xl shadow-pink-500/5 ring-1 ring-white/10"
-                    >
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={expandSidebar}
-                            className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f] transition-all rounded-lg"
-                        >
-                            <PanelLeft className="h-5 w-5" />
-                        </Button>
-
-                        <div className="w-px h-4 bg-[#2a1f2f] mx-0.5" />
-
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={expandSidebar}
-                            className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f] transition-all rounded-lg"
-                        >
-                            <Search className="h-5 w-5" />
-                        </Button>
-
-                        <div className="w-px h-4 bg-[#2a1f2f] mx-0.5" />
-
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={handleNewChat}
-                            className="h-9 w-9 text-pink-500 hover:text-pink-400 hover:bg-pink-500/10 transition-all rounded-lg"
-                        >
-                            <Plus className="h-5 w-5" />
-                        </Button>
-                    </motion.div>
+            <div
+                className={cn(
+                    'fixed top-3 left-3 z-[100] flex items-center gap-0.5 bg-[#1a1121]/90 backdrop-blur-xl p-1.5 rounded-xl border border-pink-500/20 shadow-2xl shadow-pink-500/5 ring-1 ring-white/10',
+                    'transition-all duration-200 ease-out',
+                    isCollapsed ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-3 pointer-events-none'
                 )}
-            </AnimatePresence>
+            >
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={expandSidebar}
+                    className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f] transition-all rounded-lg"
+                >
+                    <PanelLeft className="h-5 w-5" />
+                </Button>
+
+                <div className="w-px h-4 bg-[#2a1f2f] mx-0.5" />
+
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={expandSidebar}
+                    className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f] transition-all rounded-lg"
+                >
+                    <Search className="h-5 w-5" />
+                </Button>
+
+                <div className="w-px h-4 bg-[#2a1f2f] mx-0.5" />
+
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleNewChat}
+                    className="h-9 w-9 text-pink-500 hover:text-pink-400 hover:bg-pink-500/10 transition-all rounded-lg"
+                >
+                    <Plus className="h-5 w-5" />
+                </Button>
+            </div>
 
             {/* Delete confirmation modal */}
-            <AnimatePresence>
-                {deleteConfirm && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-                        onClick={handleDeleteCancel}
+            {deleteConfirm && (
+                <div
+                    className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+                    onClick={handleDeleteCancel}
+                >
+                    <div
+                        className="w-full max-w-md rounded-xl border border-[#3a2a40] bg-[#17101c] p-5 shadow-2xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-150"
+                        onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="delete-thread-title"
                     >
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.96, y: 8 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.98, y: 6 }}
-                            transition={{ duration: 0.15 }}
-                            className="w-full max-w-md rounded-xl border border-[#3a2a40] bg-[#17101c] p-5 shadow-2xl"
-                            onClick={(e) => e.stopPropagation()}
-                            role="dialog"
-                            aria-modal="true"
-                            aria-labelledby="delete-thread-title"
-                        >
-                            <h2 id="delete-thread-title" className="text-base font-semibold text-zinc-100">
-                                Confirm deletion
-                            </h2>
-                            <p className="mt-2 text-sm text-zinc-400 break-words">
-                                Are you sure you want to delete <span className="text-zinc-300">&ldquo;{deleteConfirm.title}&rdquo;</span>? This action cannot be undone.
-                            </p>
-                            <div className="mt-5 flex items-center justify-end gap-2">
-                                <Button
-                                    variant="ghost"
-                                    className="text-zinc-300 hover:text-zinc-100"
-                                    onClick={handleDeleteCancel}
-                                    disabled={deletePending}
-                                >
-                                    Cancel
-                                </Button>
-                                <Button
-                                    className="bg-red-600 hover:bg-red-500 text-white"
-                                    onClick={handleDeleteConfirm}
-                                    disabled={deletePending}
-                                >
-                                    {deletePending ? 'Deleting...' : 'Confirm'}
-                                </Button>
-                            </div>
-                        </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+                        <h2 id="delete-thread-title" className="text-base font-semibold text-zinc-100">
+                            Confirm deletion
+                        </h2>
+                        <p className="mt-2 text-sm text-zinc-400 break-words">
+                            Are you sure you want to delete <span className="text-zinc-300">&ldquo;{deleteConfirm.title}&rdquo;</span>? This action cannot be undone.
+                        </p>
+                        <div className="mt-5 flex items-center justify-end gap-2">
+                            <Button
+                                variant="ghost"
+                                className="text-zinc-300 hover:text-zinc-100"
+                                onClick={handleDeleteCancel}
+                                disabled={deletePending}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                className="bg-red-600 hover:bg-red-500 text-white"
+                                onClick={handleDeleteConfirm}
+                                disabled={deletePending}
+                            >
+                                {deletePending ? 'Deleting...' : 'Confirm'}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </>
     );
 });
