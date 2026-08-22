@@ -3,11 +3,27 @@ import { publicEnv } from "@/shared/config/public";
 import { type NextRequest, NextResponse } from "next/server";
 import type { Database } from "@/shared/lib/supabase/database.types";
 
-export const createClient = (request: NextRequest) => {
+interface ProxyHeaders {
+    /** Per-request nonce forwarded to Next.js for inline script tagging. */
+    nonce?: string;
+    /** CSP value; Next.js parses the nonce out of this request header. */
+    contentSecurityPolicy?: string;
+}
+
+export const createClient = (request: NextRequest, headers?: ProxyHeaders) => {
     // Create an unmodified response
+    const requestHeaders = new Headers(request.headers);
+    if (headers?.nonce) {
+        requestHeaders.set('x-nonce', headers.nonce);
+    }
+    if (headers?.contentSecurityPolicy) {
+        // Next.js reads the nonce for its bootstrap scripts from here.
+        requestHeaders.set('Content-Security-Policy', headers.contentSecurityPolicy);
+    }
+
     let supabaseResponse = NextResponse.next({
         request: {
-            headers: request.headers,
+            headers: requestHeaders,
         },
     });
 

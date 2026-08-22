@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logger } from '@/server/logging/logger';
+
 import { Redis } from '@upstash/redis';
 
 const DEFAULT_KEY_PREFIX = 'pluto';
@@ -44,7 +46,7 @@ export function getRedisClient(): Redis | null {
     try {
         redisClient = new Redis({ url, token });
     } catch (error) {
-        console.warn('[redis] failed to initialize Upstash client', error);
+        logger.warn('[redis] failed to initialize Upstash client', { error: error });
         redisClient = null;
     }
 

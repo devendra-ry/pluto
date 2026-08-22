@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logger } from '@/server/logging/logger';
+
 import { ApiRequestError } from '@/server/http/api-security';
 import type { Redis } from '@upstash/redis';
 import { getRedisClient, redisKey } from '@/server/redis/client';
@@ -43,7 +45,7 @@ export class SimpleRateLimiter {
             try {
                 return await this.checkRedis(redis, key);
             } catch (error) {
-                console.warn(`[rate-limit] redis check failed for scope=${this.scope}`, error);
+                logger.warn(`[rate-limit] redis check failed for scope=${this.scope}`, { error: error });
                 if (REQUIRE_DISTRIBUTED_PROTECTION) {
                     throw new ApiRequestError(503, PROTECTION_UNAVAILABLE_MESSAGE);
                 }

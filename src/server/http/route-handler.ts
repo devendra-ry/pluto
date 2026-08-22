@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logger } from '@/server/logging/logger';
+
 import { type SupabaseClient, type User } from '@supabase/supabase-js';
 import {
     assertContentLengthWithinLimit,
@@ -33,12 +35,7 @@ export async function withSecureContext(
         await assertNotTemporarilyBlocked(user.id, 'api');
 
         if (rateLimiter) {
-            try {
-                await assertRateLimit(user.id, rateLimiter);
-            } catch (error) {
-                await recordAbuseSignal(user.id, 'ratelimit', 'rate-limit');
-                throw error;
-            }
+            await assertRateLimit(user.id, rateLimiter);
         }
 
         return await handler({ user, supabase });
@@ -59,7 +56,7 @@ export async function withSecureContext(
             await recordAbuseSignal(userId, 'api', 'internal-error');
         }
 
-        console.error('API Error:', error);
+        logger.error('API Error:', error);
 
         return new Response(JSON.stringify({ error: 'Internal server error' }), {
             status: 500,

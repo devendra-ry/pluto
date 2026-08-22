@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logger } from '@/server/logging/logger';
+
 import { prepareMessageAttachments } from '@/server/chat/chat-attachments';
 import {
     CONTEXT_RETRY_SCALE,
@@ -13,7 +15,6 @@ import {
 import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/shared/core/constants';
 import { resolveModelLimits } from '@/server/providers/model-limits';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
-import { processAndTransformStream } from '@/shared/streaming/stream-transform';
 import { ChatRequestSchema } from '@/shared/core/types';
 import {
     buildSseReplayResponse,
@@ -25,7 +26,7 @@ import {
     createChatStreamWriter,
     type ChatStreamEventWriter,
 } from '@/server/redis/chat-stream-cache';
-import { recordAbuseSignal } from '@/server/security/abuse-protection';
+import { assertNotTemporarilyBlocked, recordAbuseSignal } from '@/server/security/abuse-protection';
 import { sharedTextEncoder } from '@/shared/lib/text-encoder';
 import { ApiRequestError, parseJsonRequest } from '@/server/http/api-security';
 import type { AuthenticatedContext } from '@/server/http/route-handler';
@@ -44,6 +45,9 @@ export async function handleChatRequest(
     const resumeOffset = readChatResumeOffset(req);
     let streamLockToken: string | null = null;
     if (streamId) {
+        // Repeated stream failures block this user for the 'chat' scope.
+        await assertNotTemporarilyBlocked(user.id, 'chat');
+
         const cached = await getCachedChatStreamEvents(user.id, streamId);
         if (cached) {
             // Only replay fully-completed streams. An incomplete cache means the
@@ -88,7 +92,7 @@ export async function handleChatRequest(
             controller.enqueue(encoded);
         } catch (error) {
             if (IS_DEV) {
-                console.warn('[chat][controller] Failed to enqueue stream chunk', error);
+                logger.warn('[chat][controller] Failed to enqueue stream chunk', { error: error });
             }
             // Ignore closed controller errors
         }
@@ -101,7 +105,7 @@ export async function handleChatRequest(
             controller.close();
         } catch (error) {
             if (IS_DEV) {
-                console.warn('[chat][controller] Failed to close stream controller', error);
+                logger.warn('[chat][controller] Failed to close stream controller', { error: error });
             }
         }
     };
@@ -143,7 +147,7 @@ export async function handleChatRequest(
                 const chatProvider = resolveChatProvider(modelConfig);
 
                 if (useSearch && (chatProvider.id !== 'google' || !SEARCH_ENABLED_MODEL_SET.has(model))) {
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Search is supported only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite.' })}\n\n`);
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Search is not available for the selected model.' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
@@ -159,7 +163,7 @@ export async function handleChatRequest(
 
                 let trimmedContext = trimMessagesToInputBudget(messages, limits, 1, systemPromptTokenEstimate);
                 if (trimmedContext.trimmedCount > 0) {
-                    console.log(
+                    logger.info(
                         `[chat] context-trimmed model=${model} source=${limits.source} trimmed=${trimmedContext.trimmedCount} ` +
                         `kept=${trimmedContext.messages.length} estTokens=${trimmedContext.estimatedTokens} ` +
                         `inputBudget=${trimmedContext.inputBudget} outputReserve=${trimmedContext.outputReserve} ` +
@@ -221,7 +225,7 @@ export async function handleChatRequest(
                         throw error;
                     }
 
-                    console.warn(
+                    logger.warn(
                         `[chat] context-overflow model=${model} source=${limits.source} retrying with tighter budget ` +
                         `(inputBudget=${retryContext.inputBudget}, kept=${retryContext.messages.length})`
                     );
@@ -239,15 +243,11 @@ export async function handleChatRequest(
                     ? (event: string) => { writer!.push(event); }
                     : undefined;
 
-                if (chatProvider.needsThinkTagTransform) {
-                    // OpenRouter SSE content may embed <think> tags that need
-                    // to be parsed and mapped to reasoning_content fields.
-                    await processAndTransformStream(sourceStream, controller, signal, captureEvent);
-                } else {
-                    // Google: stream is already in final SSE format with content/reasoning_content
-                    // properly separated. Pipe bytes directly — no JSON round-trip needed.
-                    const pipeDecoder = new TextDecoder();
-                    const reader = sourceStream.getReader();
+                // Provider streams arrive in final SSE format with content and
+                // reasoning already separated. Pipe bytes directly — no JSON
+                // round-trip needed.
+                const pipeDecoder = new TextDecoder();
+                const reader = sourceStream.getReader();
                     let pipeBuffer = '';
                     try {
                         while (true) {
@@ -276,7 +276,6 @@ export async function handleChatRequest(
                     } finally {
                         reader.releaseLock();
                     }
-                }
 
                 if (heartbeatInterval) {
                     clearInterval(heartbeatInterval);
@@ -295,7 +294,7 @@ export async function handleChatRequest(
                 }
 
                 if (!signal.aborted) {
-                    console.error('Chat API error:', error);
+                    logger.error('Chat API error:', error);
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: GENERIC_CHAT_ERROR_MESSAGE })}\n\n`);
                     safeClose(controller);
                     await recordAbuseSignal(user.id, 'chat', 'stream-failure');

@@ -30,61 +30,15 @@ function getSupabaseStorageRemotePatterns(): NonNullable<NextConfig['images']>['
   }
 }
 
-function getSupabaseCspSources() {
-  const httpSources = new Set(['https://*.supabase.co']);
-  const websocketSources = new Set(['wss://*.supabase.co']);
-  const rawSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-
-  if (rawSupabaseUrl) {
-    try {
-      const parsed = new URL(rawSupabaseUrl);
-      httpSources.add(parsed.origin);
-      const websocketProtocol = parsed.protocol === 'http:' ? 'ws:' : 'wss:';
-      websocketSources.add(`${websocketProtocol}//${parsed.host}`);
-    } catch {
-      // Environment validation reports malformed URLs; keep safe hosted defaults here.
-    }
-  }
-
-  return {
-    http: Array.from(httpSources).join(' '),
-    websocket: Array.from(websocketSources).join(' '),
-  };
-}
-
 const nextConfig: NextConfig = {
   images: {
     remotePatterns: getSupabaseStorageRemotePatterns(),
   },
   async headers() {
-    const isProd = process.env.NODE_ENV === 'production';
-    const supabaseSources = getSupabaseCspSources();
-
-    // Construct CSP header
-    const cspHeader = `
-      default-src 'self';
-      script-src 'self' 'unsafe-inline' ${isProd ? '' : "'unsafe-eval'"} https://va.vercel-scripts.com https://vercel.live;
-      style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-      font-src 'self' data: https://fonts.gstatic.com;
-      img-src 'self' blob: data: ${supabaseSources.http};
-      media-src 'self' blob: data: ${supabaseSources.http};
-      connect-src 'self' ${supabaseSources.http} ${supabaseSources.websocket} https://vitals.vercel-insights.com https://*.vercel-insights.com https://*.vercel-scripts.com;
-      frame-src 'self' https://vercel.live;
-      worker-src 'self' blob:;
-      object-src 'none';
-      base-uri 'self';
-      form-action 'self';
-      ${isProd ? 'upgrade-insecure-requests;' : ''}
-    `.replace(/\s{2,}/g, ' ').trim();
-
     return [
       {
         source: '/(.*)',
         headers: [
-          {
-            key: 'Content-Security-Policy',
-            value: cspHeader,
-          },
           {
             key: 'X-Content-Type-Options',
             value: 'nosniff',

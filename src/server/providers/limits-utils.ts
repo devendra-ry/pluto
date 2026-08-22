@@ -1,3 +1,5 @@
+import { logger } from '@/server/logging/logger';
+
 const DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS = 65536;
 const DEBUG_MODEL_LIMITS = process.env.CHAT_DEBUG_MODEL_LIMITS === '1';
 
@@ -21,9 +23,5 @@ export function resolveOutputTokenCap(maxOutputTokens: number | null | undefined
 
 export function logModelLimits(label: string, payload: Record<string, unknown>) {
     if (!DEBUG_MODEL_LIMITS) return;
-    try {
-        console.log(`[chat][limits] ${label} ${JSON.stringify(payload)}`);
-    } catch {
-        console.log(`[chat][limits] ${label}`);
-    }
+    logger.debug(`[chat][limits] ${label}`, payload);
 }

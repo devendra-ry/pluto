@@ -2,13 +2,13 @@
 
 A fast, production-style AI workspace built on Next.js 16.
 
-Pluto gives you one chat surface for multiple providers, with optional Google-powered search. It is optimized for realtime sync, secure request handling, and low-friction model expansion.
+Pluto gives you one chat surface for Google Gemini models, with optional Google-powered search. It is optimized for realtime sync, secure request handling, and low-friction model expansion.
 
 Architecture details: see `ARCHITECTURE.md`.
 
 ## What Makes It Good
 
-- One model selector, multiple providers: Google and OpenRouter.
+- One model selector for Google Gemini models.
 - Mode-driven UX:
   - `Chat`
   - `Search` (Gemini 2.5 Flash / Flash Lite only)
@@ -32,7 +32,7 @@ Architecture details: see `ARCHITECTURE.md`.
 Client (chat page)
   -> optimistic message/update
   -> API route (/api/chat)
-  -> provider call (Google/OpenRouter)
+  -> provider call (Google)
   -> streamed response
   -> persist (Supabase DB/Storage)
   -> realtime fanout (Supabase Realtime)
@@ -46,7 +46,7 @@ Client (chat page)
 - Tailwind CSS v4 + shadcn/ui
 - Supabase (auth, DB, storage, realtime)
 - `@tanstack/react-query`
-- Google GenAI SDK and OpenRouter HTTP API
+- Google GenAI SDK
 
 ## Quick Start
 
@@ -77,7 +77,6 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 GEMINI_API_KEY=...
 
 # Optional provider keys
-OPENROUTER_API_KEY=...
 
 # Required in production for distributed rate limits, request deduplication, and abuse protection
 UPSTASH_REDIS_REST_URL=...

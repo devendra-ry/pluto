@@ -22,7 +22,6 @@ export interface Provider {
 
 export const PROVIDERS: Provider[] = [
     { id: 'google', name: 'Google', color: '#4285F4' },
-    { id: 'openrouter', name: 'OpenRouter', color: '#6563FF' },
 ];
 
 export const CAPABILITY_INFO: Record<Capability, { label: string; icon: string }> = {
@@ -36,9 +35,10 @@ export const CAPABILITY_INFO: Record<Capability, { label: string; icon: string }
 
 export const AVAILABLE_MODELS: ModelConfig[] = models as unknown as ModelConfig[];
 
-export const DEFAULT_MODEL = 'gemini-3-flash-preview';
+export const DEFAULT_MODEL = 'gemini-3.7-flash';
 export const DEFAULT_REASONING_EFFORT = 'high';
-export const SEARCH_ENABLED_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'] as const;
+// No models currently expose Google Search grounding.
+export const SEARCH_ENABLED_MODELS = [] as const;
 
 // Suggested prompts for new chat
 export const SUGGESTED_PROMPTS = [

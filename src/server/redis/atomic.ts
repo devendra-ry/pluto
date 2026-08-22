@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logger } from '@/server/logging/logger';
+
 import type { Redis } from '@upstash/redis';
 
 // INCR + PEXPIRE atomically. The PTTL re-arm heals keys left without a TTL by
@@ -31,6 +33,6 @@ export async function releaseDistributedLock(redis: Redis, key: string, token: s
     try {
         await redis.eval(COMPARE_DELETE_SCRIPT, [key], [token]);
     } catch (error) {
-        console.warn(`[redis-lock] failed to release key=${key}`, error);
+        logger.warn(`[redis-lock] failed to release key=${key}`, { error: error });
     }
 }

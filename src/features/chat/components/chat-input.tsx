@@ -65,10 +65,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const { showToast } = useToast();
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
     const supportsSearchMode = SEARCH_ENABLED_MODELS.includes(currentModel as typeof SEARCH_ENABLED_MODELS[number]);
-    const isOpenRouterModel = selectedModel.provider === 'openrouter';
-    const supportsImages = !isOpenRouterModel && selectedModel.capabilities.includes('vision');
-    const supportsPdfs = !isOpenRouterModel && (selectedModel.capabilities.includes('pdf') || selectedModel.provider === 'google');
-    const supportsTexts = !isOpenRouterModel && selectedModel.provider === 'google';
+    const supportsImages = selectedModel.capabilities.includes('vision');
+    const supportsPdfs = selectedModel.capabilities.includes('pdf') || selectedModel.provider === 'google';
+    const supportsTexts = selectedModel.provider === 'google';
     const supportsImageUploads = supportsImages;
     const supportsAttachments = supportsImages || supportsPdfs || supportsTexts;
     const activeAttachmentItems = useMemo(

@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logger } from '@/server/logging/logger';
+
 import { createClient } from '@/shared/lib/supabase/server';
 import { getRedisClient, redisKey } from '@/server/redis/client';
 import { readPositiveInt } from '@/shared/lib/read-positive-int';
@@ -21,7 +23,7 @@ export async function assertThreadOwnership(
             const cached = await redis.get<string>(cacheKey);
             if (cached === '1') return;
         } catch (error) {
-            console.warn(`[thread-ownership] failed to read cache key=${cacheKey}`, error);
+            logger.warn(`[thread-ownership] failed to read cache key=${cacheKey}`, { error: error });
         }
     }
 
@@ -40,7 +42,7 @@ export async function assertThreadOwnership(
         try {
             await redis.set(cacheKey, '1', { px: THREAD_OWNERSHIP_CACHE_TTL_MS });
         } catch (cacheError) {
-            console.warn(`[thread-ownership] failed to write cache key=${cacheKey}`, cacheError);
+            logger.warn(`[thread-ownership] failed to write cache key=${cacheKey}`, { error: cacheError });
         }
     }
 }

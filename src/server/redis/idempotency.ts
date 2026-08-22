@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logger } from '@/server/logging/logger';
+
 import { randomUUID } from 'node:crypto';
 import type { Redis } from '@upstash/redis';
 
@@ -96,7 +98,7 @@ async function loadCachedResponse(responseKey: string) {
         if (!raw) return null;
         return parseCachedResponse(raw);
     } catch (error) {
-        console.warn(`[idempotency] failed to read cached response key=${responseKey}`, error);
+        logger.warn(`[idempotency] failed to read cached response key=${responseKey}`, { error: error });
         return null;
     }
 }
@@ -131,7 +133,7 @@ async function reserveSession(scope: string, userId: string, idempotencyKey: str
             maxBodyBytes: getMaxCachedBodyBytes(),
         };
     } catch (error) {
-        console.warn(`[idempotency] failed to reserve lock key=${lockKey}`, error);
+        logger.warn(`[idempotency] failed to reserve lock key=${lockKey}`, { error: error });
         return null;
     }
 }
@@ -165,7 +167,7 @@ async function storeResponse(session: IdempotencySession, response: Response) {
             px: session.ttlMs,
         });
     } catch (error) {
-        console.warn(`[idempotency] failed to cache response key=${session.responseKey}`, error);
+        logger.warn(`[idempotency] failed to cache response key=${session.responseKey}`, { error: error });
     }
 }
 

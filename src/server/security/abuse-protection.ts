@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logger } from '@/server/logging/logger';
+
 import { ApiRequestError } from '@/server/http/api-security';
 import { getRedisClient, redisKey } from '@/server/redis/client';
 import { readPositiveInt } from '@/shared/lib/read-positive-int';
@@ -27,7 +29,7 @@ export async function assertNotTemporarilyBlocked(userId: string, scope: string)
         }
     } catch (error) {
         if (error instanceof ApiRequestError) throw error;
-        console.warn(`[abuse] failed to check block state user=${userId} scope=${scope}`, error);
+        logger.warn(`[abuse] failed to check block state user=${userId} scope=${scope}`, { error: error });
     }
 }
 
@@ -48,6 +50,6 @@ export async function recordAbuseSignal(userId: string, scope: string, reason: s
             await redis.del(cKey);
         }
     } catch (error) {
-        console.warn(`[abuse] failed to record signal user=${userId} scope=${scope} reason=${reason}`, error);
+        logger.warn(`[abuse] failed to record signal user=${userId} scope=${scope} reason=${reason}`, { error: error });
     }
 }

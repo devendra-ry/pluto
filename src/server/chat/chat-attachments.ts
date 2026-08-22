@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logger } from '@/server/logging/logger';
+
 import type { ModelConfig } from '@/shared/core/constants';
 import type { ChatMessage } from '@/shared/core/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -30,12 +32,11 @@ interface CachedAttachment {
 const attachmentCache = new AttachmentCache<CachedAttachment>(2);
 
 function supportsImageInputs(modelConfig: ModelConfig) {
-    return modelConfig.provider !== 'openrouter' && modelConfig.capabilities.includes('vision');
+    return modelConfig.capabilities.includes('vision');
 }
 
 function supportsPdfInputs(modelConfig: ModelConfig) {
-    return modelConfig.provider !== 'openrouter'
-        && (modelConfig.capabilities.includes('pdf') || modelConfig.provider === 'google');
+    return modelConfig.capabilities.includes('pdf') || modelConfig.provider === 'google';
 }
 
 function supportsTextInputs(modelConfig: ModelConfig) {
@@ -153,9 +154,7 @@ export async function prepareMessageAttachments(
         });
 
         if (skippedForCapabilities > 0) {
-            console.warn(
-                `[chat] skipped ${skippedForCapabilities} attachment(s) for provider=${modelConfig.provider} model without required capability`
-            );
+            logger.warn(`[chat] skipped ${skippedForCapabilities} attachment(s) for provider=${modelConfig.provider} model without required capability`);
         }
     }
 

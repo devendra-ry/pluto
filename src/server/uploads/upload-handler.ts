@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logger } from '@/server/logging/logger';
+
 import { createClient } from '@/shared/lib/supabase/server';
 import {
     MAX_ATTACHMENT_SIZE_BYTES,
@@ -224,7 +226,7 @@ export async function POST(req: Request) {
             });
 
         if (uploadError) {
-            console.error('[uploads] failed to store attachment', uploadError);
+            logger.error('[uploads] failed to store attachment', uploadError);
             return jsonResponse({ error: 'Upload failed' }, 500);
         }
         const attachment: Attachment = {
@@ -243,7 +245,7 @@ export async function POST(req: Request) {
                     return response;
                 }
                 await recordAbuseSignal(user.id, 'upload', 'upload-failure');
-                console.error('[uploads] request processing failed', error);
+                logger.error('[uploads] request processing failed', error);
                 return jsonResponse({ error: 'Upload failed' }, 500);
             }
         }
@@ -332,7 +334,7 @@ export async function DELETE(req: Request) {
                     return response;
                 }
                 await recordAbuseSignal(user.id, 'upload', 'cleanup-failure');
-                console.error('[uploads] cleanup failed', error);
+                logger.error('[uploads] cleanup failed', error);
                 return jsonResponse({ error: 'Failed to cleanup attachments' }, 500);
             }
         }
@@ -466,7 +468,9 @@ export async function GET(req: Request) {
         if (response) {
             return response;
         }
-        const message = error instanceof Error ? error.message : 'Forbidden';
-        return new Response(message, { status: 403 });
+        // Non-ApiRequestError means an unexpected storage failure — never echo
+        // internal error details to the client.
+        logger.error('[uploads] download failed', error);
+        return new Response('Failed to fetch attachment', { status: 500 });
     }
 }

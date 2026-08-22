@@ -18,6 +18,10 @@ import { AVAILABLE_MODELS } from '@/shared/core/constants';
 import { type ChatResponseStats, type ChatViewMessage, type RetryMode } from '../lib/chat-view';
 import { sanitizeThreadTitle } from '@/features/threads';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
+
+// Must match the 409 body sent by the chat controller when a cached stream
+// exists but is incomplete (writer died mid-stream).
+const UNRESUMABLE_STREAM_ERROR = 'Unable to resume chat stream. Please retry the request.';
 import {
     INITIAL_STREAM_STATE,
     areStatsEqual,
@@ -156,6 +160,9 @@ export function useChatStream({
         let hasPendingAssistantUpdate = false;
         let requestFailed = false;
         let requestSucceeded = false;
+        // Set when the server reports the cached stream is unresumable (409):
+        // instead of surfacing an error we silently regenerate once.
+        let shouldRegenerate = false;
 
         const buildReplyStats = (): ChatResponseStats | undefined => {
             if (firstTokenAt === null) return undefined;
@@ -356,18 +363,36 @@ export function useChatStream({
                 const errorMessage = error instanceof Error
                     ? error.message
                     : 'Failed to generate response. Please try again.';
-                showToast(errorMessage, 'error');
+                if (errorMessage === UNRESUMABLE_STREAM_ERROR) {
+                    shouldRegenerate = true;
+                    showToast('Connection lost — regenerating response…', 'info');
+                } else {
+                    showToast(errorMessage, 'error');
+                    requestFailed = true;
+                }
                 hasPendingAssistantUpdate = false;
                 setMessages(currentMessages);
-                requestFailed = true;
-                return false;
+                if (!shouldRegenerate) return false;
             }
         } finally {
             abortControllerRef.current = null;
             dispatch({ type: 'COMPLETE', failed: requestFailed });
+            if (shouldRegenerate) {
+                void generateResponseRef.current(
+                    currentMessages,
+                    forcedModelId,
+                    forcedSystemPrompt,
+                    forceSearchMode
+                );
+            }
         }
         return requestSucceeded;
     }, [chatId, model, reasoningEffortRef, systemPrompt, showToast, setMessages, justAddedMessageIdRef, persistRetryModeHintRef]);
+
+    // Latest-ref pattern so the auto-regeneration in `finally` can re-invoke
+    // the current callback without a circular dependency.
+    const generateResponseRef = useRef(generateResponse);
+    generateResponseRef.current = generateResponse;
 
     return {
         isLoading: state.phase !== 'idle',

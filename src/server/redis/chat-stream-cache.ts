@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logger } from '@/server/logging/logger';
+
 import { getRedisClient, redisKey } from '@/server/redis/client';
 import { releaseDistributedLock } from '@/server/redis/atomic';
 import { readPositiveInt } from '@/shared/lib/read-positive-int';
@@ -141,7 +143,7 @@ export class ChatStreamEventWriter {
 
             await pipeline.exec();
         } catch (error) {
-            console.warn(`[chat-stream-cache] pipeline flush failed key=${this.key} events=${batch.length}`, error);
+            logger.warn(`[chat-stream-cache] pipeline flush failed key=${this.key} events=${batch.length}`, { error: error });
         }
     }
 }
@@ -203,7 +205,7 @@ export async function getCachedChatStreamEvents(
         if (events.length === 0) return null;
         return { events };
     } catch (error) {
-        console.warn(`[chat-stream-cache] XRANGE failed key=${key}`, error);
+        logger.warn(`[chat-stream-cache] XRANGE failed key=${key}`, { error: error });
         return null;
     }
 }
@@ -223,7 +225,7 @@ export async function reserveChatStreamLock(userId: string, streamId: string) {
         if (reserved !== 'OK') return null;
         return token;
     } catch (error) {
-        console.warn(`[chat-stream-cache] failed to reserve lock key=${key}`, error);
+        logger.warn(`[chat-stream-cache] failed to reserve lock key=${key}`, { error: error });
         return null;
     }
 }

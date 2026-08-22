@@ -87,9 +87,7 @@ function parseUsageEvent(data: string): { outputTokens: number; inputTokens?: nu
 
         const usage = normalizedUsage
             ?? ((parsed.usage && typeof parsed.usage === 'object') ? parsed.usage as Record<string, unknown> : null)
-            ?? ((parsed.usageMetadata && typeof parsed.usageMetadata === 'object') ? parsed.usageMetadata as Record<string, unknown> : null)
-            // OpenRouter may emit usage fields at top level.
-            ?? parsed;
+            ?? ((parsed.usageMetadata && typeof parsed.usageMetadata === 'object') ? parsed.usageMetadata as Record<string, unknown> : null);
         if (!usage) return null;
 
         const inputTokens =
@@ -103,7 +101,7 @@ function parseUsageEvent(data: string): { outputTokens: number; inputTokens?: nu
             readNonNegativeInt(usage.completion_tokens) ??
             readNonNegativeInt(usage.candidatesTokenCount) ??
             readNonNegativeInt(usage.tokens_completion) ??
-            readNonNegativeInt(usage.native_tokens_completion);
+            readNonNegativeInt(usage.native_tokens_completion)
         const totalTokens =
             readNonNegativeInt(usage.totalTokens) ??
             readNonNegativeInt(usage.total_tokens) ??

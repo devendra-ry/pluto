@@ -1,4 +1,5 @@
 import type { ModelConfig } from '@/shared/core/constants';
+import { logger } from '@/server/logging/logger';
 import { logModelLimits } from '@/server/providers/limits-utils';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
 import { getRedisClient, redisKey } from '@/server/redis/client';
@@ -16,6 +17,8 @@ interface CachedLimitsEntry {
 }
 
 const LIMITS_CACHE_TTL_MS = readPositiveInt(process.env.CHAT_LIMITS_CACHE_TTL_MS, DEFAULT_LIMITS_CACHE_TTL_MS);
+const DEFAULT_FALLBACK_LIMITS_TTL_MS = 60 * 1000;
+const FALLBACK_LIMITS_TTL_MS = readPositiveInt(process.env.CHAT_FALLBACK_LIMITS_TTL_MS, DEFAULT_FALLBACK_LIMITS_TTL_MS);
 const limitsCache = new Map<string, CachedLimitsEntry>();
 
 function isResolvedModelLimits(value: unknown): value is ResolvedModelLimits {
@@ -67,12 +70,12 @@ async function getCachedLimits(cacheKey: string): Promise<ResolvedModelLimits | 
         setCachedLimitsInMemory(cacheKey, parsed);
         return parsed;
     } catch (error) {
-        console.warn(`[chat] failed to read model limits cache for key=${cacheKey}`, error);
+        logger.warn(`[chat] failed to read model limits cache for key=${cacheKey}`, { error: error });
         return null;
     }
 }
 
-async function setCachedLimits(cacheKey: string, value: ResolvedModelLimits): Promise<void> {
+async function setCachedLimits(cacheKey: string, value: ResolvedModelLimits, ttlMs?: number): Promise<void> {
     setCachedLimitsInMemory(cacheKey, value);
 
     const redis = getRedisClient();
@@ -80,9 +83,9 @@ async function setCachedLimits(cacheKey: string, value: ResolvedModelLimits): Pr
 
     const keyName = redisKey('model-limits', cacheKey);
     try {
-        await redis.set(keyName, JSON.stringify(value), { px: LIMITS_CACHE_TTL_MS });
+        await redis.set(keyName, JSON.stringify(value), { px: ttlMs ?? LIMITS_CACHE_TTL_MS });
     } catch (error) {
-        console.warn(`[chat] failed to write model limits cache for key=${cacheKey}`, error);
+        logger.warn(`[chat] failed to write model limits cache for key=${cacheKey}`, { error: error });
     }
 }
 
@@ -104,7 +107,7 @@ export async function resolveModelLimits(model: string, modelConfig: ModelConfig
     try {
         resolved = await provider.resolveModelLimits({ model, signal });
     } catch (error) {
-        console.warn(`[chat] failed to resolve provider limits for model=${model} provider=${provider.id}`, error);
+        logger.warn(`[chat] failed to resolve provider limits for model=${model} provider=${provider.id}`, { error: error });
     }
 
     const finalLimits = resolved ?? getFallbackLimits();
@@ -115,6 +118,8 @@ export async function resolveModelLimits(model: string, modelConfig: ModelConfig
         contextWindowTokens: finalLimits.contextWindowTokens,
         maxOutputTokens: finalLimits.maxOutputTokens,
     });
-    await setCachedLimits(cacheKey, finalLimits);
+    // Fallback limits guess a 128k window — cache them only briefly so a
+    // transient metadata outage doesn't pin wrong budgets for the full TTL.
+    await setCachedLimits(cacheKey, finalLimits, finalLimits.source === 'fallback' ? FALLBACK_LIMITS_TTL_MS : undefined);
     return finalLimits;
 }

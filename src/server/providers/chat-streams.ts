@@ -1,6 +1,5 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
-import { isImageAttachment } from '@/features/attachments';
 import { AVAILABLE_MODELS } from '@/shared/core/constants';
 import { serverEnv } from '@/shared/config/server';
 import type { PreparedChatMessage } from '@/shared/contracts/chat';
@@ -40,63 +39,6 @@ export function buildGoogleContents(messages: PreparedChatMessage[]) {
             parts,
         };
     });
-}
-
-export function buildOpenAICompatibleMessages(messages: PreparedChatMessage[], systemPrompt?: string) {
-    const prepared = messages.map((message) => {
-        if (message.attachments.length === 0) {
-            return {
-                role: message.role,
-                content: message.content,
-            };
-        }
-
-        const contentParts: Array<Record<string, unknown>> = [];
-        if (message.content) {
-            contentParts.push({
-                type: 'text',
-                text: message.content,
-            });
-        }
-
-        for (const attachment of message.attachments) {
-            const dataUrl = `data:${attachment.mimeType};base64,${attachment.base64Data}`;
-            if (isImageAttachment(attachment.mimeType)) {
-                contentParts.push({
-                    type: 'image_url',
-                    image_url: {
-                        url: dataUrl,
-                    },
-                });
-                continue;
-            }
-
-            contentParts.push({
-                type: 'file',
-                file: {
-                    filename: attachment.name,
-                    file_data: dataUrl,
-                },
-            });
-        }
-
-        if (contentParts.length === 0) {
-            contentParts.push({ type: 'text', text: ' ' });
-        }
-
-        return {
-            role: message.role,
-            content: contentParts,
-        };
-    });
-
-    if (systemPrompt && systemPrompt.trim().length > 0) {
-        return [
-            { role: 'system', content: systemPrompt.trim() },
-            ...prepared,
-        ];
-    }
-    return prepared;
 }
 
 export async function getGoogleStream(
@@ -208,52 +150,4 @@ export async function getGoogleStream(
             }
         }
     });
-}
-
-export async function getOpenRouterStream(
-    model: string,
-    messages: PreparedChatMessage[],
-    reasoningEffort: ReasoningEffort = 'low',
-    maxOutputTokens?: number | null,
-    systemPrompt?: string,
-    tokenEstimates?: RequestTokenEstimates,
-    signal?: AbortSignal
-) {
-    const apiKey = serverEnv.OPENROUTER_API_KEY;
-    if (!apiKey) throw new Error('OpenRouter API key missing');
-    const requestMaxTokens = resolveOutputTokenCap(maxOutputTokens);
-    logModelLimits('openrouter-request', {
-        model,
-        resolvedMaxOutputTokens: maxOutputTokens,
-        requestMaxTokens,
-        messageCount: messages.length,
-        estimatedInputTokens: tokenEstimates?.estimatedInputTokens,
-        estimatedInputTokensWithSystemPrompt: tokenEstimates?.estimatedInputTokensWithSystemPrompt,
-    });
-
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-            'HTTP-Referer': serverEnv.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
-            'X-Title': 'Pluto Chat',
-        },
-        body: JSON.stringify({
-            model,
-            messages: buildOpenAICompatibleMessages(messages, systemPrompt),
-            stream: true,
-            max_tokens: requestMaxTokens,
-            reasoning: { effort: reasoningEffort },
-            stream_options: { include_usage: true },
-        }),
-        signal,
-    });
-
-    if (!response.ok) {
-        const responseText = await response.text().catch(() => '');
-        throw new Error(`OpenRouter API error ${response.status}: ${responseText || response.statusText}`);
-    }
-
-    return response.body as ReadableStream;
 }

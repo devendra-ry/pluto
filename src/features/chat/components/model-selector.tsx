@@ -56,7 +56,6 @@ const CAPABILITY_ICONS: Record<Capability, React.ElementType> = {
 // Added pointer-events-none to prevent default tooltips
 const PROVIDER_ICON_NAMES: Record<string, ProviderIconName> = {
     google: 'Gemini',
-    openrouter: 'OpenRouter',
 };
 
 const PROVIDER_LOGOS: Record<string, React.ComponentType<{ className?: string }>> = Object.fromEntries(

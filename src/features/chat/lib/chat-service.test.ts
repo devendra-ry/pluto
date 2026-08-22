@@ -133,44 +133,6 @@ describe('ChatService', () => {
         });
     });
 
-    test('streamChat parses OpenRouter top-level usage payload fields', async () => {
-        const encoder = new TextEncoder();
-        const stream = new ReadableStream({
-            start(controller) {
-                const chunks = [
-                    'data: {"id":0,"generation_id":"gen-1","provider_name":"Arcee AI","tokens_prompt":19,"tokens_completion":1649,"native_tokens_prompt":25,"native_tokens_completion":1617,"native_tokens_reasoning":696}\n\n',
-                    'data: [DONE]\n\n'
-                ];
-                for (const chunk of chunks) {
-                    controller.enqueue(encoder.encode(chunk));
-                }
-                controller.close();
-            }
-        });
-
-        fetchMock.mock.mockImplementation(async () => ({ ok: true, body: stream }));
-
-        const chunks: any[] = [];
-        for await (const chunk of chatService.streamChat({
-            messages: [],
-            model: 'm1',
-            reasoningEffort: 'low',
-            search: false
-        })) {
-            chunks.push(chunk);
-        }
-
-        assert.strictEqual(chunks.length, 1);
-        assert.deepStrictEqual(chunks[0], {
-            type: 'usage',
-            value: {
-                outputTokens: 1649,
-                inputTokens: 19,
-                totalTokens: undefined,
-                source: 'provider'
-            }
-        });
-    });
 
     test('streamChat handles errors', async () => {
         const mockResponse = {
