@@ -1,6 +1,6 @@
 import { sanitizeThreadTitle } from './sanitize-thread-title';
 import type { ChatViewMessage } from '@/shared/contracts/chat';
-import type { Json } from '@/utils/supabase/database.types';
+import type { Json } from '@/shared/lib/supabase/database.types';
 
 export function selectMessagesThroughBranch(messages: ChatViewMessage[], messageId: string) {
     const messageIndex = messages.findIndex((message) => message.id === messageId);

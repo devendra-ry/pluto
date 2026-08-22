@@ -7,7 +7,7 @@ import { triggerThreadRefresh } from './thread-events';
 import { mapThreadRowToThread } from './thread-model';
 import type { ChatViewMessage } from '@/shared/contracts/chat';
 import type { Thread } from '@/shared/contracts/thread';
-import { createClient } from '@/utils/supabase/client';
+import { createClient } from '@/shared/lib/supabase/client';
 
 export async function branchThread(
     parentThreadId: string,

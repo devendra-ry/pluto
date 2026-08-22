@@ -1,4 +1,4 @@
-import type { Database } from '@/utils/supabase/database.types';
+import type { Database } from '@/shared/lib/supabase/database.types';
 import type { Attachment, ChatResponseStats } from '@/shared/core/types';
 
 export interface Message {

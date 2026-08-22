@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { publicEnv } from "@/shared/config/public";
 import { type NextRequest, NextResponse } from "next/server";
-import type { Database } from "@/utils/supabase/database.types";
+import type { Database } from "@/shared/lib/supabase/database.types";
 
 export const createClient = (request: NextRequest) => {
     // Create an unmodified response

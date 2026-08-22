@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { createClient } from '@/utils/supabase/client';
+import { createClient } from '@/shared/lib/supabase/client';
 import { getMessagesQueryKey } from '@/shared/lib/query-client';
 import {
     type Message,

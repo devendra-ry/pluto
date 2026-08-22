@@ -3,7 +3,7 @@ import 'server-only';
 import type { ModelConfig } from '@/shared/core/constants';
 import type { ChatMessage } from '@/shared/core/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Database } from '@/utils/supabase/database.types';
+import type { Database } from '@/shared/lib/supabase/database.types';
 import { getAttachmentsBucketName, AttachmentCache } from '@/features/attachments/server';
 import type { PreparedAttachment, PreparedChatMessage } from '@/shared/contracts/chat';
 

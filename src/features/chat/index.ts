@@ -12,6 +12,4 @@ export * from './hooks/use-generation-jobs';
 export * from './hooks/use-pending-generation';
 export * from './hooks/use-retry-logic';
 export * from './hooks/use-thread-settings';
-export * from './lib/chat-service';
 export * from './lib/chat-view';
-export * from './lib/latex-utils';

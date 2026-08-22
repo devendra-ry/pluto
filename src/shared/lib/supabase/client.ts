@@ -1,7 +1,7 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { publicEnv } from "@/shared/config/public";
-import type { Database } from "@/utils/supabase/database.types";
+import type { Database } from "@/shared/lib/supabase/database.types";
 
 let browserClient: SupabaseClient<Database> | undefined;
 

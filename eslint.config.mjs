@@ -32,7 +32,6 @@ const eslintConfig = defineConfig([
       "src/components/**/*.{ts,tsx}",
       "src/features/**/*.{ts,tsx,mts}",
       "src/shared/**/*.{ts,tsx,mts}",
-      "src/utils/**/*.{ts,tsx,mts}",
     ],
     ignores: [
       "src/server/**/*",
@@ -43,7 +42,7 @@ const eslintConfig = defineConfig([
     },
   },
   {
-    files: ["src/{app,features,server,shared,utils}/**/*.{ts,tsx,mts}"],
+    files: ["src/{app,features,server,shared}/**/*.{ts,tsx,mts}"],
     rules: {
       "no-restricted-imports": [
         "error",

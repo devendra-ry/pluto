@@ -1,7 +1,7 @@
 import { DEFAULT_MODEL } from '@/shared/core/constants';
 import type { ReasoningEffort } from '@/shared/core/types';
 import type { Thread } from '@/shared/contracts/thread';
-import type { Database } from '@/utils/supabase/database.types';
+import type { Database } from '@/shared/lib/supabase/database.types';
 
 export const THREAD_SELECT_COLUMNS = 'id,title,model,reasoning_effort,system_prompt,is_pinned,created_at,updated_at,user_id';
 export const THREADS_PAGE_SIZE = 50;

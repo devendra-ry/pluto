@@ -15,7 +15,7 @@ import {
     User,
     LogOut,
 } from 'lucide-react';
-import { createClient } from '@/utils/supabase/client';
+import { createClient } from '@/shared/lib/supabase/client';
 import { type User as SupabaseUser } from '@supabase/supabase-js';
 import { List, type RowComponentProps } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';

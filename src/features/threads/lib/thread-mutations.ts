@@ -4,7 +4,7 @@ import { triggerThreadRefresh } from './thread-events';
 import { mapThreadRowToThread } from './thread-model';
 import type { Thread } from '@/shared/contracts/thread';
 import type { ReasoningEffort } from '@/shared/core/types';
-import { createClient } from '@/utils/supabase/client';
+import { createClient } from '@/shared/lib/supabase/client';
 
 export async function cleanupEmptyThreads(excludeId?: string) {
     const supabase = createClient();

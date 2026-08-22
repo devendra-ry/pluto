@@ -10,7 +10,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 
 import { ChatLayout } from "@/features/shell";
-import { createClient } from "@/utils/supabase/server";
+import { createClient } from "@/shared/lib/supabase/server";
 
 const inter = Inter({
   variable: "--font-inter",

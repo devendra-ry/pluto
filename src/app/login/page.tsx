@@ -1,6 +1,6 @@
 'use client';
 
-import { createClient } from '@/utils/supabase/client';
+import { createClient } from '@/shared/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { MessageSquare } from 'lucide-react';
 import { motion } from 'framer-motion';

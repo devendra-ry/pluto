@@ -6,8 +6,8 @@ import { useQuery } from '@tanstack/react-query';
 import { DEFAULT_ATTACHMENTS_BUCKET } from '@/features/attachments';
 import { getMessagesQueryKey, getQueryClient, MESSAGE_QUERY_KEY_PREFIX } from '@/shared/lib/query-client';
 import { type Attachment, type ChatResponseStats } from '@/shared/core/types';
-import { createClient } from '@/utils/supabase/client';
-import type { Json } from '@/utils/supabase/database.types';
+import { createClient } from '@/shared/lib/supabase/client';
+import type { Json } from '@/shared/lib/supabase/database.types';
 
 import {
     type Message,

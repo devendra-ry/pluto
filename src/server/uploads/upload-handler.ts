@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { createClient } from '@/utils/supabase/server';
+import { createClient } from '@/shared/lib/supabase/server';
 import {
     MAX_ATTACHMENT_BYTES,
     isSupportedAttachmentMimeType,

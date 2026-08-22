@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 
 import { serverEnv } from '@/shared/config/server';
 import { MAX_JSON_REQUEST_BYTES } from '@/shared/validation/request-limits';
-import { createClient } from '@/utils/supabase/server';
+import { createClient } from '@/shared/lib/supabase/server';
 
 export class ApiRequestError extends Error {
     status: number;

@@ -1,5 +1,5 @@
 import { serverEnv } from '@/shared/config/server'
-import { createClient } from '@/utils/supabase/server'
+import { createClient } from '@/shared/lib/supabase/server'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 

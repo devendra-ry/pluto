@@ -12,7 +12,7 @@ import {
     upsertThreadSorted,
 } from '../lib/thread-model';
 import type { Thread } from '@/shared/contracts/thread';
-import { createClient } from '@/utils/supabase/client';
+import { createClient } from '@/shared/lib/supabase/client';
 
 export type { Thread } from '@/shared/contracts/thread';
 
