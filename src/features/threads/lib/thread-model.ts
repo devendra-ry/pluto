@@ -1,5 +1,5 @@
 import { DEFAULT_MODEL } from '@/shared/core/constants';
-import type { ReasoningEffort } from '@/shared/core/types';
+import { toReasoningEffort } from '@/shared/core/types';
 import type { Thread } from '@/shared/contracts/thread';
 import type { Database } from '@/shared/lib/supabase/database.types';
 
@@ -32,10 +32,6 @@ export function mergeThreadsSorted(existing: Thread[], incoming: Thread[]) {
         if (!byId.has(thread.id)) byId.set(thread.id, thread);
     }
     return Array.from(byId.values()).sort(compareThreadsByUpdatedAtDesc);
-}
-
-export function toReasoningEffort(value: unknown): ReasoningEffort | undefined {
-    return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
 }
 
 export function mapThreadRowToThread(row: ThreadRow): Thread {

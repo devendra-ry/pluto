@@ -132,6 +132,14 @@ export function trimMessagesToInputBudget(
         startIndex = i;
     }
 
+    // Providers like Gemini reject a contents array whose first entry has
+    // role 'model', so the kept window must begin on a user turn. Advance
+    // the window start past any leading assistant messages.
+    while (startIndex < messages.length && messages[startIndex].role !== 'user') {
+        usedTokens -= estimateMessageTokens(messages[startIndex]);
+        startIndex += 1;
+    }
+
     let trimmedMessages = messages.slice(startIndex);
     let estimatedTokens = usedTokens;
 

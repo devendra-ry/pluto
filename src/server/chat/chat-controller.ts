@@ -46,6 +46,18 @@ export async function handleChatRequest(
     if (streamId) {
         const cached = await getCachedChatStreamEvents(user.id, streamId);
         if (cached) {
+            // Only replay fully-completed streams. An incomplete cache means the
+            // original writer died (or is still streaming); fabricating a clean
+            // end here would make the client persist a truncated response.
+            if (cached.events[cached.events.length - 1] !== '[DONE]') {
+                return new Response(
+                    JSON.stringify({ error: 'Unable to resume chat stream. Please retry the request.' }),
+                    {
+                        status: 409,
+                        headers: { 'Content-Type': 'application/json' },
+                    }
+                );
+            }
             return buildSseReplayResponse(cached.events, resumeOffset);
         }
         if (resumeOffset > 0) {

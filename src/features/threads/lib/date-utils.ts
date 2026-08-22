@@ -3,7 +3,6 @@ import {
     isYesterday,
     isThisWeek,
     isThisMonth,
-    format,
 } from 'date-fns';
 import type { Thread } from '@/shared/contracts/thread';
 
@@ -43,17 +42,4 @@ export function groupThreadsByDate(threads: Thread[]): GroupedThreads[] {
     return order
         .filter((label) => groups[label].length > 0)
         .map((label) => ({ label, threads: groups[label] }));
-}
-
-// Format date for display
-export function formatThreadDate(date: Date): string {
-    if (isToday(date)) {
-        return format(date, 'h:mm a');
-    } else if (isYesterday(date)) {
-        return 'Yesterday';
-    } else if (isThisWeek(date)) {
-        return format(date, 'EEEE');
-    } else {
-        return format(date, 'MMM d');
-    }
 }

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { getRedisClient, redisKey } from '@/server/redis/client';
+import { releaseDistributedLock } from '@/server/redis/atomic';
 import { readPositiveInt } from '@/shared/lib/read-positive-int';
 
 const CHAT_STREAM_CACHE_TTL_SECONDS = readPositiveInt(
@@ -232,14 +233,6 @@ export async function releaseChatStreamLock(userId: string, streamId: string, to
     const redis = getRedisClient();
     if (!redis) return;
 
-    const key = streamLockKey(userId, streamId);
-    try {
-        const current = await redis.get<string>(key);
-        if (current === token) {
-            await redis.del(key);
-        }
-    } catch (error) {
-        console.warn(`[chat-stream-cache] failed to release lock key=${key}`, error);
-    }
+    await releaseDistributedLock(redis, streamLockKey(userId, streamId), token);
 }
 export { buildSseReplayResponse } from './chat-stream-replay';

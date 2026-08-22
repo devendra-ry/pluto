@@ -1,12 +1,10 @@
 import {
     MAX_ATTACHMENTS_PER_MESSAGE as MAX_REQUEST_ATTACHMENTS_PER_MESSAGE,
-    MAX_ATTACHMENT_SIZE_BYTES,
 } from '@/shared/validation/request-limits';
 
 export const DEFAULT_ATTACHMENTS_BUCKET = 'chat-attachments';
 export const MAX_ATTACHMENTS_PER_MESSAGE = MAX_REQUEST_ATTACHMENTS_PER_MESSAGE;
-export const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_SIZE_BYTES;
-export const MAX_ATTACHMENT_BYTES_FOR_MODEL = MAX_ATTACHMENT_SIZE_BYTES;
+export { MAX_ATTACHMENT_SIZE_BYTES } from '@/shared/validation/request-limits';
 
 export const SUPPORTED_ATTACHMENT_MIME_TYPES = [
     'image/png',

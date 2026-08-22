@@ -59,10 +59,6 @@ async function updateThreadFields(id: string, fields: Record<string, string | bo
     triggerThreadRefresh();
 }
 
-export async function updateThreadTitle(id: string, title: string) {
-    await updateThreadFields(id, { title: sanitizeThreadTitle(title) });
-}
-
 export async function updateThreadTitleIfNewChat(id: string, title: string): Promise<boolean> {
     const supabase = createClient();
     const { data, error } = await supabase

@@ -11,13 +11,13 @@ export type { PreparedAttachment, PreparedChatMessage } from '@/shared/contracts
 
 import {
     MAX_ATTACHMENTS_PER_MESSAGE,
-    MAX_ATTACHMENT_BYTES_FOR_MODEL,
+    MAX_ATTACHMENT_SIZE_BYTES,
     isImageAttachment,
     isPdfAttachment,
     isTextAttachment,
 } from '@/features/attachments';
 
-const MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL = MAX_ATTACHMENTS_PER_MESSAGE * MAX_ATTACHMENT_BYTES_FOR_MODEL;
+const MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL = MAX_ATTACHMENTS_PER_MESSAGE * MAX_ATTACHMENT_SIZE_BYTES;
 const ATTACHMENT_DOWNLOAD_CONCURRENCY = 4;
 const ATTACHMENTS_BUCKET = getAttachmentsBucketName();
 
@@ -127,8 +127,8 @@ export async function prepareMessageAttachments(
                 continue;
             }
 
-            if (attachment.size > MAX_ATTACHMENT_BYTES_FOR_MODEL) {
-                const maxMb = Math.floor(MAX_ATTACHMENT_BYTES_FOR_MODEL / (1024 * 1024));
+            if (attachment.size > MAX_ATTACHMENT_SIZE_BYTES) {
+                const maxMb = Math.floor(MAX_ATTACHMENT_SIZE_BYTES / (1024 * 1024));
                 throw new Error(`Attachment "${attachment.name}" exceeds model limit (${maxMb}MB).`);
             }
             if (declaredTotalAttachmentBytes + attachment.size > MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL) {
@@ -183,8 +183,8 @@ export async function prepareMessageAttachments(
             }
 
             const buffer = new Uint8Array(await data.arrayBuffer());
-            if (buffer.byteLength > MAX_ATTACHMENT_BYTES_FOR_MODEL) {
-                const maxMb = Math.floor(MAX_ATTACHMENT_BYTES_FOR_MODEL / (1024 * 1024));
+            if (buffer.byteLength > MAX_ATTACHMENT_SIZE_BYTES) {
+                const maxMb = Math.floor(MAX_ATTACHMENT_SIZE_BYTES / (1024 * 1024));
                 throw new Error(`Attachment "${task.attachment.name}" exceeds model limit (${maxMb}MB).`);
             }
 

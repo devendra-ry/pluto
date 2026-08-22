@@ -3,6 +3,7 @@ import 'server-only';
 import { ApiRequestError } from '@/server/http/api-security';
 import type { Redis } from '@upstash/redis';
 import { getRedisClient, redisKey } from '@/server/redis/client';
+import { incrWithTtl } from '@/server/redis/atomic';
 
 interface FixedWindowEntry {
     count: number;
@@ -28,10 +29,7 @@ export class SimpleRateLimiter {
 
     private async checkRedis(redis: Redis, key: string) {
         const keyName = redisKey('ratelimit', this.scope, key);
-        const count = await redis.incr(keyName);
-        if (count === 1) {
-            await redis.pexpire(keyName, this.windowMs);
-        }
+        const count = await incrWithTtl(redis, keyName, this.windowMs);
         return count <= this.limit;
     }
 

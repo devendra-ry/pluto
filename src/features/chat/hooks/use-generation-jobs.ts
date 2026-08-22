@@ -3,16 +3,9 @@
 import { type ChatSubmitMode } from '../components/chat-input/chat-input-types';
 import { createClient } from '@/shared/lib/supabase/client';
 
-import { type ReasoningEffort } from '@/shared/core/types';
+import { toReasoningEffort, type ReasoningEffort } from '@/shared/core/types';
 
 type JobStatus = 'completed' | 'failed';
-
-function toReasoningEffort(value: unknown): ReasoningEffort | null {
-    if (value === 'low' || value === 'medium' || value === 'high') {
-        return value;
-    }
-    return null;
-}
 
 function toSubmitMode(value: unknown): ChatSubmitMode | null {
     if (value === 'chat' || value === 'search') {
@@ -95,7 +88,7 @@ export async function claimPendingGenerationJob(threadId: string, userMessageId?
         mode,
         modelId: typeof record.model_id === 'string' ? record.model_id : null,
         useSearch: record.use_search === true,
-        reasoningEffort: toReasoningEffort(record.reasoning_effort),
+        reasoningEffort: toReasoningEffort(record.reasoning_effort) ?? null,
         systemPrompt: typeof record.system_prompt === 'string' ? record.system_prompt : null,
     };
 }

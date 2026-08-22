@@ -1,5 +1,11 @@
 import { sharedTextEncoder } from '@/shared/lib/text-encoder';
 
+/**
+ * Replays cached SSE events from `byteOffset`. Events are sent verbatim —
+ * never append a synthetic `[DONE]`; callers must ensure the stream is
+ * complete (last event is `[DONE]`) before replaying, otherwise clients
+ * would persist a truncated response as finished.
+ */
 export function buildSseReplayResponse(events: string[], byteOffset: number = 0) {
     // Each cached event was originally sent as `data: ${event}\n\n`.
     // Reconstruct cumulative byte lengths to find the first un-acked event.
@@ -24,9 +30,6 @@ export function buildSseReplayResponse(events: string[], byteOffset: number = 0)
         start(controller) {
             for (const event of replayEvents) {
                 controller.enqueue(sharedTextEncoder.encode(`data: ${event}\n\n`));
-            }
-            if (replayEvents.length === 0 || replayEvents[replayEvents.length - 1] !== '[DONE]') {
-                controller.enqueue(sharedTextEncoder.encode('data: [DONE]\n\n'));
             }
             controller.close();
         }

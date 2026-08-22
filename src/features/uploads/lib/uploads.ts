@@ -13,14 +13,6 @@ function extractErrorMessage(payload: unknown, fallback: string) {
     return fallback;
 }
 
-export async function uploadFileForThread(
-    threadId: string,
-    file: File,
-    onProgress?: (progress: number) => void
-): Promise<Attachment> {
-    return startUploadFileForThread(threadId, file, onProgress).promise;
-}
-
 export interface UploadTask {
     promise: Promise<Attachment>;
     cancel: () => void;

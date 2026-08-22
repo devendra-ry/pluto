@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { Redis } from '@upstash/redis';
 
 import { getRedisClient, redisKey } from '@/server/redis/client';
+import { releaseDistributedLock } from '@/server/redis/atomic';
 import { readPositiveInt } from '@/shared/lib/read-positive-int';
 
 const DEFAULT_IDEMPOTENCY_TTL_MS = 15 * 60 * 1000;
@@ -136,14 +137,7 @@ async function reserveSession(scope: string, userId: string, idempotencyKey: str
 }
 
 async function releaseSessionLock(session: IdempotencySession) {
-    try {
-        const current = await session.redis.get<string>(session.lockKey);
-        if (current === session.lockToken) {
-            await session.redis.del(session.lockKey);
-        }
-    } catch (error) {
-        console.warn(`[idempotency] failed to release lock key=${session.lockKey}`, error);
-    }
+    await releaseDistributedLock(session.redis, session.lockKey, session.lockToken);
 }
 
 async function storeResponse(session: IdempotencySession, response: Response) {

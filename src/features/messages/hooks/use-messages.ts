@@ -120,11 +120,6 @@ function updateCachedThreadMessages(
     queryClient.setQueryData<Message[]>(getMessagesQueryKey(threadId), (previous) => updater(previous ?? []));
 }
 
-export function invalidateThreadMessages(threadId: string) {
-    const queryClient = getQueryClient();
-    void queryClient.invalidateQueries({ queryKey: getMessagesQueryKey(threadId) });
-}
-
 function invalidateAllThreadMessages() {
     const queryClient = getQueryClient();
     void queryClient.invalidateQueries({ queryKey: [MESSAGE_QUERY_KEY_PREFIX] });
@@ -205,35 +200,10 @@ export async function addMessage(
     return nextMessage;
 }
 
-// Update message content (for streaming updates)
-export async function updateMessage(id: string, content: string, reasoning?: string, threadId?: string) {
-    const supabase = createClient();
-    const { error } = await supabase
-        .from('messages')
-        .update({ content, reasoning })
-        .eq('id', id);
-    if (error) throw error;
-
-    if (threadId) {
-        updateCachedThreadMessages(threadId, (previous) => previous.map((message) => (
-            message.id === id
-                ? { ...message, content, reasoning }
-                : message
-        )));
-        return;
-    }
-    invalidateAllThreadMessages();
-}
-
 interface DeleteMessagesOptions {
     reason?: string;
     anchorMessageId?: string | null;
     threadId?: string;
-}
-
-// Soft delete a message
-export async function deleteMessage(id: string, reason: string = 'manual_single') {
-    await deleteMessagesByIds([id], { reason });
 }
 
 // Soft delete multiple messages by IDs and write audit rows server-side.
@@ -257,31 +227,3 @@ export async function deleteMessagesByIds(ids: string[], options?: DeleteMessage
     invalidateAllThreadMessages();
 }
 
-export async function restoreMessagesByIds(ids: string[], restoreWindowMinutes: number = 1440) {
-    if (ids.length === 0) return 0;
-    const supabase = createClient();
-    const { data, error } = await supabase.rpc('restore_soft_deleted_messages', {
-        p_message_ids: ids,
-        p_restore_window_minutes: restoreWindowMinutes,
-    });
-    if (error) throw error;
-    invalidateAllThreadMessages();
-    return typeof data === 'number' ? data : 0;
-}
-
-// Soft delete all visible messages in a thread.
-export async function clearThreadMessages(threadId: string) {
-    const supabase = createClient();
-    const { data, error } = await supabase
-        .from('messages')
-        .select('id')
-        .eq('thread_id', threadId)
-        .is('deleted_at', null);
-
-    if (error) throw error;
-
-    const ids = (data ?? [])
-        .map((row) => (typeof row.id === 'string' ? row.id : null))
-        .filter((value): value is string => value !== null);
-    await deleteMessagesByIds(ids, { reason: 'clear_thread', threadId });
-}

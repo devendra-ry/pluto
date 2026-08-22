@@ -19,9 +19,12 @@ import {
 export const ReasoningEffortSchema = z.enum(['low', 'medium', 'high']);
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 
+export function toReasoningEffort(value: unknown): ReasoningEffort | undefined {
+    return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
+}
+
 // Message role types
 export const MessageRoleSchema = z.enum(['user', 'assistant']);
-export type MessageRole = z.infer<typeof MessageRoleSchema>;
 
 // File attachment metadata saved with a message
 export const AttachmentSchema = z.object({
@@ -85,4 +88,4 @@ export const ChatRequestSchema = z.object({
         });
     }
 });
-export type ChatRequest = z.infer<typeof ChatRequestSchema>;
+

@@ -2,7 +2,7 @@ import 'server-only';
 
 import { createClient } from '@/shared/lib/supabase/server';
 import {
-    MAX_ATTACHMENT_BYTES,
+    MAX_ATTACHMENT_SIZE_BYTES,
     isSupportedAttachmentMimeType,
 } from '@/features/attachments';
 import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/features/attachments/server';
@@ -143,7 +143,7 @@ export async function POST(req: Request) {
     const contentType = (req.headers.get('content-type') || '').toLowerCase();
 
     try {
-        assertContentLengthWithinLimit(req, MAX_ATTACHMENT_BYTES + MAX_MULTIPART_OVERHEAD_BYTES);
+        assertContentLengthWithinLimit(req, MAX_ATTACHMENT_SIZE_BYTES + MAX_MULTIPART_OVERHEAD_BYTES);
     } catch (error) {
         return toJsonErrorResponse(error) ?? jsonResponse({ error: 'Request body is too large' }, 413);
     }
@@ -160,9 +160,9 @@ export async function POST(req: Request) {
         if (size <= 0) {
             return jsonResponse({ error: 'File is empty' }, 400);
         }
-        if (size > MAX_ATTACHMENT_BYTES) {
+        if (size > MAX_ATTACHMENT_SIZE_BYTES) {
             return jsonResponse({
-                error: `File is too large. Maximum ${Math.floor(MAX_ATTACHMENT_BYTES / (1024 * 1024))}MB`,
+                error: `File is too large. Maximum ${Math.floor(MAX_ATTACHMENT_SIZE_BYTES / (1024 * 1024))}MB`,
             }, 400);
         }
         return null;
