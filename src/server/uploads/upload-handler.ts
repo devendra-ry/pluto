@@ -25,8 +25,6 @@ import {
 import { assertRateLimit, uploadRateLimiter } from '@/server/http/rate-limit';
 import { MAX_MULTIPART_OVERHEAD_BYTES } from '@/shared/validation/request-limits';
 
-export const runtime = 'nodejs';
-
 function sanitizeFileName(fileName: string) {
     return fileName
         .replace(/[^\w.\-]+/g, '_')

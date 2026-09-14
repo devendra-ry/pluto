@@ -2,67 +2,10 @@
 
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react';
 
-import { type ChatSubmitMode } from '../components/chat-input/chat-input-types';
 import { deleteMessagesByIds, getThreadMessages, type RefreshMessagesResult } from '@/features/messages';
-import { SEARCH_ENABLED_MODELS } from '@/shared/core/constants';
-import { type ChatViewMessage, type RetryMode } from '../lib/chat-view';
+import { type ChatViewMessage } from '../lib/chat-view';
 
 type ToastType = 'success' | 'error' | 'info';
-
-const RETRY_MODE_HINTS_KEY = 'retry-mode-hints';
-const MAX_RETRY_MODE_HINTS_PER_THREAD = 300;
-const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
-
-function readRetryModeHints(): Record<string, Record<string, RetryMode>> {
-    if (typeof window === 'undefined') return {};
-    const raw = window.sessionStorage.getItem(RETRY_MODE_HINTS_KEY);
-    if (!raw) return {};
-    try {
-        const parsed = JSON.parse(raw) as unknown;
-        if (!parsed || typeof parsed !== 'object') return {};
-        return parsed as Record<string, Record<string, RetryMode>>;
-    } catch {
-        return {};
-    }
-}
-
-function writeRetryModeHints(hints: Record<string, Record<string, RetryMode>>) {
-    if (typeof window === 'undefined') return;
-    window.sessionStorage.setItem(RETRY_MODE_HINTS_KEY, JSON.stringify(hints));
-}
-
-function getRetryModeHint(threadId: string, userMessageId: string): RetryMode | undefined {
-    if (!threadId || !userMessageId) return undefined;
-    const hints = readRetryModeHints();
-    return hints[threadId]?.[userMessageId];
-}
-
-function looksLikeSearchResponse(content: string): boolean {
-    return /\[\d+\]\(https?:\/\/[^\s)]+\)/.test(content);
-}
-
-function inferRetrySearchMode(
-    localMessages: ChatViewMessage[],
-    clickedMessageIndex: number,
-    anchorUserIndex: number,
-    threadId: string
-): boolean {
-    const anchorUser = localMessages[anchorUserIndex];
-    if (!anchorUser) return false;
-
-    const hint = getRetryModeHint(threadId, anchorUser.id);
-    if (hint) return hint === 'search';
-
-    const clickedMessage = localMessages[clickedMessageIndex];
-    const candidateAssistant = clickedMessage?.role === 'assistant'
-        ? clickedMessage
-        : localMessages.slice(anchorUserIndex + 1).find((message) => message.role === 'assistant');
-
-    if (!candidateAssistant) return false;
-    if (!candidateAssistant.model_id || !SEARCH_ENABLED_MODEL_SET.has(candidateAssistant.model_id)) return false;
-
-    return looksLikeSearchResponse(candidateAssistant.content);
-}
 
 interface UseRetryLogicParams {
     chatId: string;
@@ -70,12 +13,10 @@ interface UseRetryLogicParams {
     setMessages: Dispatch<SetStateAction<ChatViewMessage[]>>;
     setIsLoading: Dispatch<SetStateAction<boolean>>;
     showToast: (message: string, type?: ToastType) => void;
-    getInputMode: () => ChatSubmitMode | undefined;
     generateResponse: (
         currentMessages: ChatViewMessage[],
         forcedModelId?: string,
-        forcedSystemPrompt?: string,
-        forceSearchMode?: boolean
+        forcedSystemPrompt?: string
     ) => Promise<boolean>;
     refreshStoredMessages: () => Promise<RefreshMessagesResult>;
     locallyDeletedMessageIdsRef: RefObject<Set<string>>;
@@ -91,28 +32,11 @@ export function useRetryLogic({
     setMessages,
     setIsLoading,
     showToast,
-    getInputMode,
     generateResponse,
     refreshStoredMessages,
     locallyDeletedMessageIdsRef,
     confirmDestructiveDelete,
 }: UseRetryLogicParams) {
-    const persistRetryModeHint = useCallback((userMessageId: string, mode: RetryMode) => {
-        if (!chatId || !userMessageId) return;
-        const hints = readRetryModeHints();
-        const threadHints = { ...(hints[chatId] ?? {}) };
-        threadHints[userMessageId] = mode;
-
-        const entries = Object.entries(threadHints);
-        if (entries.length > MAX_RETRY_MODE_HINTS_PER_THREAD) {
-            const trimmed = entries.slice(entries.length - MAX_RETRY_MODE_HINTS_PER_THREAD);
-            hints[chatId] = Object.fromEntries(trimmed);
-        } else {
-            hints[chatId] = threadHints;
-        }
-        writeRetryModeHints(hints);
-    }, [chatId]);
-
     const handleRetry = useCallback(async (messageId: string) => {
         setIsLoading(true);
         const localMessages = messages;
@@ -136,22 +60,6 @@ export function useRetryLogic({
         }
 
         const anchorMessageId = localMessages[msgIndex].id;
-        const inputMode = getInputMode();
-        let forcedModelId: string | undefined;
-        let forceSearchMode = false;
-
-        if (inputMode === 'search') {
-            forcedModelId = undefined;
-            forceSearchMode = true;
-        } else if (inputMode === 'chat') {
-            forcedModelId = undefined;
-            forceSearchMode = false;
-        } else {
-            // Fallback when input mode is temporarily unavailable.
-            forcedModelId = undefined;
-            forceSearchMode = inferRetrySearchMode(localMessages, clickedMessageIndex, msgIndex, chatId);
-        }
-
         try {
             const canonicalMessages = await getThreadMessages(chatId);
             const anchorDbIndex = canonicalMessages.findIndex((m) => m.id === anchorMessageId);
@@ -196,7 +104,7 @@ export function useRetryLogic({
                     showToast(refreshResult.error, 'error');
                 }
             })();
-            await generateResponse(previousMessages, forcedModelId, undefined, forceSearchMode);
+            await generateResponse(previousMessages);
         } catch (error) {
             setIsLoading(false);
             console.error('Failed to retry message:', error);
@@ -205,7 +113,6 @@ export function useRetryLogic({
     }, [
         setIsLoading,
         messages,
-        getInputMode,
         chatId,
         showToast,
         locallyDeletedMessageIdsRef,
@@ -217,6 +124,5 @@ export function useRetryLogic({
 
     return {
         handleRetry,
-        persistRetryModeHint,
     };
 }

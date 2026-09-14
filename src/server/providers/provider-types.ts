@@ -2,7 +2,7 @@ import type { PreparedChatMessage } from '@/shared/contracts/chat';
 import type { ModelConfig } from '@/shared/core/constants';
 import type { ReasoningEffort } from '@/shared/core/types';
 
-export type LimitsSource = 'google' | 'fallback';
+type LimitsSource = 'google' | 'fallback';
 
 export interface ResolvedModelLimits {
     contextWindowTokens: number;
@@ -15,19 +15,18 @@ export interface RequestTokenEstimates {
     estimatedInputTokensWithSystemPrompt?: number;
 }
 
-export interface ProviderGetStreamParams {
+interface ProviderGetStreamParams {
     model: string;
     messages: PreparedChatMessage[];
     reasoningEffort: ReasoningEffort;
     modelConfig: ModelConfig;
     maxOutputTokens?: number | null;
     systemPrompt?: string;
-    useSearch?: boolean;
     tokenEstimates?: RequestTokenEstimates;
     signal?: AbortSignal;
 }
 
-export interface ProviderResolveLimitsParams {
+interface ProviderResolveLimitsParams {
     model: string;
     signal?: AbortSignal;
 }

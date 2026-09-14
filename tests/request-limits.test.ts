@@ -11,10 +11,30 @@ import {
 test('request schemas enforce resource bounds', async (t) => {
     await t.test('rejects oversized chat message content', () => {
         const result = ChatRequestSchema.safeParse({
+            threadId: 'thread',
+            userMessageId: 'message',
             model: 'model',
             messages: [{ role: 'user', content: 'x'.repeat(MAX_CHAT_MESSAGE_CHARS + 1) }],
         });
         assert.strictEqual(result.success, false);
+    });
+
+    await t.test('requires generation ownership identifiers', () => {
+        const result = ChatRequestSchema.safeParse({
+            model: 'model',
+            messages: [{ role: 'user', content: 'hello' }],
+        });
+        assert.strictEqual(result.success, false);
+    });
+
+    await t.test('accepts a request with generation ownership identifiers', () => {
+        const result = ChatRequestSchema.safeParse({
+            threadId: 'thread',
+            userMessageId: 'message',
+            model: 'model',
+            messages: [{ role: 'user', content: 'hello' }],
+        });
+        assert.strictEqual(result.success, true);
     });
 
     await t.test('rejects oversized cleanup batches', () => {

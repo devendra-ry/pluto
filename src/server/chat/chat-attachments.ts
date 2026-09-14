@@ -9,17 +9,16 @@ import type { Database } from '@/shared/lib/supabase/database.types';
 import { getAttachmentsBucketName, AttachmentCache } from '@/features/attachments/server';
 import type { PreparedAttachment, PreparedChatMessage } from '@/shared/contracts/chat';
 
-export type { PreparedAttachment, PreparedChatMessage } from '@/shared/contracts/chat';
-
 import {
     MAX_ATTACHMENTS_PER_MESSAGE,
     MAX_ATTACHMENT_SIZE_BYTES,
+    MAX_TOTAL_ATTACHMENT_BYTES,
     isImageAttachment,
     isPdfAttachment,
     isTextAttachment,
 } from '@/features/attachments';
 
-const MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL = MAX_ATTACHMENTS_PER_MESSAGE * MAX_ATTACHMENT_SIZE_BYTES;
+const MAX_TOTAL_ATTACHMENT_BYTES_FOR_MODEL = MAX_TOTAL_ATTACHMENT_BYTES;
 const ATTACHMENT_DOWNLOAD_CONCURRENCY = 4;
 const ATTACHMENTS_BUCKET = getAttachmentsBucketName();
 

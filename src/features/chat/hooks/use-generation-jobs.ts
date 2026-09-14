@@ -1,25 +1,15 @@
 'use client';
 
-import { type ChatSubmitMode } from '../components/chat-input/chat-input-types';
 import { createClient } from '@/shared/lib/supabase/client';
 
 import { toReasoningEffort, type ReasoningEffort } from '@/shared/core/types';
 
 type JobStatus = 'completed' | 'failed';
 
-function toSubmitMode(value: unknown): ChatSubmitMode | null {
-    if (value === 'chat' || value === 'search') {
-        return value;
-    }
-    return null;
-}
-
 export interface EnqueueGenerationJobInput {
     threadId: string;
     userMessageId: string;
-    mode: ChatSubmitMode;
     modelId?: string | null;
-    useSearch?: boolean;
     reasoningEffort?: ReasoningEffort | null;
     systemPrompt?: string | null;
 }
@@ -27,9 +17,7 @@ export interface EnqueueGenerationJobInput {
 export interface ClaimedGenerationJob {
     id: string;
     userMessageId: string;
-    mode: ChatSubmitMode;
     modelId: string | null;
-    useSearch: boolean;
     reasoningEffort: ReasoningEffort | null;
     systemPrompt: string | null;
 }
@@ -42,9 +30,7 @@ export async function enqueueGenerationJob(input: EnqueueGenerationJobInput): Pr
         .insert({
             thread_id: input.threadId,
             user_message_id: input.userMessageId,
-            mode: input.mode,
             model_id: input.modelId ?? null,
-            use_search: Boolean(input.useSearch),
             reasoning_effort: input.reasoningEffort ?? null,
             system_prompt: input.systemPrompt ?? null,
             status: 'pending',
@@ -76,18 +62,14 @@ export async function claimPendingGenerationJob(threadId: string, userMessageId?
     const record = row as Record<string, unknown>;
     const id = typeof record.id === 'string' ? record.id : null;
     const claimedUserMessageId = typeof record.user_message_id === 'string' ? record.user_message_id : null;
-    const mode = toSubmitMode(record.mode);
-
-    if (!id || !claimedUserMessageId || !mode) {
+    if (!id || !claimedUserMessageId) {
         return null;
     }
 
     return {
         id,
         userMessageId: claimedUserMessageId,
-        mode,
         modelId: typeof record.model_id === 'string' ? record.model_id : null,
-        useSearch: record.use_search === true,
         reasoningEffort: toReasoningEffort(record.reasoning_effort) ?? null,
         systemPrompt: typeof record.system_prompt === 'string' ? record.system_prompt : null,
     };

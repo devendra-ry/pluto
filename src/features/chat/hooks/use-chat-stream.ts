@@ -10,14 +10,14 @@ import {
     type SetStateAction,
 } from 'react';
 
-import { addMessage } from '@/features/messages';
-import { touchThread, updateThreadTitleIfNewChat } from '@/features/threads';
+import type { RefreshMessagesResult } from '@/features/messages';
+import { updateThreadTitleIfNewChat } from '@/features/threads';
 import { scheduleFrame } from '@/shared/lib/animation-frame';
 import { chatService } from '../lib/chat-service';
 import { AVAILABLE_MODELS } from '@/shared/core/constants';
-import { type ChatResponseStats, type ChatViewMessage, type RetryMode } from '../lib/chat-view';
+import { type ChatResponseStats, type ChatViewMessage } from '../lib/chat-view';
 import { sanitizeThreadTitle } from '@/features/threads';
-import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
+import { type ReasoningEffort } from '@/shared/core/types';
 
 // Must match the 409 body sent by the chat controller when a cached stream
 // exists but is incomplete (writer died mid-stream).
@@ -37,8 +37,7 @@ interface UseChatStreamParams {
     reasoningEffortRef: RefObject<ReasoningEffort>;
     systemPrompt: string;
     setMessages: Dispatch<SetStateAction<ChatViewMessage[]>>;
-    justAddedMessageIdRef: RefObject<string | null>;
-    persistRetryModeHintRef: RefObject<((userMessageId: string, mode: RetryMode) => void) | null>;
+    refreshMessages: () => Promise<RefreshMessagesResult>;
     showToast: (message: string, type?: ToastType) => void;
 }
 
@@ -48,8 +47,7 @@ export function useChatStream({
     reasoningEffortRef,
     systemPrompt,
     setMessages,
-    justAddedMessageIdRef,
-    persistRetryModeHintRef,
+    refreshMessages,
     showToast,
 }: UseChatStreamParams) {
     const [state, dispatch] = useReducer(streamReducer, INITIAL_STREAM_STATE);
@@ -89,7 +87,7 @@ export function useChatStream({
         currentMessages: ChatViewMessage[],
         forcedModelId?: string,
         forcedSystemPrompt?: string,
-        forceSearchMode: boolean = false
+
     ): Promise<boolean> => {
         const lastMsg = currentMessages[currentMessages.length - 1];
         if (!lastMsg || lastMsg.role !== 'user') return false;
@@ -106,10 +104,7 @@ export function useChatStream({
         const activeModelId = forcedModelId || model;
         const effectiveReasoningEffort = reasoningEffortRef.current;
         const selectedModel = AVAILABLE_MODELS.find(m => m.id === activeModelId);
-        const useSearch = forceSearchMode;
         const supportsReasoning = selectedModel?.supportsReasoning ?? true;
-        const retryMode: RetryMode = useSearch ? 'search' : 'chat';
-        persistRetryModeHintRef.current?.(lastMsg.id, retryMode);
 
         const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && effectiveReasoningEffort === 'low');
 
@@ -200,7 +195,7 @@ export function useChatStream({
             lastFlushedStats = nextStats;
             setMessages((prev) => {
                 // Use the stored index for O(1) lookup.
-                // Fallback to search only if the index is stale (e.g. messages were deleted).
+                // Fallback to a scan only if the index is stale (e.g. messages were deleted).
                 let idx = assistantMsgIdx;
                 if (idx < 0 || idx >= prev.length || prev[idx].id !== assistantMsgId) {
                     idx = prev.findIndex(m => m.id === assistantMsgId);
@@ -262,30 +257,6 @@ export function useChatStream({
             });
         };
 
-        const persistAssistantMessage = async (
-            content: string,
-            reasoning?: string,
-            attachments: Attachment[] = [],
-            stats?: ChatResponseStats,
-        ) => {
-            if (!content && !reasoning && attachments.length === 0) {
-                return false;
-            }
-
-            dispatch({ type: 'PERSISTING' });
-            const newMsg = await addMessage(chatId, 'assistant', content, reasoning, activeModelId, attachments, stats);
-            setMessages(prev =>
-                prev.map((m) => (m.id === assistantMsgId ? { ...m, id: newMsg.id } : m))
-            );
-            justAddedMessageIdRef.current = newMsg.id;
-            try {
-                await touchThread(chatId);
-            } catch (error) {
-                console.error('Failed to touch thread timestamp:', error);
-            }
-            return true;
-        };
-
         try {
             dispatch({ type: 'STREAMING' });
             const effectiveSystemPrompt = (forcedSystemPrompt ?? systemPrompt).trim();
@@ -297,11 +268,12 @@ export function useChatStream({
             }));
 
             const stream = chatService.streamChat({
+                threadId: chatId,
+                userMessageId: lastMsg.id,
                 messages,
                 model: activeModelId,
                 reasoningEffort: effectiveReasoningEffort,
                 systemPrompt: effectiveSystemPrompt || undefined,
-                search: useSearch,
                 signal: abortControllerRef.current.signal,
             });
 
@@ -337,8 +309,8 @@ export function useChatStream({
 
             if (lastTokenAt === null) lastTokenAt = performance.now();
             flushAssistantUpdate();
-            const persisted = await persistAssistantMessage(fullContent, fullReasoning, [], buildReplyStats());
-            if (!persisted) {
+            flushAssistantUpdate();
+            if (!fullContent && !fullReasoning) {
                 hasPendingAssistantUpdate = false;
                 setMessages(currentMessages);
                 requestFailed = true;
@@ -346,18 +318,25 @@ export function useChatStream({
                 return false;
             }
             requestSucceeded = true;
+            const refreshResult = await refreshMessages();
+            if (!refreshResult.ok) {
+                console.warn('[chat] assistant response persisted but refresh failed:', refreshResult.error);
+            }
         } catch (error) {
 
             if (error instanceof Error && error.name === 'AbortError') {
                 flushAssistantUpdate();
-                const persisted = await persistAssistantMessage(fullContent, fullReasoning, [], buildReplyStats());
-                if (!persisted) {
+                if (!fullContent && !fullReasoning) {
                     requestFailed = true;
                     hasPendingAssistantUpdate = false;
                     setMessages(currentMessages);
                     return false;
                 }
                 requestSucceeded = true;
+                const refreshResult = await refreshMessages();
+                if (!refreshResult.ok) {
+                    console.warn('[chat] partial assistant response persisted but refresh failed:', refreshResult.error);
+                }
             } else {
                 console.error('Chat error:', error);
                 const errorMessage = error instanceof Error
@@ -381,13 +360,12 @@ export function useChatStream({
                 void generateResponseRef.current(
                     currentMessages,
                     forcedModelId,
-                    forcedSystemPrompt,
-                    forceSearchMode
+                    forcedSystemPrompt
                 );
             }
         }
         return requestSucceeded;
-    }, [chatId, model, reasoningEffortRef, systemPrompt, showToast, setMessages, justAddedMessageIdRef, persistRetryModeHintRef]);
+    }, [chatId, model, reasoningEffortRef, systemPrompt, showToast, setMessages, refreshMessages]);
 
     // Latest-ref pattern so the auto-regeneration in `finally` can re-invoke
     // the current callback without a circular dependency.

@@ -41,16 +41,17 @@ function extractJsonStringField(json: string, field: string): string {
     }
 }
 
-export interface ChatStreamParams {
+interface ChatStreamParams {
+    threadId?: string;
+    userMessageId?: string;
     messages: ChatMessage[];
     model: string;
     reasoningEffort: ReasoningEffort;
     systemPrompt?: string;
-    search: boolean;
     signal?: AbortSignal;
 }
 
-export type StreamChunk =
+type StreamChunk =
     | { type: 'content'; value: string }
     | { type: 'reasoning'; value: string }
     | { type: 'usage'; value: { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' } }
@@ -119,13 +120,14 @@ function parseUsageEvent(data: string): { outputTokens: number; inputTokens?: nu
     }
 }
 
-export class ChatService {
+class ChatService {
     async *streamChat({
         messages,
         model,
+        threadId,
+        userMessageId,
         reasoningEffort,
         systemPrompt,
-        search,
         signal,
     }: ChatStreamParams): AsyncGenerator<StreamChunk, void, unknown> {
         const streamId = createIdempotencyKey('chat');
@@ -141,11 +143,12 @@ export class ChatService {
                     ...(resumeByteOffset > 0 ? { 'X-Chat-Resume-Offset': String(resumeByteOffset) } : {}),
                 },
                 body: JSON.stringify({
+                    threadId,
+                    userMessageId,
                     messages,
                     model,
                     reasoningEffort,
                     systemPrompt,
-                    search,
                 }),
                 signal,
             });

@@ -47,7 +47,6 @@ export async function getGoogleStream(
     reasoningEffort: ReasoningEffort = 'low',
     maxOutputTokens?: number | null,
     systemPrompt?: string,
-    useSearch: boolean = false,
     tokenEstimates?: RequestTokenEstimates,
     signal?: AbortSignal
 ) {
@@ -69,7 +68,6 @@ export async function getGoogleStream(
         resolvedMaxOutputTokens: maxOutputTokens,
         requestMaxOutputTokens: config.maxOutputTokens,
         messageCount: messages.length,
-        useSearch,
         estimatedInputTokens: tokenEstimates?.estimatedInputTokens,
         estimatedInputTokensWithSystemPrompt: tokenEstimates?.estimatedInputTokensWithSystemPrompt,
     });
@@ -93,9 +91,6 @@ export async function getGoogleStream(
         }
     }
 
-    if (useSearch) {
-        config.tools = [{ googleSearch: {} }];
-    }
     if (systemPrompt && systemPrompt.trim().length > 0) {
         config.systemInstruction = systemPrompt.trim();
     }

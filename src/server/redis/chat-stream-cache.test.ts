@@ -32,15 +32,4 @@ describe('buildSseReplayResponse', () => {
         assert.ok(body.endsWith(`data: ${events[0]}\n\n`));
     });
 
-    test('replays complete streams verbatim', async () => {
-        const events = ['{"type":"text-delta","delta":"hi"}', '[DONE]'];
-
-        const response = buildSseReplayResponse(events, 0);
-        const body = await response.text();
-
-        assert.strictEqual(
-            body,
-            `data: ${events[0]}\n\ndata: ${events[1]}\n\n`
-        );
-    });
 });

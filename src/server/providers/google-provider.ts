@@ -11,7 +11,6 @@ export const googleProvider: ChatProvider = {
         reasoningEffort,
         maxOutputTokens,
         systemPrompt,
-        useSearch,
         tokenEstimates,
         signal,
     }) => getGoogleStream(
@@ -20,7 +19,6 @@ export const googleProvider: ChatProvider = {
         reasoningEffort,
         maxOutputTokens,
         systemPrompt,
-        useSearch ?? false,
         tokenEstimates,
         signal
     ),

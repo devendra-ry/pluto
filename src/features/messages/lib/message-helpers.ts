@@ -20,7 +20,7 @@ export type MessageRow = Pick<
     'id' | 'thread_id' | 'role' | 'content' | 'attachments' | 'reasoning' | 'model_id' | 'reply_stats' | 'created_at' | 'deleted_at'
 >;
 
-export function sortMessagesByCreatedAt(messages: Message[]) {
+function sortMessagesByCreatedAt(messages: Message[]) {
     return [...messages].sort((a, b) => {
         const byCreatedAt = a.created_at.localeCompare(b.created_at);
         if (byCreatedAt !== 0) return byCreatedAt;
@@ -42,7 +42,7 @@ export function removeMessagesById(existing: Message[], ids: Set<string>) {
     return existing.filter((message) => !ids.has(message.id));
 }
 
-export function attachmentsFromUnknown(value: unknown): Attachment[] {
+function attachmentsFromUnknown(value: unknown): Attachment[] {
     if (!Array.isArray(value)) return [];
     const attachments: Attachment[] = [];
     for (const item of value) {
@@ -69,7 +69,7 @@ export function attachmentsFromUnknown(value: unknown): Attachment[] {
     return attachments;
 }
 
-export function chatResponseStatsFromUnknown(value: unknown): ChatResponseStats | undefined {
+function chatResponseStatsFromUnknown(value: unknown): ChatResponseStats | undefined {
     if (!value || typeof value !== 'object') return undefined;
     const record = value as Record<string, unknown>;
     const outputTokens = record.outputTokens;

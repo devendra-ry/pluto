@@ -12,7 +12,7 @@ import {
     trimMessagesToInputBudget,
     type TrimmedContext,
 } from '@/server/chat/context-budget';
-import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/shared/core/constants';
+import { AVAILABLE_MODELS } from '@/shared/core/constants';
 import { resolveModelLimits } from '@/server/providers/model-limits';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
 import { ChatRequestSchema } from '@/shared/core/types';
@@ -30,10 +30,60 @@ import { assertNotTemporarilyBlocked, recordAbuseSignal } from '@/server/securit
 import { sharedTextEncoder } from '@/shared/lib/text-encoder';
 import { ApiRequestError, parseJsonRequest } from '@/server/http/api-security';
 import type { AuthenticatedContext } from '@/server/http/route-handler';
+import type { Json } from '@/shared/lib/supabase/database.types';
 
-const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
 const GENERIC_CHAT_ERROR_MESSAGE = 'Unable to complete request right now. Please try again.';
 const IS_DEV = process.env.NODE_ENV !== 'production';
+
+async function persistAssistantResponse(
+    supabase: AuthenticatedContext['supabase'],
+    userId: string,
+    threadId: string,
+    userMessageId: string,
+    modelId: string,
+    content: string,
+    reasoning: string,
+    replyStats?: Json,
+) {
+    const { data: existing, error: existingError } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('thread_id', threadId)
+        .eq('reply_to_message_id', userMessageId)
+        .is('deleted_at', null)
+        .maybeSingle();
+    if (existingError) throw existingError;
+    if (existing) return existing.id;
+
+    const { data, error } = await supabase
+        .from('messages')
+        .insert({
+            thread_id: threadId,
+            user_id: userId,
+            role: 'assistant',
+            content,
+            reasoning: reasoning || null,
+            model_id: modelId,
+            attachments: [],
+            reply_to_message_id: userMessageId,
+            reply_stats: replyStats ?? null,
+        })
+        .select('id')
+        .single();
+    if (error) {
+        // A concurrent retry may have inserted the response first.
+        const { data: concurrent } = await supabase
+            .from('messages')
+            .select('id')
+            .eq('thread_id', threadId)
+            .eq('reply_to_message_id', userMessageId)
+            .is('deleted_at', null)
+            .maybeSingle();
+        if (concurrent) return concurrent.id;
+        throw error;
+    }
+    return data.id;
+}
 
 export async function handleChatRequest(
     req: Request,
@@ -114,6 +164,26 @@ export async function handleChatRequest(
         async start(controller) {
             let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
             let writer: ChatStreamEventWriter | null = null;
+            let requestUserMessageId: string | null = null;
+            let generationCompleted = false;
+
+            const finishGenerationJob = async (status: 'completed' | 'failed', error?: string) => {
+                if (!requestUserMessageId) return;
+                const { error: jobError } = await supabase
+                    .from('generation_jobs')
+                    .update({
+                        status,
+                        error: status === 'failed' ? (error ?? 'Generation failed') : null,
+                        claim_expires_at: null,
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('user_id', user.id)
+                    .eq('user_message_id', requestUserMessageId)
+                    .in('status', ['pending', 'claimed']);
+                if (jobError && IS_DEV) {
+                    logger.warn('[chat] failed to finalize generation job', { error: jobError });
+                }
+            };
 
             if (signal.aborted) return;
 
@@ -134,7 +204,28 @@ export async function handleChatRequest(
                     return;
                 }
 
-                const { messages, model, reasoningEffort, systemPrompt, search } = parseResult.data;
+                const { threadId, userMessageId, messages, model, reasoningEffort, systemPrompt } = parseResult.data;
+                requestUserMessageId = userMessageId;
+                const { data: ownedThread, error: threadError } = await supabase
+                    .from('threads')
+                    .select('id')
+                    .eq('id', threadId)
+                    .eq('user_id', user.id)
+                    .maybeSingle();
+                if (threadError || !ownedThread) {
+                    throw new ApiRequestError(403, 'Thread not found or access denied');
+                }
+                const { data: ownedUserMessage, error: userMessageError } = await supabase
+                    .from('messages')
+                    .select('id')
+                    .eq('id', userMessageId)
+                    .eq('thread_id', threadId)
+                    .eq('role', 'user')
+                    .eq('user_id', user.id)
+                    .maybeSingle();
+                if (userMessageError || !ownedUserMessage) {
+                    throw new ApiRequestError(403, 'Message not found or access denied');
+                }
                 const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
                 if (!modelConfig) {
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid model selection' })}\n\n`);
@@ -142,15 +233,8 @@ export async function handleChatRequest(
                     return;
                 }
 
-                const useSearch = search === true;
                 const normalizedSystemPrompt = systemPrompt?.trim() ?? '';
                 const chatProvider = resolveChatProvider(modelConfig);
-
-                if (useSearch && (chatProvider.id !== 'google' || !SEARCH_ENABLED_MODEL_SET.has(model))) {
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Search is not available for the selected model.' })}\n\n`);
-                    safeClose(controller);
-                    return;
-                }
 
                 const limits = await resolveModelLimits(model, modelConfig, signal);
                 const systemPromptTokenEstimate = estimateSystemPromptTokens(normalizedSystemPrompt);
@@ -203,7 +287,6 @@ export async function handleChatRequest(
                         modelConfig,
                         maxOutputTokens: outputPlan.requestMaxTokens,
                         systemPrompt: normalizedSystemPrompt,
-                        useSearch,
                         tokenEstimates,
                         signal,
                     });
@@ -248,34 +331,98 @@ export async function handleChatRequest(
                 // round-trip needed.
                 const pipeDecoder = new TextDecoder();
                 const reader = sourceStream.getReader();
-                    let pipeBuffer = '';
-                    try {
-                        while (true) {
-                            if (signal.aborted) break;
-                            const { done, value } = await reader.read();
-                            if (done) break;
-
-                            // Decode once for event capture (only when caching is active).
-                            if (captureEvent) {
-                                pipeBuffer += pipeDecoder.decode(value, { stream: true });
-                                let nlIdx: number;
-                                let searchFrom = 0;
-                                while ((nlIdx = pipeBuffer.indexOf('\n', searchFrom)) !== -1) {
-                                    const line = pipeBuffer.substring(searchFrom, nlIdx);
-                                    searchFrom = nlIdx + 1;
-                                    if (line.startsWith('data: ')) {
-                                        captureEvent(line.substring(6));
-                                    }
-                                }
-                                pipeBuffer = searchFrom > 0 ? pipeBuffer.substring(searchFrom) : pipeBuffer;
-                            }
-
-                            // Enqueue the original bytes directly — no re-encode.
-                            safeEnqueue(controller, value);
+                let pipeBuffer = '';
+                let responseContent = '';
+                let responseReasoning = '';
+                let responseUsage: { outputTokens?: number; inputTokens?: number; totalTokens?: number } | null = null;
+                const responseStartedAt = performance.now();
+                let firstTokenAt: number | null = null;
+                let lastTokenAt: number | null = null;
+                let providerStreamCompleted = false;
+                try {
+                    while (true) {
+                        if (signal.aborted) break;
+                        const { done, value } = await reader.read();
+                        if (done) {
+                            providerStreamCompleted = true;
+                            break;
                         }
-                    } finally {
-                        reader.releaseLock();
+
+                        pipeBuffer += pipeDecoder.decode(value, { stream: true });
+                        let nlIdx: number;
+                        let searchFrom = 0;
+                        while ((nlIdx = pipeBuffer.indexOf('\n', searchFrom)) !== -1) {
+                            const line = pipeBuffer.substring(searchFrom, nlIdx).trimEnd();
+                            searchFrom = nlIdx + 1;
+                            if (!line.startsWith('data: ')) continue;
+                            const event = line.substring(6);
+                            captureEvent?.(event);
+                            if (event === '[DONE]') continue;
+                            try {
+                                const parsed = JSON.parse(event) as Record<string, unknown>;
+                                const content = typeof parsed.c === 'string' ? parsed.c : '';
+                                const reasoning = typeof parsed.r === 'string' ? parsed.r : '';
+                                if (content || reasoning) {
+                                    const now = performance.now();
+                                    firstTokenAt ??= now;
+                                    lastTokenAt = now;
+                                    responseContent += content;
+                                    responseReasoning += reasoning;
+                                }
+                                if (parsed.meta === 'usage' && parsed.usage && typeof parsed.usage === 'object') {
+                                    const usage = parsed.usage as Record<string, unknown>;
+                                    responseUsage = {
+                                        inputTokens: typeof usage.inputTokens === 'number' ? usage.inputTokens : undefined,
+                                        outputTokens: typeof usage.outputTokens === 'number' ? usage.outputTokens : undefined,
+                                        totalTokens: typeof usage.totalTokens === 'number' ? usage.totalTokens : undefined,
+                                    };
+                                }
+                            } catch {
+                                // Ignore malformed provider events; the client parser does the same.
+                            }
+                        }
+                        pipeBuffer = searchFrom > 0 ? pipeBuffer.substring(searchFrom) : pipeBuffer;
+
+                        // Enqueue the original bytes directly — no re-encode.
+                        safeEnqueue(controller, value);
                     }
+                } finally {
+                    reader.releaseLock();
+                }
+
+                if ((providerStreamCompleted || signal.aborted) && (responseContent || responseReasoning)) {
+                    const endTime = lastTokenAt ?? performance.now();
+                    const seconds = Math.max((endTime - (firstTokenAt ?? responseStartedAt)) / 1000, 0.001);
+                    const outputTokens = responseUsage?.outputTokens;
+                    const replyStats = outputTokens === undefined ? undefined : {
+                        outputTokens,
+                        seconds,
+                        tokensPerSecond: outputTokens / seconds,
+                        ttfbSeconds: firstTokenAt === null ? undefined : Math.max((firstTokenAt - responseStartedAt) / 1000, 0),
+                        inputTokens: responseUsage?.inputTokens,
+                        totalTokens: responseUsage?.totalTokens,
+                        source: 'provider',
+                    } satisfies Record<string, unknown>;
+                    await persistAssistantResponse(
+                        supabase,
+                        user.id,
+                        threadId,
+                        userMessageId,
+                        model,
+                        responseContent,
+                        responseReasoning,
+                        replyStats as Json | undefined,
+                    );
+                    await finishGenerationJob('completed');
+                    generationCompleted = true;
+                    await supabase
+                        .from('threads')
+                        .update({ updated_at: new Date().toISOString() })
+                        .eq('id', threadId)
+                        .eq('user_id', user.id);
+                } else if (signal.aborted || providerStreamCompleted) {
+                    await finishGenerationJob('failed', 'Generation ended before a response was produced');
+                }
 
                 if (heartbeatInterval) {
                     clearInterval(heartbeatInterval);
@@ -294,10 +441,14 @@ export async function handleChatRequest(
                 }
 
                 if (!signal.aborted) {
+                    await finishGenerationJob('failed', error instanceof Error ? error.message : 'Generation failed');
                     logger.error('Chat API error:', error);
                     safeEnqueue(controller, `data: ${JSON.stringify({ error: GENERIC_CHAT_ERROR_MESSAGE })}\n\n`);
                     safeClose(controller);
                     await recordAbuseSignal(user.id, 'chat', 'stream-failure');
+                }
+                if (signal.aborted && !generationCompleted && requestUserMessageId) {
+                    await finishGenerationJob('failed', 'Generation was interrupted');
                 }
                 if (writer) {
                     await writer.close();

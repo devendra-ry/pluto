@@ -15,7 +15,7 @@ function optionalServerEnv(value: string | undefined) {
     return normalized && normalized.length > 0 ? normalized : undefined;
 }
 
-export function readOptionalServerEnv(name: string) {
+function readOptionalServerEnv(name: string) {
     return optionalServerEnv(process.env[name]);
 }
 

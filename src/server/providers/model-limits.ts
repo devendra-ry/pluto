@@ -6,7 +6,7 @@ import { getRedisClient, redisKey } from '@/server/redis/client';
 import type { ResolvedModelLimits } from '@/server/providers/provider-types';
 import { readPositiveInt } from '@/shared/lib/read-positive-int';
 export type { ResolvedModelLimits } from '@/server/providers/provider-types';
-export { logModelLimits, resolveOutputTokenCap } from '@/server/providers/limits-utils';
+export { resolveOutputTokenCap } from '@/server/providers/limits-utils';
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000;
 const DEFAULT_LIMITS_CACHE_TTL_MS = 30 * 60 * 1000;

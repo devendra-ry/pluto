@@ -2,16 +2,14 @@
 
 A fast, production-style AI workspace built on Next.js 16.
 
-Pluto gives you one chat surface for Google Gemini models, with optional Google-powered search. It is optimized for realtime sync, secure request handling, and low-friction model expansion.
+Pluto gives you one chat surface for Google Gemini models. It is optimized for realtime sync, secure request handling, and low-friction model expansion.
 
 Architecture details: see `ARCHITECTURE.md`.
 
 ## What Makes It Good
 
 - One model selector for Google Gemini models.
-- Mode-driven UX:
-  - `Chat`
-  - `Search` (Gemini 2.5 Flash / Flash Lite only)
+- Reasoning effort and custom system prompts.
 - Attachment pipeline with server validation and ownership checks.
 - Realtime message sync with Supabase + React Query canonical cache.
 - Hardened API boundaries (auth + origin checks + JSON/schema checks + SSRF guard).
@@ -21,9 +19,9 @@ Architecture details: see `ARCHITECTURE.md`.
 | Area | Implementation |
 |---|---|
 | Chat routing | Provider registry + model metadata |
-| Streaming | SSE from `/api/chat` with transformation |
+| Streaming | SSE from `/api/chat` with server-side persistence |
 | Sync | Supabase Realtime + `@tanstack/react-query` |
-| Uploads | Multipart-only, max `100MB`, MIME allowlist |
+| Uploads | Multipart-only, max `20MB` per file / `50MB` per generation, MIME allowlist |
 | Security | Auth middleware, CSRF-style origin checks, and abuse protection |
 
 ## Architecture
@@ -114,7 +112,7 @@ The database stores stable, authenticated `/api/uploads` proxy URLs, never expir
 ## Deployment checklist
 
 - Apply `supabase/migrations` before deploying application code.
-- Configure both Supabase public variables and all provider keys used by enabled models.
+- Configure both Supabase public variables and the Gemini provider key.
 - Configure Upstash Redis in production; request deduplication, rate limits, and abuse protection intentionally fail closed when it is unavailable.
 - Set `APP_URL` or `NEXT_PUBLIC_APP_URL` to the canonical HTTPS origin.
 - Keep the attachments bucket private and confirm its name matches both bucket environment variables.

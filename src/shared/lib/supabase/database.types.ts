@@ -21,14 +21,12 @@ export type Database = {
           created_at: string
           error: string | null
           id: string
-          mode: string
           model_id: string | null
           reasoning_effort: string | null
           status: string
           system_prompt: string | null
           thread_id: string
           updated_at: string
-          use_search: boolean
           user_id: string
           user_message_id: string
         }
@@ -38,14 +36,12 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: string
-          mode: string
           model_id?: string | null
           reasoning_effort?: string | null
           status?: string
           system_prompt?: string | null
           thread_id: string
           updated_at?: string
-          use_search?: boolean
           user_id?: string
           user_message_id: string
         }
@@ -55,14 +51,12 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: string
-          mode?: string
           model_id?: string | null
           reasoning_effort?: string | null
           status?: string
           system_prompt?: string | null
           thread_id?: string
           updated_at?: string
-          use_search?: boolean
           user_id?: string
           user_message_id?: string
         }
@@ -92,6 +86,7 @@ export type Database = {
           deleted_by: string | null
           id: string
           model_id: string | null
+          reply_to_message_id: string | null
           reply_stats: Json | null
           reasoning: string | null
           role: string
@@ -106,6 +101,7 @@ export type Database = {
           deleted_by?: string | null
           id?: string
           model_id?: string | null
+          reply_to_message_id?: string | null
           reply_stats?: Json | null
           reasoning?: string | null
           role: string
@@ -120,6 +116,7 @@ export type Database = {
           deleted_by?: string | null
           id?: string
           model_id?: string | null
+          reply_to_message_id?: string | null
           reply_stats?: Json | null
           reasoning?: string | null
           role?: string
@@ -185,11 +182,9 @@ export type Database = {
         }
         Returns: {
           id: string
-          mode: string
           model_id: string | null
           reasoning_effort: string | null
           system_prompt: string | null
-          use_search: boolean
           user_message_id: string
         }[]
       }
@@ -251,7 +246,6 @@ export type Tables<
       ? R
       : never
     : never
-
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
@@ -276,7 +270,6 @@ export type TablesInsert<
       ? I
       : never
     : never
-
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
@@ -335,9 +328,3 @@ export type CompositeTypes<
   : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
     ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
     : never
-
-export const Constants = {
-  public: {
-    Enums: {},
-  },
-} as const

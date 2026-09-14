@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type VirtuosoHandle } from 'react-virtuoso';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
@@ -9,7 +9,7 @@ import { ChatDestructiveConfirmDialog } from '@/features/chat';
 import { ChatEmptyState } from '@/features/chat';
 import { ErrorBoundary } from '@/shared/components/error-boundary';
 import { ChatHeader } from '@/features/chat';
-import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/features/chat';
+import { ChatInput, type ChatInputHandle } from '@/features/chat';
 import { useToast } from '@/components/ui/toast';
 import { useChatMessageState } from '@/features/chat';
 import { useChatScroll } from '@/features/chat';
@@ -20,8 +20,7 @@ import { usePendingGeneration } from '@/features/chat';
 import { useRetryLogic } from '@/features/chat';
 import { useThread, branchThread, type Thread } from '@/features/threads';
 import { useThreadSettings } from '@/features/chat';
-import { SEARCH_ENABLED_MODELS } from '@/shared/core/constants';
-import { type ChatViewMessage, type RetryMode } from '@/features/chat';
+import { type ChatViewMessage } from '@/features/chat';
 import { type Attachment } from '@/shared/core/types';
 
 interface ChatPageClientProps {
@@ -34,65 +33,6 @@ const ChatMessageList = dynamic(
     { ssr: false }
 );
 
-const RETRY_MODE_HINTS_KEY = 'retry-mode-hints';
-const SEARCH_ENABLED_MODEL_SET = new Set<string>(SEARCH_ENABLED_MODELS);
-
-function readRetryModeHints(): Record<string, Record<string, RetryMode>> {
-    if (typeof window === 'undefined') return {};
-    const raw = window.sessionStorage.getItem(RETRY_MODE_HINTS_KEY);
-    if (!raw) return {};
-    try {
-        const parsed = JSON.parse(raw) as unknown;
-        if (!parsed || typeof parsed !== 'object') return {};
-        return parsed as Record<string, Record<string, RetryMode>>;
-    } catch {
-        return {};
-    }
-}
-
-function getRetryModeHint(threadId: string, userMessageId: string): RetryMode | undefined {
-    if (!threadId || !userMessageId) return undefined;
-    const hints = readRetryModeHints();
-    return hints[threadId]?.[userMessageId];
-}
-
-function looksLikeSearchResponse(content: string): boolean {
-    return /\[\d+\]\(https?:\/\/[^\s)]+\)/.test(content);
-}
-
-function inferEditGenerationMode(
-    localMessages: ChatViewMessage[],
-    anchorUserIndex: number,
-    threadId: string
-) {
-    const anchorUser = localMessages[anchorUserIndex];
-    if (!anchorUser || anchorUser.role !== 'user') {
-        return { forcedModelId: undefined as string | undefined, forceSearchMode: false };
-    }
-
-    const hint = getRetryModeHint(threadId, anchorUser.id);
-    if (hint === 'search') {
-        return { forcedModelId: undefined as string | undefined, forceSearchMode: true };
-    }
-
-    const nextAssistantMessage = localMessages
-        .slice(anchorUserIndex + 1)
-        .find((message) => message.role === 'assistant');
-    if (!nextAssistantMessage) {
-        return { forcedModelId: undefined as string | undefined, forceSearchMode: false };
-    }
-
-    if (
-        nextAssistantMessage.model_id
-        && SEARCH_ENABLED_MODEL_SET.has(nextAssistantMessage.model_id)
-        && looksLikeSearchResponse(nextAssistantMessage.content)
-    ) {
-        return { forcedModelId: undefined as string | undefined, forceSearchMode: true };
-    }
-
-    return { forcedModelId: undefined as string | undefined, forceSearchMode: false };
-}
-
 export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
     const router = useRouter();
     const thread = useThread(chatId, initialThread);
@@ -102,7 +42,6 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
     const [messages, setMessages] = useState<ChatViewMessage[]>([]);
     const justAddedMessageIdRef = useRef<string | null>(null);
     const locallyDeletedMessageIdsRef = useRef<Set<string>>(new Set());
-    const persistRetryModeHintRef = useRef<((userMessageId: string, mode: RetryMode) => void) | null>(null);
     const prevChatIdRef = useRef<string | null>(null);
     const { showToast } = useToast();
 
@@ -138,8 +77,7 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
         reasoningEffortRef,
         systemPrompt,
         setMessages,
-        justAddedMessageIdRef,
-        persistRetryModeHintRef,
+        refreshMessages: refreshStoredMessages,
         showToast,
     });
 
@@ -167,23 +105,17 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
         closeDeleteConfirm,
     } = useDestructiveDeleteConfirm();
 
-    const getInputMode = useCallback(() => chatInputRef.current?.getMode(), []);
-    const { handleRetry, persistRetryModeHint } = useRetryLogic({
+    const { handleRetry } = useRetryLogic({
         chatId,
         messages,
         setMessages,
         setIsLoading,
         showToast,
-        getInputMode,
         generateResponse,
         refreshStoredMessages,
         locallyDeletedMessageIdsRef,
         confirmDestructiveDelete,
     });
-
-    useEffect(() => {
-        persistRetryModeHintRef.current = persistRetryModeHint;
-    }, [persistRetryModeHint]);
 
     useLayoutEffect(() => {
         // Only reset when actually switching between different chats, not on initial mount.
@@ -204,7 +136,6 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
         isLoading,
         isThinking,
         lastRequestFailed,
-        chatInputRef,
         applyPendingReasoningEffort,
         generateResponse,
     });
@@ -213,13 +144,11 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
         userMessage: string,
         attachments: Attachment[],
         existingMessages: ChatViewMessage[],
-        options: ChatSubmitOptions
     ) => {
         setIsLoading(true);
         // Reset the failure flag when user manually sends a message.
         clearLastRequestFailure();
         const targetModel = modelRef.current;
-        const useSearch = options.mode === 'search';
 
         const userMsg: ChatViewMessage = {
             id: crypto.randomUUID(),
@@ -239,7 +168,7 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
             );
             setMessages(persistedMessages);
 
-            await generateResponse(persistedMessages, targetModel, undefined, useSearch);
+            await generateResponse(persistedMessages, targetModel);
             return true;
         } catch (error) {
             setIsLoading(false);
@@ -249,10 +178,10 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
         }
     }, [chatId, generateResponse, showToast, setIsLoading, clearLastRequestFailure, modelRef]);
 
-    const handleSend = useCallback(async (value: string, attachments: Attachment[], options: ChatSubmitOptions) => {
+    const handleSend = useCallback(async (value: string, attachments: Attachment[]) => {
         if ((!value.trim() && attachments.length === 0) || isLoading) return false;
         setIsAtBottom(true);
-        return sendMessage(value, attachments, visibleMessages, options);
+        return sendMessage(value, attachments, visibleMessages);
     }, [isLoading, visibleMessages, sendMessage, setIsAtBottom]);
 
     const handlePromptClick = useCallback((prompt: string) => {
@@ -271,8 +200,7 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
             return;
         }
         const editedMessageAttachments = localMessages[msgIndex].attachments ?? [];
-        const { forcedModelId, forceSearchMode } = inferEditGenerationMode(localMessages, msgIndex, chatId);
-        const editModelId = forcedModelId ?? modelRef.current;
+        const editModelId = modelRef.current;
 
         const anchorBeforeEditId = msgIndex > 0 ? localMessages[msgIndex - 1].id : null;
         try {
@@ -339,7 +267,7 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
                 }
             })();
 
-            await generateResponse(updatedMessages, forcedModelId, undefined, forceSearchMode);
+            await generateResponse(updatedMessages, editModelId);
         } catch (error) {
             setIsLoading(false);
             console.error('Failed to edit message:', error);

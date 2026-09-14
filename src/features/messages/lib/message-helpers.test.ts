@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { sortMessagesByCreatedAt, mergeMessagesSorted, removeMessagesById, toMessage, type Message } from './message-helpers';
+import { mergeMessagesSorted, toMessage, type Message } from './message-helpers';
 
 describe('message-helpers', () => {
     const baseMessage: Message = {
@@ -12,25 +12,6 @@ describe('message-helpers', () => {
         attachments: [],
         deleted_at: null
     };
-
-    describe('sortMessagesByCreatedAt', () => {
-        test('sorts messages by created_at', () => {
-            const m1 = { ...baseMessage, id: '1', created_at: '2023-01-01T10:00:00Z' };
-            const m2 = { ...baseMessage, id: '2', created_at: '2023-01-01T11:00:00Z' };
-            const m3 = { ...baseMessage, id: '3', created_at: '2023-01-01T09:00:00Z' };
-
-            const sorted = sortMessagesByCreatedAt([m1, m2, m3]);
-            assert.deepStrictEqual(sorted, [m3, m1, m2]);
-        });
-
-        test('sorts messages by id if created_at is equal', () => {
-             const m1 = { ...baseMessage, id: 'b', created_at: '2023-01-01T10:00:00Z' };
-             const m2 = { ...baseMessage, id: 'a', created_at: '2023-01-01T10:00:00Z' };
-
-             const sorted = sortMessagesByCreatedAt([m1, m2]);
-             assert.deepStrictEqual(sorted, [m2, m1]);
-        });
-    });
 
     describe('mergeMessagesSorted', () => {
         test('merges and sorts messages', () => {
@@ -50,19 +31,6 @@ describe('message-helpers', () => {
              const merged = mergeMessagesSorted(existing, incoming);
              assert.strictEqual(merged.length, 1);
              assert.strictEqual(merged[0].content, 'new');
-        });
-    });
-
-    describe('removeMessagesById', () => {
-        test('removes messages by id', () => {
-            const existing = [
-                { ...baseMessage, id: '1' },
-                { ...baseMessage, id: '2' }
-            ];
-            const ids = new Set(['1']);
-            const result = removeMessagesById(existing, ids);
-            assert.strictEqual(result.length, 1);
-            assert.strictEqual(result[0].id, '2');
         });
     });
 

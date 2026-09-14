@@ -171,7 +171,7 @@ async function storeResponse(session: IdempotencySession, response: Response) {
     }
 }
 
-export function readIdempotencyKey(req: Request) {
+function readIdempotencyKey(req: Request) {
     return normalizeIdempotencyKey(req.headers.get('x-idempotency-key'));
 }
 

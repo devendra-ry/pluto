@@ -3,15 +3,14 @@
 import { useRef, useEffect, forwardRef, useState, useImperativeHandle, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ArrowUp, Square, Paperclip } from 'lucide-react';
-import { AVAILABLE_MODELS, SEARCH_ENABLED_MODELS } from '@/shared/core/constants';
+import { AVAILABLE_MODELS } from '@/shared/core/constants';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
-import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment } from '@/features/attachments';
+import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_TOTAL_ATTACHMENT_BYTES, isImageAttachment } from '@/features/attachments';
 import { startUploadFileForThread } from '@/features/uploads';
 import { useToast } from '@/components/ui/toast';
 import { scheduleFrame } from '@/shared/lib/animation-frame';
-import { ChatSubmitMode, ChatSubmitOptions, LocalAttachmentItem, ChatInputHandle } from './chat-input/chat-input-types';
+import { LocalAttachmentItem, ChatInputHandle } from './chat-input/chat-input-types';
 import { AttachmentList } from './chat-input/attachment-list';
-import { ModeSelector } from './chat-input/mode-selector';
 import { ReasoningSelector } from './chat-input/reasoning-selector';
 import { SystemPromptSelector } from './chat-input/system-prompt-selector';
 import { ModelSelector } from './model-selector';
@@ -22,8 +21,7 @@ interface ChatInputProps {
     onInputChange?: (value: string) => void;
     onSubmit: (
         value: string,
-        attachments: Attachment[],
-        options: ChatSubmitOptions
+        attachments: Attachment[]
     ) => Promise<boolean | void> | boolean | void;
     onEnsureThread?: () => Promise<string>;
     threadId?: string | null;
@@ -58,13 +56,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const valueRef = useRef(initialValue);
     const attachmentItemsRef = useRef<LocalAttachmentItem[]>([]);
     const [value, setValue] = useState(initialValue);
-    const [isSearchMode, setIsSearchMode] = useState(false);
-    const isSearchModeRef = useRef(false);
-    const searchForcedRef = useRef(false);
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
     const { showToast } = useToast();
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
-    const supportsSearchMode = SEARCH_ENABLED_MODELS.includes(currentModel as typeof SEARCH_ENABLED_MODELS[number]);
     const supportsImages = selectedModel.capabilities.includes('vision');
     const supportsPdfs = selectedModel.capabilities.includes('pdf') || selectedModel.provider === 'google';
     const supportsTexts = selectedModel.provider === 'google';
@@ -87,26 +81,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const hasUploadingAttachments = activeAttachmentItems.some((item) => item.status === 'uploading');
     const hasFailedAttachments = activeAttachmentItems.some((item) => item.status === 'failed');
 
-    const activeMode: ChatSubmitMode = isSearchMode ? 'search' : 'chat';
-
-    useEffect(() => {
-        if (!supportsSearchMode && isSearchMode) {
-            // Skip the reset if search mode was force-set (e.g. by pending generation handoff)
-            // before the model prop has caught up.
-            if (searchForcedRef.current) {
-                searchForcedRef.current = false;
-                return;
-            }
-            isSearchModeRef.current = false;
-            setIsSearchMode(false);
-            showToast('Search is available only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite', 'error');
-        }
-    }, [supportsSearchMode, isSearchMode, showToast]);
-
-    const getSubmitMode = useCallback<() => ChatSubmitMode>(() => {
-        if (isSearchModeRef.current) return 'search';
-        return 'chat';
-    }, []);
 
     useEffect(() => {
         if (textareaRef.current) {
@@ -213,7 +187,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     };
 
     const handleSubmit = async () => {
-        const submitMode = getSubmitMode();
         if ((!value.trim() && uploadedAttachments.length === 0) || hasUploadingAttachments || hasFailedAttachments || isLoading) {
             return;
         }
@@ -231,7 +204,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         }
 
         try {
-            const submitted = await onSubmit(submittedValue, submittedAttachments, { mode: submitMode });
+            const submitted = await onSubmit(submittedValue, submittedAttachments);
             if (submitted === false) {
                 // Restore only if user has not started drafting a new message yet.
                 if (valueRef.current.trim().length === 0 && attachmentItemsRef.current.length === 0) {
@@ -261,24 +234,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         }
     };
 
-    const setMode = useCallback((mode: ChatSubmitMode, force?: boolean) => {
-        if (mode === activeMode) return;
-        if (mode === 'search' && !force && !supportsSearchMode) {
-            showToast('Search is available only for Gemini 2.5 Flash and Gemini 2.5 Flash Lite', 'error');
-            return;
-        }
-        if (mode === 'search' && isLoading) return;
-
-        const nextSearch = mode === 'search';
-
-        isSearchModeRef.current = nextSearch;
-        setIsSearchMode(nextSearch);
-        if (force && nextSearch) {
-            searchForcedRef.current = true;
-        }
-
-    }, [activeMode, supportsSearchMode, showToast, isLoading]);
-
     useImperativeHandle(ref, () => ({
         setValue: (newValue: string) => {
             setValue(newValue);
@@ -290,9 +245,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             });
         },
         focus: () => textareaRef.current?.focus(),
-        setMode: (mode: ChatSubmitMode) => setMode(mode, true),
-        getMode: () => getSubmitMode(),
-    }), [getSubmitMode, setMode]);
+    }), []);
 
     const handleAttachClick = () => {
         if (isLoading || !supportsAttachments) return;
@@ -302,12 +255,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const enqueueLocalFiles = useCallback((files: File[], source: 'picker' | 'paste') => {
         if (files.length === 0) return;
         if (!supportsAttachments) {
-            showToast('Attachments are not supported for the current mode/model', 'error');
+            showToast('Attachments are not supported for the current model', 'error');
             return;
         }
 
         const availableSlots = Math.max(0, MAX_ATTACHMENTS_PER_MESSAGE - activeAttachmentItems.length);
-        const selectedFiles = files.slice(0, availableSlots);
+        const currentBytes = activeAttachmentItems.reduce((total, item) => total + item.file.size, 0);
+        const selectedFiles = files.slice(0, availableSlots).filter((file, index, selected) => {
+            const previousBytes = selected.slice(0, index).reduce((total, previous) => total + previous.size, 0);
+            return currentBytes + previousBytes + file.size <= MAX_TOTAL_ATTACHMENT_BYTES;
+        });
         if (selectedFiles.length === 0) {
             showToast(`Maximum ${MAX_ATTACHMENTS_PER_MESSAGE} attachments allowed per message`, 'error');
             return;
@@ -349,18 +306,18 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             const addedCount = selectedFiles.length;
             showToast(
                 source === 'paste'
-                    ? `Only ${addedCount} pasted image(s) were added due to attachment limit`
-                    : `Only ${addedCount} file(s) were added due to attachment limit`,
+                    ? `Only ${addedCount} pasted image(s) were added due to attachment limits`
+                    : `Only ${addedCount} file(s) were added due to attachment limits`,
                 'error'
             );
         }
     }, [
         supportsAttachments,
-        activeAttachmentItems.length,
         supportsImages,
         supportsPdfs,
         supportsTexts,
         uploadLocalFile,
+        activeAttachmentItems,
         showToast,
     ]);
 
@@ -390,7 +347,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         }
 
         if (!supportsAttachments || !supportsImageUploads) {
-            showToast('Pasted images are not supported for the current mode/model', 'error');
+            showToast('Pasted images are not supported for the current model', 'error');
             return;
         }
 
@@ -431,7 +388,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         onChange={handleChange}
                         onKeyDown={handleKeyDown}
                         onPaste={handlePaste}
-                        placeholder={isSearchMode ? 'Ask anything with web search...' : 'Type your message here...'}
+                        placeholder="Type your message here..."
                         className="w-full px-5 pt-4 pb-3 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
                     />
 
@@ -457,12 +414,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 />
                             )}
 
-                            <ModeSelector
-                                activeMode={activeMode}
-                                supportsSearchMode={supportsSearchMode}
-                                isLoading={isLoading}
-                                onModeChange={setMode}
-                            />
 
                             <SystemPromptSelector
                                 systemPrompt={systemPrompt}

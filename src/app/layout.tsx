@@ -18,7 +18,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "Pluto",
-  description: "A secure multi-provider AI workspace for chat and search.",
+  description: "A secure Google Gemini workspace for AI chat.",
 };
 
 export default async function RootLayout({

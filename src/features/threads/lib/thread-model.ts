@@ -8,7 +8,7 @@ export const THREADS_PAGE_SIZE = 50;
 
 type ThreadRow = Database['public']['Tables']['threads']['Row'];
 
-export function compareThreadsByUpdatedAtDesc(a: Thread, b: Thread) {
+function compareThreadsByUpdatedAtDesc(a: Thread, b: Thread) {
     const byUpdatedAt = b.updated_at.localeCompare(a.updated_at);
     return byUpdatedAt !== 0 ? byUpdatedAt : b.id.localeCompare(a.id);
 }

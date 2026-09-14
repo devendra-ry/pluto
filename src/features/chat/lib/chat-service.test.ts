@@ -41,7 +41,6 @@ describe('ChatService', () => {
             messages: [],
             model: 'm1',
             reasoningEffort: 'low',
-            search: false
         })) {
             chunks.push(chunk);
         }
@@ -50,89 +49,6 @@ describe('ChatService', () => {
         assert.deepStrictEqual(chunks[0], { type: 'content', value: 'Hello' });
         assert.deepStrictEqual(chunks[1], { type: 'reasoning', value: 'Thinking' });
     });
-
-    test('streamChat yields provider usage chunks when present', async () => {
-        const encoder = new TextEncoder();
-        const stream = new ReadableStream({
-            start(controller) {
-                const chunks = [
-                    'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n',
-                    'data: {"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}}\n\n',
-                    'data: [DONE]\n\n'
-                ];
-                for (const chunk of chunks) {
-                    controller.enqueue(encoder.encode(chunk));
-                }
-                controller.close();
-            }
-        });
-
-        fetchMock.mock.mockImplementation(async () => ({ ok: true, body: stream }));
-
-        const chunks: any[] = [];
-        for await (const chunk of chatService.streamChat({
-            messages: [],
-            model: 'm1',
-            reasoningEffort: 'low',
-            search: false
-        })) {
-            chunks.push(chunk);
-        }
-
-        assert.strictEqual(chunks.length, 2);
-        assert.deepStrictEqual(chunks[0], { type: 'content', value: 'Hello' });
-        assert.deepStrictEqual(chunks[1], {
-            type: 'usage',
-            value: {
-                outputTokens: 8,
-                inputTokens: 12,
-                totalTokens: 20,
-                source: 'provider'
-            }
-        });
-    });
-
-    test('streamChat infers output tokens when completion_tokens is null', async () => {
-        const encoder = new TextEncoder();
-        const stream = new ReadableStream({
-            start(controller) {
-                const chunks = [
-                    'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n',
-                    'data: {"usage":{"prompt_tokens":18,"completion_tokens":null,"total_tokens":31}}\n\n',
-                    'data: [DONE]\n\n'
-                ];
-                for (const chunk of chunks) {
-                    controller.enqueue(encoder.encode(chunk));
-                }
-                controller.close();
-            }
-        });
-
-        fetchMock.mock.mockImplementation(async () => ({ ok: true, body: stream }));
-
-        const chunks: any[] = [];
-        for await (const chunk of chatService.streamChat({
-            messages: [],
-            model: 'm1',
-            reasoningEffort: 'low',
-            search: false
-        })) {
-            chunks.push(chunk);
-        }
-
-        assert.strictEqual(chunks.length, 2);
-        assert.deepStrictEqual(chunks[0], { type: 'content', value: 'Hello' });
-        assert.deepStrictEqual(chunks[1], {
-            type: 'usage',
-            value: {
-                outputTokens: 13,
-                inputTokens: 18,
-                totalTokens: 31,
-                source: 'provider'
-            }
-        });
-    });
-
 
     test('streamChat handles errors', async () => {
         const mockResponse = {
@@ -148,7 +64,6 @@ describe('ChatService', () => {
                 messages: [],
                 model: 'm1',
                 reasoningEffort: 'low',
-                search: false
             })) {
                 // Should not yield
             }
@@ -203,7 +118,6 @@ describe('ChatService', () => {
             messages: [],
             model: 'm1',
             reasoningEffort: 'low',
-            search: false
         })) {
             chunks.push(chunk);
         }

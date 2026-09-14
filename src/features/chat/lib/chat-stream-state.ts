@@ -1,6 +1,6 @@
 import type { ChatResponseStats } from './chat-view';
 
-export type StreamPhase = 'idle' | 'preparing' | 'requesting' | 'streaming' | 'persisting';
+type StreamPhase = 'idle' | 'preparing' | 'requesting' | 'streaming';
 
 export interface StreamState {
     phase: StreamPhase;
@@ -14,7 +14,6 @@ export type StreamAction =
     | { type: 'BEGIN'; messageId: string; thinking: boolean }
     | { type: 'STREAMING' }
     | { type: 'SET_THINKING'; thinking: boolean }
-    | { type: 'PERSISTING' }
     | { type: 'COMPLETE'; failed: boolean }
     | { type: 'CLEAR_FAILURE' }
     | { type: 'RESET' };
@@ -60,8 +59,6 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
             return state.phase === 'idle' ? state : { ...state, phase: 'streaming' };
         case 'SET_THINKING':
             return { ...state, isThinking: action.thinking };
-        case 'PERSISTING':
-            return state.phase === 'idle' ? state : { ...state, phase: 'persisting' };
         case 'COMPLETE':
             return { ...state, phase: 'idle', isThinking: false, activeUserMessageId: null, lastRequestFailed: action.failed };
         case 'CLEAR_FAILURE':

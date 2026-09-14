@@ -1,8 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type RefObject } from 'react';
-
-import { type ChatInputHandle } from '../components/chat-input/chat-input-types';
+import { useEffect, useRef } from 'react';
 import { claimPendingGenerationJob, completeGenerationJob } from './use-generation-jobs';
 import { type ChatViewMessage } from '../lib/chat-view';
 import { type ReasoningEffort } from '@/shared/core/types';
@@ -14,13 +12,11 @@ interface UsePendingGenerationParams {
     isLoading: boolean;
     isThinking: boolean;
     lastRequestFailed: boolean;
-    chatInputRef: RefObject<ChatInputHandle | null>;
     applyPendingReasoningEffort: (effort: ReasoningEffort) => void;
     generateResponse: (
         currentMessages: ChatViewMessage[],
         forcedModelId?: string,
-        forcedSystemPrompt?: string,
-        forceSearchMode?: boolean
+        forcedSystemPrompt?: string
     ) => Promise<boolean>;
 }
 
@@ -31,7 +27,6 @@ export function usePendingGeneration({
     isLoading,
     isThinking,
     lastRequestFailed,
-    chatInputRef,
     applyPendingReasoningEffort,
     generateResponse,
 }: UsePendingGenerationParams) {
@@ -74,8 +69,6 @@ export function usePendingGeneration({
             if (claimedJob.reasoningEffort) {
                 applyPendingReasoningEffort(claimedJob.reasoningEffort);
             }
-            chatInputRef.current?.setMode(claimedJob.mode);
-
             let succeeded = false;
             try {
                 const forcedModelId = claimedJob.modelId || lastMessage.model_id || undefined;
@@ -83,8 +76,7 @@ export function usePendingGeneration({
                 succeeded = await generateResponse(
                     messages,
                     forcedModelId,
-                    forcedSystemPrompt,
-                    claimedJob.useSearch
+                    forcedSystemPrompt
                 );
             } catch (error) {
                 console.error('Failed during pending generation:', error);
@@ -116,7 +108,6 @@ export function usePendingGeneration({
         generateResponse,
         chatId,
         lastRequestFailed,
-        chatInputRef,
         applyPendingReasoningEffort,
     ]);
 }

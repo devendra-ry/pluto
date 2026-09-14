@@ -37,9 +37,6 @@ export const AVAILABLE_MODELS: ModelConfig[] = models as unknown as ModelConfig[
 
 export const DEFAULT_MODEL = 'gemini-3.7-flash';
 export const DEFAULT_REASONING_EFFORT = 'high';
-// No models currently expose Google Search grounding.
-export const SEARCH_ENABLED_MODELS = [] as const;
-
 // Suggested prompts for new chat
 export const SUGGESTED_PROMPTS = [
     "How does AI work?",

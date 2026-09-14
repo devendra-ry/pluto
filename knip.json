@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "tests/register-loader.mjs",
+    "tests/loader.mjs",
+    "src/**/*.test.ts",
+    "tests/**/*.test.ts"
+  ],
+  "ignore": [
+    "tests/mocks/server-only.js",
+    "src/shared/lib/supabase/database.types.ts"
+  ],
+  "ignoreDependencies": [
+    "tsx"
+  ]
+}

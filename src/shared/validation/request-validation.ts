@@ -11,5 +11,3 @@ export const UploadCleanupRequestSchema = z.object({
     threadId: ThreadIdSchema,
     paths: z.array(z.string().min(1).max(MAX_ATTACHMENT_PATH_CHARS)).max(MAX_CLEANUP_PATHS).optional(),
 });
-
-export type UploadCleanupRequest = z.infer<typeof UploadCleanupRequestSchema>;

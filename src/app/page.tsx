@@ -6,7 +6,7 @@ import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSys
 import { addMessage } from '@/features/messages';
 import { enqueueGenerationJob } from '@/features/chat';
 import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT } from '@/shared/core/constants';
-import { ChatInput, type ChatInputHandle, type ChatSubmitOptions } from '@/features/chat';
+import { ChatInput, type ChatInputHandle } from '@/features/chat';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -131,11 +131,9 @@ export default function HomePage() {
   const handleSend = async (
     value: string,
     attachments: Attachment[],
-    options: ChatSubmitOptions
   ) => {
     if (!value.trim() && attachments.length === 0) return false;
     const effectiveModel = modelRef.current;
-    const isSearchMode = options.mode === 'search';
 
     setIsLoading(true);
     try {
@@ -149,9 +147,7 @@ export default function HomePage() {
       await enqueueGenerationJob({
         threadId,
         userMessageId: userMessage.id,
-        mode: options.mode,
         modelId: effectiveModel,
-        useSearch: isSearchMode,
         reasoningEffort: reasoningEffortRef.current,
         systemPrompt: systemPrompt.trim().length > 0
           ? systemPrompt.trim()
