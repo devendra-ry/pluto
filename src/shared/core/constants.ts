@@ -35,7 +35,7 @@ export const CAPABILITY_INFO: Record<Capability, { label: string; icon: string }
 
 export const AVAILABLE_MODELS: ModelConfig[] = models as unknown as ModelConfig[];
 
-export const DEFAULT_MODEL = 'gemini-3.7-flash';
+export const DEFAULT_MODEL = 'gemini-3.8-flash';
 export const DEFAULT_REASONING_EFFORT = 'high';
 // Suggested prompts for new chat
 export const SUGGESTED_PROMPTS = [
