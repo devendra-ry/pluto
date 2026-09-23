@@ -136,6 +136,7 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
         isLoading,
         isThinking,
         lastRequestFailed,
+        showToast,
         applyPendingReasoningEffort,
         generateResponse,
     });

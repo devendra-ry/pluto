@@ -7,6 +7,49 @@ import { logModelLimits, resolveOutputTokenCap } from '@/server/providers/limits
 import type { RequestTokenEstimates } from '@/server/providers/provider-types';
 import type { ReasoningEffort } from '@/shared/core/types';
 import { sharedTextEncoder } from '@/shared/lib/text-encoder';
+import { logger } from '@/server/logging/logger';
+
+const TRANSIENT_RETRY_DELAYS_MS = [500, 1500];
+
+export function isTransientProviderError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const { code, status } = error as { code?: unknown; status?: unknown };
+    return code === 429 || code === 503 || status === 429 || status === 503;
+}
+
+function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const onAbort = () => {
+            clearTimeout(timer);
+            reject(new DOMException('Aborted', 'AbortError'));
+        };
+        const timer = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, delayMs);
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener('abort', onAbort, { once: true });
+    });
+}
+
+export async function retryTransientProviderRequest<T>(
+    request: () => Promise<T>,
+    signal?: AbortSignal,
+    retryDelaysMs: readonly number[] = TRANSIENT_RETRY_DELAYS_MS,
+): Promise<T> {
+    for (let attempt = 0; ; attempt += 1) {
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+        try {
+            return await request();
+        } catch (error) {
+            if (!isTransientProviderError(error) || attempt >= retryDelaysMs.length || signal?.aborted) {
+                throw error;
+            }
+            logger.warn('[chat] provider temporarily unavailable; retrying', { attempt: attempt + 1 });
+            await waitForRetry(retryDelaysMs[attempt], signal);
+        }
+    }
+}
 
 function toNonNegativeInt(value: unknown): number | undefined {
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
@@ -95,7 +138,10 @@ export async function getGoogleStream(
         config.systemInstruction = systemPrompt.trim();
     }
 
-    const response = await ai.models.generateContentStream({ model, config, contents });
+    const response = await retryTransientProviderRequest(
+        () => ai.models.generateContentStream({ model, config, contents }),
+        signal,
+    );
     return new ReadableStream({
         async start(controller) {
             try {

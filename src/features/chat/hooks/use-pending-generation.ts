@@ -12,6 +12,7 @@ interface UsePendingGenerationParams {
     isLoading: boolean;
     isThinking: boolean;
     lastRequestFailed: boolean;
+    showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
     applyPendingReasoningEffort: (effort: ReasoningEffort) => void;
     generateResponse: (
         currentMessages: ChatViewMessage[],
@@ -27,6 +28,7 @@ export function usePendingGeneration({
     isLoading,
     isThinking,
     lastRequestFailed,
+    showToast,
     applyPendingReasoningEffort,
     generateResponse,
 }: UsePendingGenerationParams) {
@@ -61,6 +63,7 @@ export function usePendingGeneration({
                     return await claimPendingGenerationJob(chatId, lastMessage.id);
                 } catch (error) {
                     console.error('Failed to claim generation job:', error);
+                    showToast('Could not start the response. Refresh this chat to retry.', 'error');
                     return null;
                 }
             })();
@@ -109,6 +112,7 @@ export function usePendingGeneration({
         generateResponse,
         chatId,
         lastRequestFailed,
+        showToast,
         applyPendingReasoningEffort,
     ]);
 }

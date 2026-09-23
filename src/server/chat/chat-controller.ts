@@ -15,6 +15,7 @@ import {
 import { AVAILABLE_MODELS } from '@/shared/core/constants';
 import { resolveModelLimits } from '@/server/providers/model-limits';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
+import { isTransientProviderError } from '@/server/providers/chat-streams';
 import { ChatRequestSchema } from '@/shared/core/types';
 import {
     buildSseReplayResponse,
@@ -169,17 +170,24 @@ export async function handleChatRequest(
 
             const finishGenerationJob = async (status: 'completed' | 'failed', error?: string) => {
                 if (!requestUserMessageId) return;
-                const { error: jobError } = await supabase
+                const { data: jobs, error: lookupError } = await supabase
                     .from('generation_jobs')
-                    .update({
-                        status,
-                        error: status === 'failed' ? (error ?? 'Generation failed') : null,
-                        claim_expires_at: null,
-                        updated_at: new Date().toISOString(),
-                    })
+                    .select('id')
                     .eq('user_id', user.id)
                     .eq('user_message_id', requestUserMessageId)
-                    .in('status', ['pending', 'claimed']);
+                    .in('status', ['pending', 'claimed'])
+                    .limit(1);
+                if (lookupError) {
+                    if (IS_DEV) logger.warn('[chat] failed to find generation job', { error: lookupError });
+                    return;
+                }
+                const jobId = jobs?.[0]?.id;
+                if (!jobId) return;
+                const { error: jobError } = await supabase.rpc('complete_generation_job', {
+                    p_job_id: jobId,
+                    p_status: status,
+                    p_error: status === 'failed' ? (error ?? 'Generation failed') : null,
+                });
                 if (jobError && IS_DEV) {
                     logger.warn('[chat] failed to finalize generation job', { error: jobError });
                 }
@@ -443,9 +451,15 @@ export async function handleChatRequest(
                 if (!signal.aborted) {
                     await finishGenerationJob('failed', error instanceof Error ? error.message : 'Generation failed');
                     logger.error('Chat API error:', error);
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: GENERIC_CHAT_ERROR_MESSAGE })}\n\n`);
+                    const providerUnavailable = isTransientProviderError(error);
+                    const message = providerUnavailable
+                        ? 'The selected model is busy right now. Please retry or choose another model.'
+                        : GENERIC_CHAT_ERROR_MESSAGE;
+                    safeEnqueue(controller, `data: ${JSON.stringify({ error: message })}\n\n`);
                     safeClose(controller);
-                    await recordAbuseSignal(user.id, 'chat', 'stream-failure');
+                    if (!providerUnavailable) {
+                        await recordAbuseSignal(user.id, 'chat', 'stream-failure');
+                    }
                 }
                 if (signal.aborted && !generationCompleted && requestUserMessageId) {
                     await finishGenerationJob('failed', 'Generation was interrupted');
