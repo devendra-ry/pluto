@@ -1,4 +1,4 @@
-import { sanitizeThreadTitle } from './sanitize-thread-title';
+import { sanitizeThreadTitle } from './thread-model';
 import type { ChatViewMessage } from '@/shared/contracts/chat';
 import type { Json } from '@/shared/lib/supabase/database.types';
 

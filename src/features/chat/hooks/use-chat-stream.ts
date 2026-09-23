@@ -15,7 +15,8 @@ import { updateThreadTitleIfNewChat } from '@/features/threads';
 import { scheduleFrame } from '@/shared/lib/animation-frame';
 import { chatService } from '../lib/chat-service';
 import { AVAILABLE_MODELS } from '@/shared/core/constants';
-import { type ChatResponseStats, type ChatViewMessage } from '../lib/chat-view';
+import type { ChatResponseStats } from '@/shared/core/types';
+import type { ChatViewMessage } from '@/shared/contracts/chat';
 import { sanitizeThreadTitle } from '@/features/threads';
 import { type ReasoningEffort } from '@/shared/core/types';
 

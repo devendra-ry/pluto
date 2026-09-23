@@ -3,7 +3,7 @@
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react';
 
 import { deleteMessagesByIds, getThreadMessages, type RefreshMessagesResult } from '@/features/messages';
-import { type ChatViewMessage } from '../lib/chat-view';
+import type { ChatViewMessage } from '@/shared/contracts/chat';
 
 type ToastType = 'success' | 'error' | 'info';
 

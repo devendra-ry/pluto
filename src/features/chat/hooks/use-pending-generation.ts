@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { claimPendingGenerationJob, completeGenerationJob } from './use-generation-jobs';
-import { type ChatViewMessage } from '../lib/chat-view';
+import type { ChatViewMessage } from '@/shared/contracts/chat';
 import { type ReasoningEffort } from '@/shared/core/types';
 
 interface UsePendingGenerationParams {
@@ -30,12 +30,15 @@ export function usePendingGeneration({
     applyPendingReasoningEffort,
     generateResponse,
 }: UsePendingGenerationParams) {
-    const inFlightRef = useRef(false);
+    const inFlightRef = useRef<{ chatId: string; messageId: string } | null>(null);
 
     useEffect(() => {
-        if (inFlightRef.current) {
+        // React Strict Mode re-runs effects on mount. Keep the same claim
+        // across that replay so a second claim cannot steal the job.
+        if (inFlightRef.current?.chatId === chatId) {
             return;
         }
+        if (inFlightRef.current) inFlightRef.current = null;
         // Don't auto-retry if the last request failed or if canonical messages are still loading.
         if (lastRequestFailed || !messagesReady) {
             return;
@@ -49,8 +52,8 @@ export function usePendingGeneration({
             return;
         }
 
-        let cancelled = false;
-        inFlightRef.current = true;
+        const run = { chatId, messageId: lastMessage.id };
+        inFlightRef.current = run;
 
         void (async () => {
             const claimedJob = await (async () => {
@@ -62,7 +65,7 @@ export function usePendingGeneration({
                 }
             })();
 
-            if (cancelled || !claimedJob) {
+            if (inFlightRef.current !== run || !claimedJob) {
                 return;
             }
 
@@ -83,7 +86,7 @@ export function usePendingGeneration({
                 succeeded = false;
             }
 
-            if (cancelled) {
+            if (inFlightRef.current !== run) {
                 return;
             }
 
@@ -94,12 +97,10 @@ export function usePendingGeneration({
             );
         })()
             .finally(() => {
-                inFlightRef.current = false;
+                if (inFlightRef.current === run) {
+                    inFlightRef.current = null;
+                }
             });
-
-        return () => {
-            cancelled = true;
-        };
     }, [
         messages,
         messagesReady,

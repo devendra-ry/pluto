@@ -8,7 +8,7 @@ import { useToast } from '@/components/ui/toast';
 import { cn } from '@/shared/core/utils';
 import { type Attachment } from '@/shared/core/types';
 import { isLegacyAttachmentProxyUrl } from '@/features/attachments';
-import { type ChatResponseStats } from '../lib/chat-view';
+import type { ChatResponseStats } from '@/shared/core/types';
 import { ActionIcon } from './chat-action-icon';
 import { StreamingMarkdown } from './streaming-markdown';
 

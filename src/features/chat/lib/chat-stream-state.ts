@@ -1,4 +1,4 @@
-import type { ChatResponseStats } from './chat-view';
+import type { ChatResponseStats } from '@/shared/core/types';
 
 type StreamPhase = 'idle' | 'preparing' | 'requesting' | 'streaming';
 

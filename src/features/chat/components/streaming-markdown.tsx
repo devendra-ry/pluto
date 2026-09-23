@@ -6,7 +6,13 @@ import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { preprocessLaTeX } from '../lib/latex-utils';
+
+function preprocessLaTeX(text: string) {
+    if (!text) return text;
+    return text
+        .replace(/\\+\[([\s\S]*?)\\+\]/g, (_, equation) => `\n$$\n${equation}\n$$\n`)
+        .replace(/\\+\(([\s\S]*?)\\+\)/g, (_, equation) => `$${equation}$`);
+}
 
 const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex];
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
@@ -79,7 +85,7 @@ function StreamingMarkdownInner({
     const latestContentRef = useRef(content);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Always keep the ref in sync with the prop.
+    // The timer reads the latest committed content when it fires.
     useEffect(() => {
         latestContentRef.current = content;
     }, [content]);
@@ -105,14 +111,17 @@ function StreamingMarkdownInner({
             }, STREAMING_DEBOUNCE_MS);
         }
 
-        // Cleanup on unmount or when streaming stops.
+    }, [content, isStreaming]);
+
+    // A new chunk must not cancel the timer for the previous chunk.
+    useEffect(() => {
         return () => {
             if (timerRef.current !== null) {
                 clearTimeout(timerRef.current);
                 timerRef.current = null;
             }
         };
-    }, [content, isStreaming]);
+    }, []);
 
     if (!renderedContent) return null;
 

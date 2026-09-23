@@ -1,5 +1,5 @@
 import { cleanupThreadAttachments } from '@/features/uploads';
-import { sanitizeThreadTitle } from './sanitize-thread-title';
+import { sanitizeThreadTitle } from './thread-model';
 import { triggerThreadRefresh } from './thread-events';
 import { mapThreadRowToThread } from './thread-model';
 import type { Thread } from '@/shared/contracts/thread';

@@ -9,12 +9,15 @@ import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_TOTAL_ATTACHMENT_BYTES, isImageAttachm
 import { startUploadFileForThread } from '@/features/uploads';
 import { useToast } from '@/components/ui/toast';
 import { scheduleFrame } from '@/shared/lib/animation-frame';
-import { LocalAttachmentItem, ChatInputHandle } from './chat-input/chat-input-types';
-import { AttachmentList } from './chat-input/attachment-list';
-import { ReasoningSelector } from './chat-input/reasoning-selector';
-import { SystemPromptSelector } from './chat-input/system-prompt-selector';
+import { AttachmentList, type LocalAttachmentItem } from './chat-input-attachments';
+import { ReasoningSelector, SystemPromptSelector } from './chat-input-settings';
 import { ModelSelector } from './model-selector';
 import { isFileAllowedForChatInput } from '../lib/chat-input-policy';
+
+export interface ChatInputHandle {
+    setValue: (value: string) => void;
+    focus: () => void;
+}
 
 interface ChatInputProps {
     initialValue?: string;

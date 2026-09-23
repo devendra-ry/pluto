@@ -1,7 +1,18 @@
 'use client';
 
 import { AlertCircle, Paperclip, RotateCcw, X } from 'lucide-react';
-import { LocalAttachmentItem } from './chat-input-types';
+import type { Attachment } from '@/shared/core/types';
+
+export type LocalAttachmentStatus = 'uploading' | 'uploaded' | 'failed';
+
+export interface LocalAttachmentItem {
+    localId: string;
+    file: File;
+    status: LocalAttachmentStatus;
+    progress: number;
+    attachment?: Attachment;
+    error?: string;
+}
 
 interface AttachmentListProps {
     items: LocalAttachmentItem[];
