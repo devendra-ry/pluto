@@ -407,7 +407,7 @@ export async function GET(req: Request) {
                     });
                 }
                 start = Math.max(totalSize - suffixLength, 0);
-            } else {
+            } else if (rawStart !== undefined) {
                 start = Number.parseInt(rawStart, 10);
                 if (!Number.isFinite(start) || start < 0) {
                     return new Response('Requested range not satisfiable', {

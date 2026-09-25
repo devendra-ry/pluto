@@ -58,7 +58,9 @@ export function streamReducer(state: StreamState, action: StreamAction): StreamS
         case 'STREAMING':
             return state.phase === 'idle' ? state : { ...state, phase: 'streaming' };
         case 'SET_THINKING':
-            return { ...state, isThinking: action.thinking };
+            return state.isThinking === action.thinking
+                ? state
+                : { ...state, isThinking: action.thinking };
         case 'COMPLETE':
             return { ...state, phase: 'idle', isThinking: false, activeUserMessageId: null, lastRequestFailed: action.failed };
         case 'CLEAR_FAILURE':

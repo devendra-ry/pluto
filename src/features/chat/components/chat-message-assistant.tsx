@@ -11,17 +11,18 @@ import { isLegacyAttachmentProxyUrl } from '@/features/attachments';
 import type { ChatResponseStats } from '@/shared/core/types';
 import { ActionIcon } from './chat-action-icon';
 import { StreamingMarkdown } from './streaming-markdown';
+import { useStreamedMessage } from './chat-stream-message-store';
 
 const MARKDOWN_COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = {
     pre: ({ children }) => (
-        <pre className="bg-[#1a1520]/80 backdrop-blur-sm rounded-xl p-5 overflow-x-auto my-4 border border-[#2d2235]/60 scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
+        <pre className="bg-plum-900/80 backdrop-blur-sm rounded-xl p-5 overflow-x-auto my-4 border border-plum-700/60 scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
             {children}
         </pre>
     ),
     code: ({ className, children, ...props }) => {
         const isInline = !className;
         return isInline ? (
-            <code className="bg-[#2a2035]/60 px-1.5 py-0.5 rounded-md text-[15px] text-pink-300 font-mono border border-white/5" {...props}>
+            <code className="bg-plum-700/60 px-1.5 py-0.5 rounded-md text-[15px] text-brand-300 font-mono border border-white/5" {...props}>
                 {children}
             </code>
         ) : (
@@ -64,26 +65,30 @@ export function AssistantMessage({
     const [reasoningExpanded, setReasoningExpanded] = useState(false);
     const [copied, setCopied] = useState(false);
     const { showToast } = useToast();
+    const streamedMessage = useStreamedMessage(id);
+    const renderedContent = streamedMessage.content || content;
+    const renderedReasoning = streamedMessage.reasoning || reasoning;
+    const renderedStats = streamedMessage.stats ?? stats;
 
     const handleCopy = async () => {
-        await navigator.clipboard.writeText(content);
+        await navigator.clipboard.writeText(renderedContent);
         setCopied(true);
         showToast('Copied to clipboard!', 'success');
         setTimeout(() => setCopied(false), 2000);
     };
 
     // Don't return null if streaming (loading) - show loading indicator
-    if (!content && !reasoning && attachments.length === 0 && !isThinking && !isStreaming) return null;
+    if (!renderedContent && !renderedReasoning && attachments.length === 0 && !isThinking && !isStreaming) return null;
 
     // Show loading indicator for non-thinking models when streaming but no content yet
-    const showLoadingDots = isStreaming && !content && !reasoning && attachments.length === 0 && !isThinking;
-    const formattedStats = stats
+    const showLoadingDots = isStreaming && !renderedContent && !renderedReasoning && attachments.length === 0 && !isThinking;
+    const formattedStats = renderedStats
         ? {
-            outputTokens: Math.max(0, Math.round(stats.outputTokens)),
-            seconds: Number(stats.seconds.toFixed(1)),
-            tokensPerSecond: Number(stats.tokensPerSecond.toFixed(1)),
-            ttfbSeconds: typeof stats.ttfbSeconds === 'number' ? Number(stats.ttfbSeconds.toFixed(1)) : null,
-            source: stats.source ?? 'estimated',
+            outputTokens: Math.max(0, Math.round(renderedStats.outputTokens)),
+            seconds: Number(renderedStats.seconds.toFixed(1)),
+            tokensPerSecond: Number(renderedStats.tokensPerSecond.toFixed(1)),
+            ttfbSeconds: typeof renderedStats.ttfbSeconds === 'number' ? Number(renderedStats.ttfbSeconds.toFixed(1)) : null,
+            source: renderedStats.source ?? 'estimated',
         }
         : null;
 
@@ -100,13 +105,13 @@ export function AssistantMessage({
                 )}
 
                 {/* Reasoning section (collapsible) */}
-                {(reasoning || isThinking) && (
+                {(renderedReasoning || isThinking) && (
                     <div className="mb-4">
                         <div
                             className={cn(
                                 "rounded-xl transition-all duration-300 ease-in-out overflow-hidden border",
                                 reasoningExpanded
-                                    ? "bg-[#16121a] border-white/5 shadow-xl"
+                                    ? "bg-plum-900 border-white/5 shadow-xl"
                                     : "bg-transparent border-transparent"
                             )}
                         >
@@ -119,7 +124,7 @@ export function AssistantMessage({
                             >
                                 <Brain className={cn(
                                     "h-4 w-4 shrink-0 transition-colors",
-                                    reasoningExpanded ? "text-pink-400/80" : "text-zinc-500"
+                                    reasoningExpanded ? "text-brand-400/80" : "text-zinc-500"
                                 )} />
                                 <span className="text-sm font-medium tracking-tight text-zinc-400">Reasoning</span>
                                 <ChevronDown className={cn(
@@ -137,9 +142,9 @@ export function AssistantMessage({
                             >
                                 <div className="overflow-hidden">
                                     <div className="p-4 pt-1">
-                                        {reasoning ? (
+                                        {renderedReasoning ? (
                                             <StreamingMarkdown
-                                                content={reasoning}
+                                                content={renderedReasoning}
                                                 isStreaming={isStreaming}
                                                 className="prose prose-invert prose-base max-w-none
                                                     prose-p:text-zinc-400 prose-p:leading-relaxed prose-p:text-[15px] prose-p:my-3
@@ -165,9 +170,9 @@ export function AssistantMessage({
                 )}
 
                 {/* Main content */}
-                {content && (
+                {renderedContent && (
                     <StreamingMarkdown
-                        content={content}
+                        content={renderedContent}
                         isStreaming={isStreaming}
                         components={MARKDOWN_COMPONENTS}
                         className="prose prose-invert prose-base max-w-none
@@ -175,11 +180,11 @@ export function AssistantMessage({
                             prose-headings:text-zinc-100 prose-headings:font-bold
                             prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
                             prose-li:text-base prose-li:text-zinc-200
-                            prose-strong:text-zinc-100 prose-a:text-pink-400
-                            hover:prose-a:text-pink-300 prose-a:no-underline
-                            prose-code:text-pink-300/90 prose-pre:bg-[#2a2035]/60
+                            prose-strong:text-zinc-100 prose-a:text-brand-400
+                            hover:prose-a:text-brand-300 prose-a:no-underline
+                            prose-code:text-brand-300/90 prose-pre:bg-plum-700/60
                             prose-pre:border prose-pre:border-white/5
-                            prose-blockquote:text-zinc-400 prose-blockquote:border-l-pink-500/50
+                            prose-blockquote:text-zinc-400 prose-blockquote:border-l-brand-500/50
                             prose-table:text-base prose-th:text-zinc-100 prose-td:text-zinc-300
                             [&_.katex]:text-base [&_.katex-display]:text-lg
                             [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden
@@ -188,7 +193,7 @@ export function AssistantMessage({
                 )}
 
                 {attachments.length > 0 && (
-                    <div className={cn("space-y-2", content ? "mt-3" : "")}>
+                    <div className={cn("space-y-2", renderedContent ? "mt-3" : "")}>
                         {attachments.map((attachment) => {
                             const isImage = attachment.mimeType.startsWith('image/');
                             return (
@@ -243,7 +248,7 @@ export function AssistantMessage({
 
 
                 {/* Action icons below AI message */}
-                {!isStreaming && content && (
+                {!isStreaming && renderedContent && (
                     <div className="flex items-center gap-1 mt-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity -ml-2">
                         {onRetry && (
                             <ActionIcon

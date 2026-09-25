@@ -13,7 +13,9 @@ export interface GroupedThreads {
 
 // Group threads by date categories
 export function groupThreadsByDate(threads: Thread[]): GroupedThreads[] {
-    const groups: Record<string, Thread[]> = {
+    const order = ['Today', 'Yesterday', 'Previous 7 Days', 'This Month', 'Older'] as const;
+    type GroupLabel = (typeof order)[number];
+    const groups: Record<GroupLabel, Thread[]> = {
         Today: [],
         Yesterday: [],
         'Previous 7 Days': [],
@@ -24,21 +26,22 @@ export function groupThreadsByDate(threads: Thread[]): GroupedThreads[] {
     for (const thread of threads) {
         const date = new Date(thread.updated_at);
 
+        let label: GroupLabel;
         if (isToday(date)) {
-            groups['Today'].push(thread);
+            label = 'Today';
         } else if (isYesterday(date)) {
-            groups['Yesterday'].push(thread);
+            label = 'Yesterday';
         } else if (isThisWeek(date)) {
-            groups['Previous 7 Days'].push(thread);
+            label = 'Previous 7 Days';
         } else if (isThisMonth(date)) {
-            groups['This Month'].push(thread);
+            label = 'This Month';
         } else {
-            groups['Older'].push(thread);
+            label = 'Older';
         }
+        groups[label].push(thread);
     }
 
     // Return only non-empty groups in order
-    const order = ['Today', 'Yesterday', 'Previous 7 Days', 'This Month', 'Older'];
     return order
         .filter((label) => groups[label].length > 0)
         .map((label) => ({ label, threads: groups[label] }));

@@ -12,7 +12,7 @@ test('decodes lines split across UTF-8 byte chunks', () => {
         ...decoder.finish(),
     ];
     assert.deepEqual(lines, ['data: {"content":"héllo"}', '']);
-    assert.equal(readSseDataLine(lines[0]), '{"content":"héllo"}');
+    assert.equal(readSseDataLine(lines[0] ?? ''), '{"content":"héllo"}');
 });
 
 test('accepts SSE data fields with or without a space', () => {

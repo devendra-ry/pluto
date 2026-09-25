@@ -18,14 +18,14 @@ export default function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen bg-[#0f0a12] flex flex-col items-center justify-center p-4">
+        <main className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
             <div className="flex flex-col items-center max-w-sm w-full space-y-8">
                 {/* Logo and Header */}
                 <div className="flex flex-col items-center space-y-4">
                     <motion.div
                         initial={{ scale: 0.9, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
-                        className="w-16 h-16 bg-[#e91e63] rounded-2xl flex items-center justify-center shadow-lg shadow-pink-500/20"
+                    className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary shadow-lg shadow-primary/20"
                     >
                         <MessageSquare className="w-10 h-10 text-white fill-current" />
                     </motion.div>
@@ -34,7 +34,7 @@ export default function LoginPage() {
                         initial={{ y: 10, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
                         transition={{ delay: 0.1 }}
-                        className="text-2xl font-bold text-white tracking-tight"
+                        className="text-2xl font-bold tracking-tight text-foreground"
                     >
                         Sign in to Pluto
                     </motion.h1>
@@ -45,12 +45,12 @@ export default function LoginPage() {
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ delay: 0.2 }}
-                    className="w-full bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-3xl p-8 shadow-2xl"
+                    className="w-full rounded-3xl border border-border bg-card p-8 shadow-2xl"
                 >
                     <Button
                         onClick={handleLogin}
                         variant="outline"
-                        className="w-full h-12 bg-transparent border-white/[0.1] hover:bg-white/[0.05] text-zinc-300 hover:text-white transition-all rounded-xl flex items-center justify-center gap-3 group"
+                        className="h-12 w-full justify-center gap-3 rounded-xl border-input bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground group"
                     >
                         <svg className="w-5 h-5 transition-transform group-hover:scale-110" viewBox="0 0 24 24">
                             <path
@@ -81,11 +81,11 @@ export default function LoginPage() {
                     transition={{ delay: 0.3 }}
                     className="text-center"
                 >
-                    <p className="text-zinc-600 text-sm">
+                    <p className="text-sm text-muted-foreground">
                         Terms of Service and Privacy Policy
                     </p>
                 </motion.div>
             </div>
-        </div>
+        </main>
     );
 }

@@ -78,7 +78,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     ].filter(Boolean).join(',');
 
     const uploadedAttachments = useMemo(
-        () => activeAttachmentItems.filter((item) => item.status === 'uploaded' && item.attachment).map((item) => item.attachment as Attachment),
+        () => activeAttachmentItems
+            .filter((item): item is Extract<LocalAttachmentItem, { status: 'uploaded' }> => item.status === 'uploaded')
+            .map((item) => item.attachment),
         [activeAttachmentItems]
     );
     const hasUploadingAttachments = activeAttachmentItems.some((item) => item.status === 'uploading');
@@ -113,11 +115,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
     const uploadLocalFile = useCallback(async (localId: string, file: File) => {
         updateItem(localId, (item) => ({
-            ...item,
+            localId: item.localId,
+            file: item.file,
             status: 'uploading',
             progress: 0,
-            error: undefined,
-            attachment: undefined,
         }));
 
         let targetThreadId = threadId ?? null;
@@ -127,7 +128,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'Failed to prepare upload thread';
                 updateItem(localId, (item) => ({
-                    ...item,
+                    localId: item.localId,
+                    file: item.file,
                     status: 'failed',
                     progress: 0,
                     error: message,
@@ -138,7 +140,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
         if (!targetThreadId) {
             updateItem(localId, (item) => ({
-                ...item,
+                localId: item.localId,
+                file: item.file,
                 status: 'failed',
                 progress: 0,
                 error: 'Thread is not ready for uploads',
@@ -148,23 +151,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
         try {
             const uploadTask = startUploadFileForThread(targetThreadId, file, (progress) => {
-                updateItem(localId, (item) => ({ ...item, progress }));
+                updateItem(localId, (item) => item.status === 'uploading' ? { ...item, progress } : item);
             });
             uploadTasksRef.current.set(localId, uploadTask.cancel);
 
             const attachment = await uploadTask.promise;
 
             updateItem(localId, (item) => ({
-                ...item,
+                localId: item.localId,
+                file: item.file,
                 status: 'uploaded',
                 progress: 100,
                 attachment,
-                error: undefined,
             }));
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Upload failed';
             updateItem(localId, (item) => ({
-                ...item,
+                localId: item.localId,
+                file: item.file,
                 status: 'failed',
                 progress: 0,
                 error: message,
@@ -373,9 +377,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     };
 
     return (
-        <div className="pb-4 px-4 pt-0 bg-[#1a1520]">
+        <div className="pb-4 px-4 pt-0 bg-plum-900">
             <div className="max-w-3xl mx-auto">
-                <div className="relative rounded-2xl bg-[#221c26] border border-[#302736]/60 shadow-xl transition-all duration-200">
+                <div className="relative rounded-2xl bg-plum-800 border border-plum-700/60 shadow-xl transition-all duration-200">
                     <input
                         ref={fileInputRef}
                         type="file"
@@ -392,7 +396,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         onKeyDown={handleKeyDown}
                         onPaste={handlePaste}
                         placeholder="Type your message here..."
-                        className="w-full px-5 pt-4 pb-3 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus:outline-none resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
+                        className="w-full px-5 pt-4 pb-3 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
                     />
 
                     <AttachmentList
@@ -420,27 +424,28 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
                             <SystemPromptSelector
                                 systemPrompt={systemPrompt}
-                                onSystemPromptChange={onSystemPromptChange}
+                                {...(onSystemPromptChange ? { onSystemPromptChange } : {})}
                             />
 
                             <div className="group/attach relative flex shrink-0 flex-col items-center">
                                 <Button
                                     variant="ghost"
                                     type="button"
+                                    aria-label={supportsAttachments ? 'Attach file' : 'Attachments require an attachment-capable model'}
                                     onClick={handleAttachClick}
                                     disabled={
                                         isLoading
                                         || !supportsAttachments
                                         || activeAttachmentItems.length >= MAX_ATTACHMENTS_PER_MESSAGE
                                     }
-                                    className="h-8 w-8 md:w-11 p-0 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all flex items-center justify-center"
+                                    className="h-8 w-8 md:w-11 p-0 text-brand-100 hover:text-white bg-plum-700/30 hover:bg-plum-700/50 border border-white/10 rounded-xl md:rounded-full transition-all flex items-center justify-center"
                                 >
                                     <Paperclip className="h-3.5 w-3.5 md:h-4 md:w-4" />
                                 </Button>
 
                                 <div className="absolute bottom-full mb-2 hidden group-hover/attach:block z-50 pointer-events-none">
-                                    <div className="bg-[#1a1520]/95 backdrop-blur-md text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
-                                        <span className="text-[#fce7ef]">
+                                    <div className="bg-plum-900/95 backdrop-blur-md text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
+                                        <span className="text-brand-100">
                                             {supportsAttachments
                                                 ? 'Attach file'
                                                 : 'Use an attachment-capable model to attach files'}
@@ -454,6 +459,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                             <Button
                                 type="button"
                                 size="icon"
+                                aria-label="Stop generating"
                                 onClick={onStop}
                                 className="shrink-0 h-8 w-8 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-all border border-red-500/20"
                             >
@@ -463,6 +469,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                             <Button
                                 type="button"
                                 size="icon"
+                                aria-label="Send message"
                                 onClick={() => void handleSubmit()}
                                 disabled={
                                     isLoading ||
@@ -470,7 +477,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                     hasFailedAttachments ||
                                     (!value.trim() && uploadedAttachments.length === 0)
                                 }
-                                className="shrink-0 h-8 w-8 rounded-lg bg-[#3a283e] hover:bg-[#4a354e] text-pink-300/80 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="shrink-0 h-8 w-8 rounded-lg bg-plum-600 hover:bg-plum-600 text-brand-300/80 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <ArrowUp className="h-4 w-4" />
                             </Button>

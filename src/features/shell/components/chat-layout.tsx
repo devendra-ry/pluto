@@ -25,7 +25,7 @@ export function ChatLayout({ children, initialUser }: { children: React.ReactNod
     }, []);
 
     return (
-        <div className="flex h-screen bg-[#1a1520]">
+        <div className="flex h-screen bg-plum-900">
             <SidebarClient isMobileSize={isMobile} initialUser={initialUser} />
             <main className="flex-1 overflow-hidden relative">
                 <ErrorBoundary

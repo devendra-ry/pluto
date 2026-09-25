@@ -2,6 +2,7 @@ import { type ChatMessage, type ReasoningEffort } from '@/shared/core/types';
 import { createIdempotencyKey } from '@/shared/lib/idempotency';
 import { sharedTextEncoder } from '@/shared/lib/text-encoder';
 import { readSseDataLine, SseLineDecoder } from '@/shared/streaming/sse-line-decoder';
+import { parseChatStreamEvent, parseChatStreamPayload } from '@/shared/contracts/chat-stream';
 
 /**
  * Extract a string-typed field value from a JSON string using indexOf,
@@ -44,14 +45,14 @@ function extractJsonStringField(json: string, field: string): string {
 interface ChatStreamParams {
     threadId?: string;
     userMessageId?: string;
-    messages: ChatMessage[];
+    messages?: ChatMessage[];
     model: string;
     reasoningEffort: ReasoningEffort;
     systemPrompt?: string;
     signal?: AbortSignal;
 }
 
-type StreamChunk =
+export type ChatServiceStreamChunk =
     | { type: 'content'; value: string }
     | { type: 'reasoning'; value: string }
     | { type: 'usage'; value: { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' } }
@@ -79,17 +80,9 @@ function parseUsageEvent(data: string): { outputTokens: number; inputTokens?: nu
     }
 
     try {
-        const parsed = JSON.parse(data) as Record<string, unknown>;
-        const normalizedUsage = (
-            parsed.meta === 'usage'
-            && parsed.usage
-            && typeof parsed.usage === 'object'
-        ) ? parsed.usage as Record<string, unknown> : null;
-
-        const usage = normalizedUsage
-            ?? ((parsed.usage && typeof parsed.usage === 'object') ? parsed.usage as Record<string, unknown> : null)
-            ?? ((parsed.usageMetadata && typeof parsed.usageMetadata === 'object') ? parsed.usageMetadata as Record<string, unknown> : null);
-        if (!usage) return null;
+        const parsed = parseChatStreamEvent(data);
+        if (!parsed || parsed.type !== 'usage') return null;
+        const usage = parsed.usage;
 
         const inputTokens =
             readNonNegativeInt(usage.inputTokens) ??
@@ -122,14 +115,13 @@ function parseUsageEvent(data: string): { outputTokens: number; inputTokens?: nu
 
 class ChatService {
     async *streamChat({
-        messages,
         model,
         threadId,
         userMessageId,
         reasoningEffort,
         systemPrompt,
         signal,
-    }: ChatStreamParams): AsyncGenerator<StreamChunk, void, unknown> {
+    }: ChatStreamParams): AsyncGenerator<ChatServiceStreamChunk, void, unknown> {
         const streamId = createIdempotencyKey('chat');
         let attempts = 0;
         let resumeByteOffset = 0;
@@ -145,20 +137,20 @@ class ChatService {
                 body: JSON.stringify({
                     threadId,
                     userMessageId,
-                    messages,
                     model,
                     reasoningEffort,
                     systemPrompt,
                 }),
-                signal,
+                ...(signal ? { signal } : {}),
             });
 
             if (!response.ok) {
                 let message = `Failed to get response (${response.status})`;
                 try {
-                    const payload = await response.json() as Record<string, unknown>;
-                    const errorText = typeof payload.error === 'string' ? payload.error : '';
-                    const detailsText = typeof payload.details === 'string' ? payload.details : '';
+                    const payload: unknown = await response.json();
+                    const parsed = parseChatStreamPayload(payload);
+                    const errorText = parsed?.type === 'error' ? parsed.message : '';
+                    const detailsText = parsed?.type === 'error' ? parsed.details ?? '' : '';
                     if (errorText) {
                         message = detailsText ? `${errorText}: ${detailsText}` : errorText;
                     }
@@ -173,7 +165,7 @@ class ChatService {
 
             const lineDecoder = new SseLineDecoder({
                 label: 'chat-service',
-                onWarning: IS_DEV ? (message) => console.warn(message) : undefined,
+                ...(IS_DEV ? { onWarning: (message: string) => console.warn(message) } : {}),
             });
 
             try {
@@ -204,10 +196,12 @@ class ChatService {
                         try {
                             // Fast path: check for error responses first (rare).
                             if (data.includes('"error"')) {
-                                const parsed = JSON.parse(data) as Record<string, unknown>;
-                                const streamError = typeof parsed.error === 'string' ? parsed.error.trim() : '';
+                                const parsed = parseChatStreamEvent(data);
+                                const streamError = parsed?.type === 'error'
+                                    ? parsed.message.trim()
+                                    : '';
                                 if (streamError) {
-                                    const streamDetails = typeof parsed.details === 'string' ? parsed.details.trim() : '';
+                                    const streamDetails = parsed?.type === 'error' ? parsed.details?.trim() ?? '' : '';
                                     const normalizedStreamError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
                                     throw new Error(`STREAM_ERROR:${normalizedStreamError}`);
                                 }

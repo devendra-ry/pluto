@@ -64,7 +64,9 @@ async function mapWithConcurrency<T, R>(
             if (current >= items.length) {
                 return;
             }
-            results[current] = await mapper(items[current], current);
+            const item = items[current];
+            if (item === undefined) return;
+            results[current] = await mapper(item, current);
         }
     }
 
@@ -228,7 +230,8 @@ export async function prepareMessageAttachments(
 
     for (const [messageIndex, entry] of attachmentsByMessage.entries()) {
         entry.sort((a, b) => a.attachmentIndex - b.attachmentIndex);
-        prepared[messageIndex].attachments = entry.map((item) => item.attachment);
+        const message = prepared[messageIndex];
+        if (message) message.attachments = entry.map((item) => item.attachment);
     }
 
     return prepared;

@@ -1,9 +1,9 @@
 import { test, describe, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert';
-import { chatService } from './chat-service';
+import { chatService, type ChatServiceStreamChunk } from './chat-service';
 
 describe('ChatService', () => {
-    let fetchMock: any;
+    let fetchMock: import('node:test').Mock<typeof globalThis.fetch>;
 
     beforeEach(() => {
         fetchMock = mock.method(global, 'fetch');
@@ -29,14 +29,11 @@ describe('ChatService', () => {
             }
         });
 
-        const mockResponse = {
-            ok: true,
-            body: stream
-        };
+        const mockResponse = new Response(stream, { status: 200 });
 
         fetchMock.mock.mockImplementation(async () => mockResponse);
 
-        const chunks: any[] = [];
+        const chunks: ChatServiceStreamChunk[] = [];
         for await (const chunk of chatService.streamChat({
             messages: [],
             model: 'm1',
@@ -51,11 +48,7 @@ describe('ChatService', () => {
     });
 
     test('streamChat handles errors', async () => {
-        const mockResponse = {
-            ok: false,
-            status: 500,
-            json: async () => ({ error: 'Internal Server Error' })
-        };
+        const mockResponse = Response.json({ error: 'Internal Server Error' }, { status: 500 });
 
         fetchMock.mock.mockImplementation(async () => mockResponse);
 
@@ -68,7 +61,8 @@ describe('ChatService', () => {
                 // Should not yield
             }
             assert.fail('Should have thrown error');
-        } catch (error: any) {
+        } catch (error: unknown) {
+            assert.ok(error instanceof Error);
             assert.strictEqual(error.message, 'Internal Server Error');
         }
     });
@@ -98,22 +92,22 @@ describe('ChatService', () => {
             }
         });
 
-        fetchMock.mock.mockImplementation(async (_url: string, init: any) => {
+        fetchMock.mock.mockImplementation(async (_url, init) => {
             callCount++;
             if (callCount === 1) {
-                return { ok: true, body: failingStream };
+                return new Response(failingStream, { status: 200 });
             }
             // Second call: verify the byte-offset header.
-            const resumeHeader = init?.headers?.['X-Chat-Resume-Offset'];
+            const resumeHeader = new Headers(init?.headers).get('X-Chat-Resume-Offset');
             assert.strictEqual(
                 resumeHeader,
                 String(firstChunkBytes.byteLength),
                 `Expected byte offset ${firstChunkBytes.byteLength} but got ${resumeHeader}`
             );
-            return { ok: true, body: resumeStream };
+            return new Response(resumeStream, { status: 200 });
         });
 
-        const chunks: any[] = [];
+        const chunks: ChatServiceStreamChunk[] = [];
         for await (const chunk of chatService.streamChat({
             messages: [],
             model: 'm1',

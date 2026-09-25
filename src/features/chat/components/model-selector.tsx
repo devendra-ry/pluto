@@ -3,6 +3,7 @@
 import { useState, useMemo, memo } from 'react';
 import { ProviderIcon, type ProviderIconName } from '@/components/provider-icon';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
     DropdownMenu,
@@ -167,21 +168,23 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                     side="top"
                     sideOffset={12}
                     collisionPadding={20}
-                    className="w-[calc(100vw-32px)] md:w-[580px] h-[80vh] md:h-[500px] p-0 bg-[#1a1520] border-[#2a2535]/80 shadow-2xl mb-2 rounded-xl overflow-hidden"
+                    className="w-[calc(100vw-32px)] md:w-[580px] h-[80vh] md:h-[500px] p-0 bg-plum-900 border-plum-700/80 shadow-2xl mb-2 rounded-xl overflow-hidden"
                 >
 
                     <div className="flex h-full">
                         {/* Provider Sidebar */}
-                        <div className="w-[52px] bg-[#14101a] border-r border-[#2a2535]/50 flex flex-col py-3 h-full rounded-l-xl">
+                        <div className="w-[52px] bg-plum-950 border-r border-plum-700/50 flex flex-col py-3 h-full rounded-l-xl">
                             {/* Fixed Top Actions */}
                             <div className="flex flex-col items-center gap-2 mb-1 shrink-0">
                                 <Tooltip delayDuration={0}>
                                     <TooltipTrigger asChild>
                                         <button
+                                            type="button"
+                                            aria-label="Show all models"
                                             onClick={() => setSelectedProvider('all')}
                                             className={cn(
                                                 'w-9 h-9 rounded-lg flex items-center justify-center transition-all',
-                                                selectedProvider === 'all' ? 'bg-[#2a2535] text-purple-400' : 'text-zinc-600 hover:text-zinc-400 hover:bg-[#1a1520]'
+                                                selectedProvider === 'all' ? 'bg-plum-700 text-brand-400' : 'text-zinc-600 hover:text-zinc-400 hover:bg-plum-900'
                                             )}
                                         >
                                             <Sparkles className={cn('h-5 w-5', selectedProvider === 'all' && 'fill-current')} />
@@ -193,10 +196,12 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                 <Tooltip delayDuration={0}>
                                     <TooltipTrigger asChild>
                                         <button
+                                            type="button"
+                                            aria-label="Show favorite models"
                                             onClick={() => setSelectedProvider(null)}
                                             className={cn(
                                                 'w-9 h-9 rounded-lg flex items-center justify-center transition-all',
-                                                selectedProvider === null ? 'bg-[#2a2535] text-yellow-500' : 'text-zinc-600 hover:text-zinc-400 hover:bg-[#1a1520]'
+                                                selectedProvider === null ? 'bg-plum-700 text-yellow-500' : 'text-zinc-600 hover:text-zinc-400 hover:bg-plum-900'
                                             )}
                                         >
                                             <Star className={cn('h-5 w-5', selectedProvider === null && 'fill-current')} />
@@ -206,7 +211,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                 </Tooltip>
                             </div>
 
-                            <div className="w-6 h-px bg-[#2a2535]/60 my-2 shrink-0 self-center" />
+                            <div className="w-6 h-px bg-plum-700/60 my-2 shrink-0 self-center" />
 
                             {/* Scrollable Provider List */}
                             <div className="flex-1 w-full min-h-0 overflow-y-auto scrollbar-none">
@@ -218,10 +223,12 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                             <Tooltip key={provider.id} delayDuration={0}>
                                                 <TooltipTrigger asChild>
                                                     <button
+                                                        type="button"
+                                                        aria-label={`Show ${provider.name} models`}
                                                         onClick={() => setSelectedProvider(provider.id)}
                                                         className={cn(
                                                             'w-9 h-9 rounded-lg flex items-center justify-center transition-all relative',
-                                                            isActive ? 'bg-[#2a2535] text-white' : 'text-zinc-600 hover:text-zinc-400 hover:bg-[#1a1520]'
+                                                            isActive ? 'bg-plum-700 text-white' : 'text-zinc-600 hover:text-zinc-400 hover:bg-plum-900'
                                                         )}
                                                     >
                                                         {isActive && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full" style={{ backgroundColor: provider.color }} />}
@@ -238,34 +245,34 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
 
                         {/* Main Content */}
                         <div className="flex-1 flex flex-col min-h-0 overflow-hidden rounded-r-xl">
-                            <div className="flex-none flex items-center gap-2 px-3 py-3 border-b border-[#2a2535]/50">
+                            <div className="flex-none flex items-center gap-2 px-3 py-3 border-b border-plum-700/50">
                                 <Search className="h-5 w-5 text-zinc-500 shrink-0" />
-                                <input
+                                <Input
                                     type="text"
                                     placeholder="Search models..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="flex-1 bg-transparent text-base text-zinc-300 placeholder:text-zinc-600 focus:outline-none"
+                                    className="h-auto flex-1 border-0 bg-transparent px-0 py-0 text-base text-zinc-300 shadow-none placeholder:text-zinc-600 focus-visible:outline-none"
                                 />
                                 <DropdownMenu open={showFilterMenu} onOpenChange={setShowFilterMenu}>
                                     <DropdownMenuTrigger asChild>
-                                        <button className={cn('p-1.5 rounded-md transition-colors', activeFilters.length > 0 ? 'text-purple-400 bg-purple-500/10' : 'text-zinc-500 hover:text-zinc-300 hover:bg-[#2a2535]/50')}>
+                                        <button type="button" aria-label="Filter models" className={cn('p-1.5 rounded-md transition-colors', activeFilters.length > 0 ? 'text-brand-400 bg-brand-500/10' : 'text-zinc-500 hover:text-zinc-300 hover:bg-plum-700/50')}>
                                             <Filter className="h-4 w-4" />
                                         </button>
                                     </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-52 bg-[#1a1520] border-[#2a2535]">
+                                    <DropdownMenuContent align="end" className="w-52 bg-plum-900 border-plum-700">
                                         {(Object.keys(CAPABILITY_INFO) as Capability[]).map((cap) => {
                                             const Icon = CAPABILITY_ICONS[cap];
                                             const isActive = activeFilters.includes(cap);
                                             return (
-                                                <DropdownMenuItem key={cap} onClick={() => toggleFilter(cap)} className={cn('flex items-center gap-3 py-2 cursor-pointer', isActive && 'bg-purple-500/10')}>
-                                                    <Icon className={cn('h-4 w-4', isActive ? 'text-purple-400' : 'text-zinc-500')} />
-                                                    <span className={isActive ? 'text-purple-300' : 'text-zinc-300'}>{CAPABILITY_INFO[cap].label}</span>
-                                                    {isActive && <Check className="h-3 w-3 ml-auto text-purple-400" />}
+                                                <DropdownMenuItem key={cap} onClick={() => toggleFilter(cap)} className={cn('flex items-center gap-3 py-2 cursor-pointer', isActive && 'bg-brand-500/10')}>
+                                                    <Icon className={cn('h-4 w-4', isActive ? 'text-brand-400' : 'text-zinc-500')} />
+                                                    <span className={isActive ? 'text-brand-300' : 'text-zinc-300'}>{CAPABILITY_INFO[cap].label}</span>
+                                                    {isActive && <Check className="h-3 w-3 ml-auto text-brand-400" />}
                                                 </DropdownMenuItem>
                                             );
                                         })}
-                                        <div className="border-t border-[#2a2535] mt-1 pt-1">
+                                        <div className="border-t border-plum-700 mt-1 pt-1">
                                             <DropdownMenuItem onClick={() => setActiveFilters([])} className="text-sm text-zinc-500 hover:text-zinc-300">Show combined results</DropdownMenuItem>
                                         </div>
                                     </DropdownMenuContent>
@@ -292,19 +299,21 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                                             handleModelSelect(model.id);
                                                         }
                                                     }}
-                                                    className={cn('w-full flex items-start gap-2 md:gap-3 px-3 md:px-4 py-3 transition-colors text-left group cursor-pointer outline-none focus-visible:bg-[#2a2040]', isSelected ? 'bg-[#2a2040]' : 'hover:bg-[#1f1a28]')}
+                                                    className={cn('w-full flex items-start gap-2 md:gap-3 px-3 md:px-4 py-3 transition-colors text-left group cursor-pointer outline-none focus-visible:bg-plum-700', isSelected ? 'bg-plum-700' : 'hover:bg-plum-800')}
 
                                                 >
                                                     {ProviderLogo ? (
-                                                        <ProviderLogo className={cn('h-4 w-4 mt-1 shrink-0', isSelected ? 'text-purple-400' : 'text-zinc-500')} />
+                                                        <ProviderLogo className={cn('h-4 w-4 mt-1 shrink-0', isSelected ? 'text-brand-400' : 'text-zinc-500')} />
                                                     ) : (
-                                                        <Sparkles className={cn('h-4 w-4 mt-1 shrink-0 pointer-events-none', isSelected ? 'text-purple-400' : 'text-zinc-500')} />
+                                                        <Sparkles className={cn('h-4 w-4 mt-1 shrink-0 pointer-events-none', isSelected ? 'text-brand-400' : 'text-zinc-500')} />
                                                     )}
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex items-center gap-2 min-w-0">
                                                             <span className="font-semibold text-zinc-100 text-base truncate">{model.name}</span>
 
                                                             <button
+                                                                type="button"
+                                                                aria-label={`${starredModelIds.includes(model.id) ? 'Remove' : 'Add'} ${model.name} ${starredModelIds.includes(model.id) ? 'from' : 'to'} favorites`}
                                                                 onClick={(e) => toggleStarred(e, model.id)}
                                                                 className="p-1 -m-1 hover:text-yellow-400 transition-colors"
                                                             >
@@ -326,7 +335,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                                             return (
                                                                 <Tooltip key={cap} delayDuration={0}>
                                                                     <TooltipTrigger asChild>
-                                                                        <div className="h-6 w-6 rounded-full bg-[#2a2535]/80 flex items-center justify-center group-hover:bg-[#3a3545] transition-colors">
+                                                                        <div className="h-6 w-6 rounded-full bg-plum-700/80 flex items-center justify-center group-hover:bg-plum-600 transition-colors">
                                                                             <Icon className="h-3 w-3 text-zinc-400" />
                                                                         </div>
                                                                     </TooltipTrigger>
@@ -336,7 +345,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                                         })}
                                                         <Tooltip delayDuration={0}>
                                                             <TooltipTrigger asChild>
-                                                                <button className="h-6 w-6 rounded-full bg-[#2a2535]/80 flex items-center justify-center hover:bg-[#3a3545]" onClick={(e) => e.stopPropagation()}>
+                                                                <button type="button" aria-label={`More information about ${model.name}`} className="h-6 w-6 rounded-full bg-plum-700/80 flex items-center justify-center hover:bg-plum-600" onClick={(e) => e.stopPropagation()}>
                                                                     <Info className="h-3 w-3 text-zinc-500" />
                                                                 </button>
                                                             </TooltipTrigger>
@@ -348,8 +357,8 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                         })
                                     )}
                                     {legacyModels.length > 0 && (
-                                        <div className="mt-2 border-t border-[#2a2535]/50">
-                                            <button onClick={() => setShowLegacy(!showLegacy)} className="w-full flex items-center gap-2 px-4 py-3 text-base text-zinc-500 hover:text-zinc-300 hover:bg-[#1f1a28] transition-colors">
+                                        <div className="mt-2 border-t border-plum-700/50">
+                                            <button onClick={() => setShowLegacy(!showLegacy)} className="w-full flex items-center gap-2 px-4 py-3 text-base text-zinc-500 hover:text-zinc-300 hover:bg-plum-800 transition-colors">
                                                 <Folder className="h-4 w-4" />
                                                 <span>{legacyModels.length} legacy models</span>
                                                 {showLegacy ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}

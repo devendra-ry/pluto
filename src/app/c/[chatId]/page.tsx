@@ -51,7 +51,7 @@ export default async function ChatPage({ params }: PageProps) {
 
     return (
         <HydrationBoundary state={dehydrate(queryClient)}>
-            <ChatPageClient chatId={chatId} initialThread={initialThread} />
+            <ChatPageClient chatId={chatId} {...(initialThread ? { initialThread } : {})} />
         </HydrationBoundary>
     );
 }

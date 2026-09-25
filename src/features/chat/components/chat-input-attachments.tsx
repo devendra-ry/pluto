@@ -3,16 +3,16 @@
 import { AlertCircle, Paperclip, RotateCcw, X } from 'lucide-react';
 import type { Attachment } from '@/shared/core/types';
 
-export type LocalAttachmentStatus = 'uploading' | 'uploaded' | 'failed';
-
-export interface LocalAttachmentItem {
+interface LocalAttachmentBase {
     localId: string;
     file: File;
-    status: LocalAttachmentStatus;
-    progress: number;
-    attachment?: Attachment;
-    error?: string;
 }
+
+export type LocalAttachmentItem =
+    | (LocalAttachmentBase & { status: 'uploading'; progress: number })
+    | (LocalAttachmentBase & { status: 'uploaded'; progress: 100; attachment: Attachment })
+    | (LocalAttachmentBase & { status: 'failed'; progress: 0; error: string });
+export type LocalAttachmentStatus = LocalAttachmentItem['status'];
 
 interface AttachmentListProps {
     items: LocalAttachmentItem[];
@@ -37,7 +37,7 @@ export function AttachmentList({ items, onRemove, onRetry }: AttachmentListProps
                 {items.map((item) => (
                     <div
                         key={item.localId}
-                        className="rounded-xl bg-[#2a2035]/60 border border-white/10 px-3 py-2"
+                        className="rounded-xl bg-plum-700/60 border border-white/10 px-3 py-2"
                     >
                         <div className="flex items-center gap-2">
                             {item.status === 'failed' ? (
@@ -73,7 +73,7 @@ export function AttachmentList({ items, onRemove, onRetry }: AttachmentListProps
                             <div className="mt-1.5">
                                 <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
                                     <div
-                                        className="h-full bg-pink-400/80 transition-all duration-200"
+                                        className="h-full bg-brand-400/80 transition-all duration-200"
                                         style={{ width: `${item.progress}%` }}
                                     />
                                 </div>

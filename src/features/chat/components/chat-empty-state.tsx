@@ -3,18 +3,18 @@
 import { BookOpen, Code, GraduationCap, Wand2, type LucideIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { CATEGORIES, SUGGESTED_PROMPTS } from '@/shared/core/constants';
+import { CATEGORIES, SUGGESTED_PROMPTS, type CategoryIconName } from '@/shared/core/constants';
 
 interface ChatEmptyStateProps {
     onPromptClick: (prompt: string) => void;
 }
 
-const ICON_MAP: Record<string, LucideIcon> = {
+const ICON_MAP = {
     Wand2,
     BookOpen,
     Code,
     GraduationCap,
-};
+} satisfies Record<CategoryIconName, LucideIcon>;
 
 export function ChatEmptyState({ onPromptClick }: ChatEmptyStateProps) {
     return (
@@ -31,7 +31,7 @@ export function ChatEmptyState({ onPromptClick }: ChatEmptyStateProps) {
                             key={cat.label}
                             variant="ghost"
                             onClick={() => onPromptClick(cat.prompt)}
-                            className="h-9 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-[15px]"
+                            className="h-9 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-plum-700 border border-plum-600 rounded-full text-[15px]"
                         >
                             <IconComponent className="h-4 w-4" />
                             {cat.label}
@@ -45,7 +45,7 @@ export function ChatEmptyState({ onPromptClick }: ChatEmptyStateProps) {
                     <button
                         key={i}
                         onClick={() => onPromptClick(prompt)}
-                        className="w-full text-left px-1 py-2 text-base text-pink-300/80 hover:text-pink-200 transition-colors"
+                        className="w-full text-left px-1 py-2 text-base text-brand-300/80 hover:text-brand-200 transition-colors"
                     >
                         {prompt}
                     </button>

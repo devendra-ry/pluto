@@ -174,6 +174,33 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+        start_chat_with_message: {
+        Args: {
+          p_attachments: Json
+          p_content: string
+          p_model: string
+          p_reasoning_effort: string | null
+          p_system_prompt: string | null
+          p_thread_id?: string | null
+        }
+        Returns: {
+          thread_id: string
+          user_message_id: string
+          }[]
+        }
+        edit_user_message: {
+          Args: {
+            p_attachments: Json
+            p_content: string
+            p_message_id: string
+            p_model_id: string
+            p_thread_id: string
+          }
+          Returns: {
+            deleted_message_ids: string[]
+            user_message_id: string
+          }[]
+        }
       claim_pending_generation_job: {
         Args: {
           p_lease_seconds?: number

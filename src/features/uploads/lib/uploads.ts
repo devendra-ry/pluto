@@ -1,14 +1,16 @@
 'use client';
 
-import { type Attachment } from '@/shared/core/types';
+import { AttachmentSchema, type Attachment } from '@/shared/core/types';
 import { createIdempotencyKey } from '@/shared/lib/idempotency';
+import { z } from 'zod';
+
+const UploadResponseSchema = z.object({ attachment: AttachmentSchema });
 
 function extractErrorMessage(payload: unknown, fallback: string) {
-    if (!payload || typeof payload !== 'object') return fallback;
-    const record = payload as Record<string, unknown>;
-    const error = record.error;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return fallback;
+    const error = 'error' in payload ? payload.error : undefined;
     if (typeof error === 'string' && error.trim()) return error;
-    const message = record.message;
+    const message = 'message' in payload ? payload.message : undefined;
     if (typeof message === 'string' && message.trim()) return message;
     return fallback;
 }
@@ -107,23 +109,24 @@ export function startUploadFileForThread(
         };
 
         uploadXhr.onload = () => {
-            const payload = uploadXhr?.response as {
-                attachment?: Attachment;
-                error?: string;
-                message?: string;
-            } | null;
-            if (!uploadXhr || uploadXhr.status < 200 || uploadXhr.status >= 300) {
+            if (!uploadXhr) {
+                rejectOnce(new Error(`Upload returned an invalid payload for "${file.name}"`));
+                return;
+            }
+            const payload: unknown = uploadXhr.response;
+            if (uploadXhr.status < 200 || uploadXhr.status >= 300) {
                 const fallback = `Failed to upload "${file.name}"`;
                 rejectOnce(new Error(extractErrorMessage(payload, fallback)));
                 return;
             }
-            if (!payload?.attachment) {
+            const parsedPayload = UploadResponseSchema.safeParse(payload);
+            if (!parsedPayload.success) {
                 rejectOnce(new Error(`Upload returned an invalid payload for "${file.name}"`));
                 return;
             }
 
             onProgress?.(100);
-            resolveOnce(payload.attachment);
+            resolveOnce(parsedPayload.data.attachment);
         };
 
         uploadXhr.send(uploadBody);

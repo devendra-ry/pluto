@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Image from 'next/image';
 import { Copy, RefreshCcw, SquarePen, GitBranch, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/shared/core/utils';
 import { type Attachment } from '@/shared/core/types';
@@ -60,10 +61,10 @@ export function UserMessage({
         <div className="flex flex-col items-end py-1 px-4 group">
             {isEditing ? (
                 <div className="w-full max-w-[90%] md:max-w-[75%] flex flex-col gap-2">
-                    <textarea
+                    <Textarea
                         value={editContent}
                         onChange={(e) => setEditContent(e.target.value)}
-                        className="w-full min-h-[80px] p-3 bg-[#2a2035] text-zinc-100 rounded-2xl border border-[#3a2a4a] focus:border-pink-500/50 focus:outline-none resize-none text-base"
+                        className="min-h-[80px] rounded-2xl bg-plum-700 p-3 text-base text-zinc-100 focus:border-primary/50 focus-visible:ring-primary/70 resize-none"
                         autoFocus
                     />
 
@@ -79,7 +80,7 @@ export function UserMessage({
                         <Button
                             size="sm"
                             onClick={handleSaveEdit}
-                            className="bg-pink-600 hover:bg-pink-500 text-white"
+                            className="bg-brand-600 hover:bg-brand-500 text-white"
                         >
                             Save & Resend
                         </Button>
@@ -87,7 +88,7 @@ export function UserMessage({
                 </div>
             ) : (
                 <>
-                    <div className="max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-2 bg-[#2a2035]/80 backdrop-blur-sm border border-white/5 text-zinc-100 shadow-lg">
+                    <div className="max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-2 bg-plum-700/80 backdrop-blur-sm border border-white/5 text-zinc-100 shadow-lg">
                         {content && (
                             <p className="whitespace-pre-wrap break-words text-base leading-relaxed">{content}</p>
                         )}

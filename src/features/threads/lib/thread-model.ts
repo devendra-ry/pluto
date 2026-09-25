@@ -2,6 +2,7 @@ import { DEFAULT_MODEL } from '@/shared/core/constants';
 import { toReasoningEffort } from '@/shared/core/types';
 import type { Thread } from '@/shared/contracts/thread';
 import type { Database } from '@/shared/lib/supabase/database.types';
+import { z } from 'zod';
 
 export const THREAD_SELECT_COLUMNS = 'id,title,model,reasoning_effort,system_prompt,is_pinned,created_at,updated_at,user_id';
 export const THREADS_PAGE_SIZE = 50;
@@ -30,7 +31,8 @@ export function upsertThreadSorted(threads: Thread[], nextThread: Thread): Threa
     const withoutNext = threads.filter((thread) => thread.id !== nextThread.id);
     let insertAt = withoutNext.length;
     for (let i = 0; i < withoutNext.length; i += 1) {
-        if (compareThreadsByUpdatedAtDesc(nextThread, withoutNext[i]) < 0) {
+        const thread = withoutNext[i];
+        if (thread && compareThreadsByUpdatedAtDesc(nextThread, thread) < 0) {
             insertAt = i;
             break;
         }
@@ -48,13 +50,14 @@ export function mergeThreadsSorted(existing: Thread[], incoming: Thread[]) {
 }
 
 export function mapThreadRowToThread(row: ThreadRow): Thread {
+    const reasoningEffort = toReasoningEffort(row.reasoning_effort);
     return {
         id: row.id,
         title: row.title ?? 'New Chat',
         model: row.model ?? DEFAULT_MODEL,
-        reasoning_effort: toReasoningEffort(row.reasoning_effort),
+        ...(reasoningEffort === undefined ? {} : { reasoning_effort: reasoningEffort }),
         system_prompt: row.system_prompt,
-        is_pinned: row.is_pinned ?? undefined,
+        ...(row.is_pinned === null ? {} : { is_pinned: row.is_pinned }),
         created_at: row.created_at,
         updated_at: row.updated_at,
         user_id: row.user_id,
@@ -62,8 +65,9 @@ export function mapThreadRowToThread(row: ThreadRow): Thread {
 }
 
 export function toThread(value: unknown): Thread | null {
-    if (!value || typeof value !== 'object') return null;
-    const record = value as Record<string, unknown>;
+    const parsedRecord = z.record(z.string(), z.unknown()).safeParse(value);
+    if (!parsedRecord.success) return null;
+    const record = parsedRecord.data;
     if (
         typeof record.id !== 'string'
         || typeof record.title !== 'string'
@@ -72,15 +76,17 @@ export function toThread(value: unknown): Thread | null {
         || typeof record.updated_at !== 'string'
     ) return null;
 
+    const reasoningEffort = toReasoningEffort(record.reasoning_effort);
+    const userId = typeof record.user_id === 'string' ? record.user_id : undefined;
     return {
         id: record.id,
         title: record.title,
         model: record.model,
-        reasoning_effort: toReasoningEffort(record.reasoning_effort),
+        ...(reasoningEffort === undefined ? {} : { reasoning_effort: reasoningEffort }),
         system_prompt: typeof record.system_prompt === 'string' ? record.system_prompt : null,
-        is_pinned: typeof record.is_pinned === 'boolean' ? record.is_pinned : undefined,
+        ...(typeof record.is_pinned === 'boolean' ? { is_pinned: record.is_pinned } : {}),
         created_at: record.created_at,
         updated_at: record.updated_at,
-        user_id: typeof record.user_id === 'string' ? record.user_id : undefined,
+        ...(userId === undefined ? {} : { user_id: userId }),
     };
 }

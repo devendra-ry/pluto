@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useCallback, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 
-import { deleteMessagesByIds, getThreadMessages, type RefreshMessagesResult } from '@/features/messages';
+import { deleteMessagesByIds } from '@/features/messages';
 import type { ChatViewMessage } from '@/shared/contracts/chat';
 
 type ToastType = 'success' | 'error' | 'info';
@@ -18,7 +18,6 @@ interface UseRetryLogicParams {
         forcedModelId?: string,
         forcedSystemPrompt?: string
     ) => Promise<boolean>;
-    refreshStoredMessages: () => Promise<RefreshMessagesResult>;
     locallyDeletedMessageIdsRef: RefObject<Set<string>>;
     confirmDestructiveDelete: (context: {
         action: 'retry';
@@ -33,13 +32,15 @@ export function useRetryLogic({
     setIsLoading,
     showToast,
     generateResponse,
-    refreshStoredMessages,
     locallyDeletedMessageIdsRef,
     confirmDestructiveDelete,
 }: UseRetryLogicParams) {
+    const messagesRef = useRef(messages);
+    messagesRef.current = messages;
+
     const handleRetry = useCallback(async (messageId: string) => {
         setIsLoading(true);
-        const localMessages = messages;
+        const localMessages = messagesRef.current;
         const clickedMessageIndex = localMessages.findIndex(m => m.id === messageId);
         if (clickedMessageIndex === -1) {
             setIsLoading(false);
@@ -48,28 +49,31 @@ export function useRetryLogic({
         let msgIndex = clickedMessageIndex;
 
         // If retrying an assistant message, find the preceding user message.
-        if (localMessages[msgIndex].role === 'assistant') {
+        const clickedMessage = localMessages[msgIndex];
+        if (!clickedMessage) {
+            setIsLoading(false);
+            return;
+        }
+        if (clickedMessage.role === 'assistant') {
             msgIndex = localMessages.slice(0, msgIndex).findLastIndex(m => m.role === 'user');
             if (msgIndex === -1) {
                 setIsLoading(false);
                 return;
             }
-        } else if (localMessages[msgIndex].role !== 'user') {
+        } else if (clickedMessage.role !== 'user') {
             setIsLoading(false);
             return;
         }
 
-        const anchorMessageId = localMessages[msgIndex].id;
+        const anchorMessage = localMessages[msgIndex];
+        if (!anchorMessage) {
+            setIsLoading(false);
+            return;
+        }
+        const anchorMessageId = anchorMessage.id;
+        const deleteIds = localMessages.slice(msgIndex + 1).map((message) => message.id);
+        const previousMessages = localMessages.slice(0, msgIndex + 1);
         try {
-            const canonicalMessages = await getThreadMessages(chatId);
-            const anchorDbIndex = canonicalMessages.findIndex((m) => m.id === anchorMessageId);
-            if (anchorDbIndex === -1) {
-                setIsLoading(false);
-                showToast('Retry failed to align with saved history. Refresh and try again.', 'error');
-                return;
-            }
-
-            const deleteIds = canonicalMessages.slice(anchorDbIndex + 1).map((m) => m.id);
             if (deleteIds.length > 0) {
                 const confirmed = await confirmDestructiveDelete({
                     action: 'retry',
@@ -83,41 +87,26 @@ export function useRetryLogic({
             if (deleteIds.length > 0) {
                 deleteIds.forEach((id) => locallyDeletedMessageIdsRef.current.add(id));
             }
+            setMessages(previousMessages);
             await deleteMessagesByIds(deleteIds, {
                 reason: 'retry',
                 anchorMessageId,
                 threadId: chatId,
             });
-            const previousMessages: ChatViewMessage[] = canonicalMessages.slice(0, anchorDbIndex + 1).map((m) => ({
-                id: m.id,
-                role: m.role,
-                content: m.content,
-                attachments: m.attachments ?? [],
-                reasoning: m.reasoning,
-                model_id: m.model_id,
-            }));
-
-            setMessages(previousMessages);
-            void (async () => {
-                const refreshResult = await refreshStoredMessages();
-                if (!refreshResult.ok) {
-                    showToast(refreshResult.error, 'error');
-                }
-            })();
             await generateResponse(previousMessages);
         } catch (error) {
             setIsLoading(false);
+            deleteIds.forEach((id) => locallyDeletedMessageIdsRef.current.delete(id));
+            setMessages(localMessages);
             console.error('Failed to retry message:', error);
             showToast('Failed to delete previous responses. Please try again.', 'error');
         }
     }, [
         setIsLoading,
-        messages,
         chatId,
         showToast,
         locallyDeletedMessageIdsRef,
         setMessages,
-        refreshStoredMessages,
         generateResponse,
         confirmDestructiveDelete,
     ]);

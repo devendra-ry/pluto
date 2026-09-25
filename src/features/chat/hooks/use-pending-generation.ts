@@ -50,7 +50,7 @@ export function usePendingGeneration({
         }
 
         const lastMessage = messages[messages.length - 1];
-        if (lastMessage.role !== 'user') {
+        if (!lastMessage || lastMessage.role !== 'user') {
             return;
         }
 

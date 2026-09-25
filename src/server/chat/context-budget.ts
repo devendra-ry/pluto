@@ -87,7 +87,7 @@ function resolveTrimOutputReserve(
 
 function findLastUserIndex(messages: ChatMessage[]) {
     for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === 'user') return i;
+        if (messages[i]?.role === 'user') return i;
     }
     return -1;
 }
@@ -124,7 +124,9 @@ export function trimMessagesToInputBudget(
     let usedTokens = 0;
     let startIndex = messages.length;
     for (let i = messages.length - 1; i >= 0; i--) {
-        const estimated = estimateMessageTokens(messages[i]);
+        const message = messages[i];
+        if (!message) continue;
+        const estimated = estimateMessageTokens(message);
         if (usedTokens + estimated > inputBudget && startIndex < messages.length) {
             break;
         }
@@ -135,8 +137,10 @@ export function trimMessagesToInputBudget(
     // Providers like Gemini reject a contents array whose first entry has
     // role 'model', so the kept window must begin on a user turn. Advance
     // the window start past any leading assistant messages.
-    while (startIndex < messages.length && messages[startIndex].role !== 'user') {
-        usedTokens -= estimateMessageTokens(messages[startIndex]);
+    while (startIndex < messages.length && messages[startIndex]?.role !== 'user') {
+        const message = messages[startIndex];
+        if (!message) break;
+        usedTokens -= estimateMessageTokens(message);
         startIndex += 1;
     }
 
@@ -150,7 +154,8 @@ export function trimMessagesToInputBudget(
             trimmedMessages = messages.slice(lastUserIndex);
             estimatedTokens = estimateConversationTokens(trimmedMessages);
         } else {
-            trimmedMessages = [messages[messages.length - 1]];
+            const lastMessage = messages.at(-1);
+            trimmedMessages = lastMessage ? [lastMessage] : [];
             estimatedTokens = estimateConversationTokens(trimmedMessages);
         }
     }

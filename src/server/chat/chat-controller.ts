@@ -16,7 +16,14 @@ import { AVAILABLE_MODELS } from '@/shared/core/constants';
 import { resolveModelLimits } from '@/server/providers/model-limits';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
 import { isTransientProviderError } from '@/server/providers/chat-streams';
-import { ChatRequestSchema } from '@/shared/core/types';
+import { ChatRequestSchema, type ChatMessage } from '@/shared/core/types';
+import { MESSAGE_SELECT_COLUMNS, mapMessageRowToMessage } from '@/features/messages/lib/message-helpers';
+import {
+    MAX_CHAT_MESSAGES,
+    MAX_CHAT_REQUEST_ATTACHMENTS,
+    MAX_CHAT_REQUEST_TEXT_CHARS,
+} from '@/shared/validation/request-limits';
+import { parseChatStreamEvent, serializeChatStreamEvent } from '@/shared/contracts/chat-stream';
 import {
     buildSseReplayResponse,
     getCachedChatStreamEvents,
@@ -90,6 +97,9 @@ export async function handleChatRequest(
     req: Request,
     { user, supabase }: AuthenticatedContext
 ): Promise<Response> {
+    const requestStartedAt = performance.now();
+    const timing: Record<string, number> = {};
+    let modelForMetrics = 'unknown';
     const signal = req.signal;
     let streamClosed = false;
     const streamId = readChatStreamId(req);
@@ -106,7 +116,7 @@ export async function handleChatRequest(
             // end here would make the client persist a truncated response.
             if (cached.events[cached.events.length - 1] !== '[DONE]') {
                 return new Response(
-                    JSON.stringify({ error: 'Unable to resume chat stream. Please retry the request.' }),
+                    serializeChatStreamEvent({ type: 'error', message: 'Unable to resume chat stream. Please retry the request.' }),
                     {
                         status: 409,
                         headers: { 'Content-Type': 'application/json' },
@@ -117,7 +127,7 @@ export async function handleChatRequest(
         }
         if (resumeOffset > 0) {
             return new Response(
-                JSON.stringify({ error: 'Unable to resume chat stream. Please retry the request.' }),
+                serializeChatStreamEvent({ type: 'error', message: 'Unable to resume chat stream. Please retry the request.' }),
                 {
                     status: 409,
                     headers: { 'Content-Type': 'application/json' },
@@ -127,7 +137,7 @@ export async function handleChatRequest(
         streamLockToken = await reserveChatStreamLock(user.id, streamId);
         if (!streamLockToken) {
             return new Response(
-                JSON.stringify({ error: 'A matching chat request is already in progress.' }),
+                serializeChatStreamEvent({ type: 'error', message: 'A matching chat request is already in progress.' }),
                 {
                     status: 409,
                     headers: { 'Content-Type': 'application/json' },
@@ -196,47 +206,30 @@ export async function handleChatRequest(
             if (signal.aborted) return;
 
             try {
+                const bodyParseStartedAt = performance.now();
                 let body: unknown;
                 try {
                     body = await parseJsonRequest(req);
                 } catch (error) {
                     const message = error instanceof ApiRequestError ? error.message : 'Invalid request';
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: message })}\n\n`);
+                    safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: message })}\n\n`);
                     safeClose(controller);
                     return;
                 }
                 const parseResult = ChatRequestSchema.safeParse(body);
                 if (!parseResult.success) {
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid request' })}\n\n`);
+                    safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: 'Invalid request' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
 
-                const { threadId, userMessageId, messages, model, reasoningEffort, systemPrompt } = parseResult.data;
+                const { threadId, userMessageId, model, reasoningEffort, systemPrompt } = parseResult.data;
+                modelForMetrics = model;
+                timing.bodyParseMs = performance.now() - bodyParseStartedAt;
                 requestUserMessageId = userMessageId;
-                const { data: ownedThread, error: threadError } = await supabase
-                    .from('threads')
-                    .select('id')
-                    .eq('id', threadId)
-                    .eq('user_id', user.id)
-                    .maybeSingle();
-                if (threadError || !ownedThread) {
-                    throw new ApiRequestError(403, 'Thread not found or access denied');
-                }
-                const { data: ownedUserMessage, error: userMessageError } = await supabase
-                    .from('messages')
-                    .select('id')
-                    .eq('id', userMessageId)
-                    .eq('thread_id', threadId)
-                    .eq('role', 'user')
-                    .eq('user_id', user.id)
-                    .maybeSingle();
-                if (userMessageError || !ownedUserMessage) {
-                    throw new ApiRequestError(403, 'Message not found or access denied');
-                }
                 const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
                 if (!modelConfig) {
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'Invalid model selection' })}\n\n`);
+                    safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: 'Invalid model selection' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
@@ -244,16 +237,76 @@ export async function handleChatRequest(
                 const normalizedSystemPrompt = systemPrompt?.trim() ?? '';
                 const chatProvider = resolveChatProvider(modelConfig);
 
-                const limits = await resolveModelLimits(model, modelConfig, signal);
+                // Reconstruct history from persisted rows. This avoids sending and
+                // validating a growing transcript in every browser request, and the
+                // same query validates thread and message ownership.
+                const historyStartedAt = performance.now();
+                const limitsStartedAt = performance.now();
+                const historyPromise = supabase
+                        .from('messages')
+                        .select(MESSAGE_SELECT_COLUMNS)
+                        .eq('thread_id', threadId)
+                        .eq('user_id', user.id)
+                        .is('deleted_at', null)
+                        .order('created_at', { ascending: false })
+                        .order('id', { ascending: false })
+                        .limit(MAX_CHAT_MESSAGES)
+                        .then((result) => {
+                            timing.historyLoadMs = performance.now() - historyStartedAt;
+                            return result;
+                        });
+                const limitsPromise = resolveModelLimits(model, modelConfig, signal).finally(() => {
+                    timing.modelLimitsMs = performance.now() - limitsStartedAt;
+                });
+                const [historyResult, limits] = await Promise.all([historyPromise, limitsPromise]);
+                if (historyResult.error) throw historyResult.error;
+
+                const storedMessages = (historyResult.data ?? [])
+                    .map(mapMessageRowToMessage)
+                    .reverse();
+                const userMessageIndex = storedMessages.findIndex(
+                    (message) => message.id === userMessageId && message.role === 'user'
+                );
+                if (userMessageIndex === -1) {
+                    throw new ApiRequestError(403, 'Message not found or access denied');
+                }
+                const historyThroughUserMessage = storedMessages.slice(0, userMessageIndex + 1);
+                let contextStartIndex = historyThroughUserMessage.length - 1;
+                let contextTextCharacters = 0;
+                let includedNewestMessage = false;
+                for (let index = historyThroughUserMessage.length - 1; index >= 0; index -= 1) {
+                    const message = historyThroughUserMessage[index];
+                    if (!message) continue;
+                    if (
+                        includedNewestMessage
+                        && contextTextCharacters + message.content.length > MAX_CHAT_REQUEST_TEXT_CHARS
+                    ) {
+                        break;
+                    }
+                    contextTextCharacters += message.content.length;
+                    contextStartIndex = index;
+                    includedNewestMessage = true;
+                }
+                const messages: ChatMessage[] = historyThroughUserMessage
+                    .slice(contextStartIndex)
+                    .map(({ role, content, attachments }) => ({ role, content, attachments }));
+
                 const systemPromptTokenEstimate = estimateSystemPromptTokens(normalizedSystemPrompt);
                 const systemPromptPlan = resolveOutputTokenPlan(limits, limits.maxOutputTokens, systemPromptTokenEstimate);
                 if (systemPromptPlan.remainingForOutput <= 0) {
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: 'System prompt is too long for the selected model context window.' })}\n\n`);
+                    safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: 'System prompt is too long for the selected model context window.' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
 
                 let trimmedContext = trimMessagesToInputBudget(messages, limits, 1, systemPromptTokenEstimate);
+                const trimmedAttachmentCount = trimmedContext.messages.reduce(
+                    (count, message) => count + (message.attachments?.length ?? 0),
+                    0
+                );
+                if (trimmedAttachmentCount > MAX_CHAT_REQUEST_ATTACHMENTS) {
+                    throw new ApiRequestError(400, 'Too many attachments in one request');
+                }
                 if (trimmedContext.trimmedCount > 0) {
                     logger.info(
                         `[chat] context-trimmed model=${model} source=${limits.source} trimmed=${trimmedContext.trimmedCount} ` +
@@ -274,6 +327,7 @@ export async function handleChatRequest(
                         throw new Error('Input is too long for selected model context window.');
                     }
 
+                    const attachmentStartedAt = performance.now();
                     const preparedMessages = await prepareMessageAttachments(
                         context.messages,
                         supabase,
@@ -281,6 +335,8 @@ export async function handleChatRequest(
                         modelConfig,
                         signal
                     );
+                    timing.attachmentPreparationMs = (timing.attachmentPreparationMs ?? 0)
+                        + performance.now() - attachmentStartedAt;
                     const estimatedInputTokens = estimatePreparedConversationTokens(preparedMessages);
                     const estimatedInputTokensWithSystemPrompt = estimatedInputTokens + systemPromptTokenEstimate;
                     const tokenEstimates = {
@@ -288,7 +344,8 @@ export async function handleChatRequest(
                         estimatedInputTokensWithSystemPrompt,
                     };
 
-                    return chatProvider.getStream({
+                    const providerStartedAt = performance.now();
+                    const providerStream = await chatProvider.getStream({
                         model,
                         messages: preparedMessages,
                         reasoningEffort: reasoningEffort || 'low',
@@ -298,6 +355,9 @@ export async function handleChatRequest(
                         tokenEstimates,
                         signal,
                     });
+                    timing.providerConnectMs = (timing.providerConnectMs ?? 0)
+                        + performance.now() - providerStartedAt;
+                    return providerStream;
                 };
 
                 let sourceStream: ReadableStream;
@@ -347,6 +407,7 @@ export async function handleChatRequest(
                 let firstTokenAt: number | null = null;
                 let lastTokenAt: number | null = null;
                 let providerStreamCompleted = false;
+                let firstProviderTokenLogged = false;
                 try {
                     while (true) {
                         if (signal.aborted) break;
@@ -366,27 +427,33 @@ export async function handleChatRequest(
                             const event = line.substring(6);
                             captureEvent?.(event);
                             if (event === '[DONE]') continue;
-                            try {
-                                const parsed = JSON.parse(event) as Record<string, unknown>;
-                                const content = typeof parsed.c === 'string' ? parsed.c : '';
-                                const reasoning = typeof parsed.r === 'string' ? parsed.r : '';
-                                if (content || reasoning) {
-                                    const now = performance.now();
-                                    firstTokenAt ??= now;
-                                    lastTokenAt = now;
-                                    responseContent += content;
-                                    responseReasoning += reasoning;
+                            const parsed = parseChatStreamEvent(event);
+                            if (!parsed) continue;
+
+                            if (parsed.type === 'error') {
+                                throw new Error(parsed.message);
+                            }
+                            if (parsed.type === 'delta' && (parsed.content || parsed.reasoning)) {
+                                const now = performance.now();
+                                firstTokenAt ??= now;
+                                lastTokenAt = now;
+                                if (!firstProviderTokenLogged) {
+                                    firstProviderTokenLogged = true;
+                                    timing.providerFirstTokenMs = now - requestStartedAt;
+                                    logger.info('[chat][perf] first provider token', {
+                                        model: modelForMetrics,
+                                        ...timing,
+                                    });
                                 }
-                                if (parsed.meta === 'usage' && parsed.usage && typeof parsed.usage === 'object') {
-                                    const usage = parsed.usage as Record<string, unknown>;
-                                    responseUsage = {
-                                        inputTokens: typeof usage.inputTokens === 'number' ? usage.inputTokens : undefined,
-                                        outputTokens: typeof usage.outputTokens === 'number' ? usage.outputTokens : undefined,
-                                        totalTokens: typeof usage.totalTokens === 'number' ? usage.totalTokens : undefined,
-                                    };
-                                }
-                            } catch {
-                                // Ignore malformed provider events; the client parser does the same.
+                                responseContent += parsed.content;
+                                responseReasoning += parsed.reasoning;
+                            }
+                            if (parsed.type === 'usage') {
+                                responseUsage = {
+                                    ...(parsed.usage.inputTokens === undefined ? {} : { inputTokens: parsed.usage.inputTokens }),
+                                    ...(parsed.usage.outputTokens === undefined ? {} : { outputTokens: parsed.usage.outputTokens }),
+                                    ...(parsed.usage.totalTokens === undefined ? {} : { totalTokens: parsed.usage.totalTokens }),
+                                };
                             }
                         }
                         pipeBuffer = searchFrom > 0 ? pipeBuffer.substring(searchFrom) : pipeBuffer;
@@ -439,6 +506,12 @@ export async function handleChatRequest(
                 if (!signal.aborted) {
                     safeClose(controller);
                 }
+                logger.info('[chat][perf] stream completed', {
+                    model: modelForMetrics,
+                    totalMs: performance.now() - requestStartedAt,
+                    responseCharacters: responseContent.length + responseReasoning.length,
+                    ...timing,
+                });
                 if (writer) {
                     await writer.close();
                 }
@@ -449,13 +522,18 @@ export async function handleChatRequest(
                 }
 
                 if (!signal.aborted) {
+                    logger.warn('[chat][perf] stream failed', {
+                        model: modelForMetrics,
+                        totalMs: performance.now() - requestStartedAt,
+                        ...timing,
+                    });
                     await finishGenerationJob('failed', error instanceof Error ? error.message : 'Generation failed');
                     logger.error('Chat API error:', error);
                     const providerUnavailable = isTransientProviderError(error);
                     const message = providerUnavailable
                         ? 'The selected model is busy right now. Please retry or choose another model.'
                         : GENERIC_CHAT_ERROR_MESSAGE;
-                    safeEnqueue(controller, `data: ${JSON.stringify({ error: message })}\n\n`);
+                    safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: message })}\n\n`);
                     safeClose(controller);
                     if (!providerUnavailable) {
                         await recordAbuseSignal(user.id, 'chat', 'stream-failure');

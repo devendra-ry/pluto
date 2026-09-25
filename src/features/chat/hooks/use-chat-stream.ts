@@ -5,6 +5,7 @@ import {
     useEffect,
     useReducer,
     useRef,
+    useState,
     type Dispatch,
     type RefObject,
     type SetStateAction,
@@ -19,6 +20,7 @@ import type { ChatResponseStats } from '@/shared/core/types';
 import type { ChatViewMessage } from '@/shared/contracts/chat';
 import { sanitizeThreadTitle } from '@/features/threads';
 import { type ReasoningEffort } from '@/shared/core/types';
+import { ChatStreamMessageStore } from '../components/chat-stream-message-store';
 
 // Must match the 409 body sent by the chat controller when a cached stream
 // exists but is incomplete (writer died mid-stream).
@@ -38,7 +40,7 @@ interface UseChatStreamParams {
     reasoningEffortRef: RefObject<ReasoningEffort>;
     systemPrompt: string;
     setMessages: Dispatch<SetStateAction<ChatViewMessage[]>>;
-    refreshMessages: () => Promise<RefreshMessagesResult>;
+    refreshPersistedReply: (userMessageId: string) => Promise<RefreshMessagesResult>;
     showToast: (message: string, type?: ToastType) => void;
 }
 
@@ -48,10 +50,11 @@ export function useChatStream({
     reasoningEffortRef,
     systemPrompt,
     setMessages,
-    refreshMessages,
+    refreshPersistedReply,
     showToast,
 }: UseChatStreamParams) {
     const [state, dispatch] = useReducer(streamReducer, INITIAL_STREAM_STATE);
+    const [streamedMessageStore] = useState(() => new ChatStreamMessageStore());
     const stateRef = useRef(state);
     const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -194,23 +197,33 @@ export function useChatStream({
             lastFlushedContent = fullContent;
             lastFlushedReasoning = fullReasoning;
             lastFlushedStats = nextStats;
+            streamedMessageStore.publish(assistantMsgId, {
+                content: fullContent,
+                reasoning: fullReasoning,
+                ...(nextStats === undefined ? {} : { stats: nextStats }),
+            });
+        };
+
+        const commitAssistantMessage = () => {
+            const stats = buildReplyStats();
             setMessages((prev) => {
                 // Use the stored index for O(1) lookup.
                 // Fallback to a scan only if the index is stale (e.g. messages were deleted).
                 let idx = assistantMsgIdx;
-                if (idx < 0 || idx >= prev.length || prev[idx].id !== assistantMsgId) {
+                if (idx < 0 || idx >= prev.length || prev[idx]?.id !== assistantMsgId) {
                     idx = prev.findIndex(m => m.id === assistantMsgId);
                     if (idx !== -1) assistantMsgIdx = idx;
                 }
                 if (idx === -1) return prev;
 
                 const existing = prev[idx];
+                if (!existing) return prev;
                 // Skip if somehow the values are already identical (defensive).
                 if (
                     existing.content === fullContent
                     && existing.reasoning === fullReasoning
                     && existing.model_id === activeModelId
-                    && areStatsEqual(existing.stats, nextStats)
+                    && areStatsEqual(existing.stats, stats)
                 ) {
                     return prev;
                 }
@@ -222,7 +235,7 @@ export function useChatStream({
                     content: fullContent,
                     reasoning: fullReasoning,
                     model_id: activeModelId,
-                    stats: nextStats,
+                    stats,
                 };
                 return updated;
             });
@@ -262,16 +275,9 @@ export function useChatStream({
             dispatch({ type: 'STREAMING' });
             const effectiveSystemPrompt = (forcedSystemPrompt ?? systemPrompt).trim();
 
-            const messages = currentMessages.map((m) => ({
-                role: m.role,
-                content: m.content,
-                attachments: m.attachments ?? [],
-            }));
-
             const stream = chatService.streamChat({
                 threadId: chatId,
                 userMessageId: lastMsg.id,
-                messages,
                 model: activeModelId,
                 reasoningEffort: effectiveReasoningEffort,
                 systemPrompt: effectiveSystemPrompt || undefined,
@@ -318,8 +324,9 @@ export function useChatStream({
                 showToast('No response returned. Please try again.', 'error');
                 return false;
             }
+            commitAssistantMessage();
             requestSucceeded = true;
-            const refreshResult = await refreshMessages();
+            const refreshResult = await refreshPersistedReply(lastMsg.id);
             if (!refreshResult.ok) {
                 console.warn('[chat] assistant response persisted but refresh failed:', refreshResult.error);
             }
@@ -333,8 +340,9 @@ export function useChatStream({
                     setMessages(currentMessages);
                     return false;
                 }
+                commitAssistantMessage();
                 requestSucceeded = true;
-                const refreshResult = await refreshMessages();
+                const refreshResult = await refreshPersistedReply(lastMsg.id);
                 if (!refreshResult.ok) {
                     console.warn('[chat] partial assistant response persisted but refresh failed:', refreshResult.error);
                 }
@@ -356,6 +364,7 @@ export function useChatStream({
             }
         } finally {
             abortControllerRef.current = null;
+            streamedMessageStore.clear(assistantMsgId);
             dispatch({ type: 'COMPLETE', failed: requestFailed });
             if (shouldRegenerate) {
                 void generateResponseRef.current(
@@ -366,7 +375,7 @@ export function useChatStream({
             }
         }
         return requestSucceeded;
-    }, [chatId, model, reasoningEffortRef, systemPrompt, showToast, setMessages, refreshMessages]);
+    }, [chatId, model, reasoningEffortRef, systemPrompt, showToast, setMessages, refreshPersistedReply, streamedMessageStore]);
 
     // Latest-ref pattern so the auto-regeneration in `finally` can re-invoke
     // the current callback without a circular dependency.
@@ -376,6 +385,7 @@ export function useChatStream({
     return {
         isLoading: state.phase !== 'idle',
         isThinking: state.isThinking,
+        streamedMessageStore,
         setIsLoading,
         handleStop,
         generateResponse,

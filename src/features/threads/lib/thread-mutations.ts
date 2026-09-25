@@ -9,7 +9,7 @@ import { createClient } from '@/shared/lib/supabase/client';
 export async function cleanupEmptyThreads(excludeId?: string) {
     const supabase = createClient();
     const { data, error } = await supabase.rpc('cleanup_empty_new_chat_threads', {
-        exclude_thread_id: excludeId,
+        ...(excludeId === undefined ? {} : { exclude_thread_id: excludeId }),
     });
     if (error) {
         throw new Error(`Cleanup failed (${error.message}). Apply the Supabase migrations and retry.`);
@@ -32,7 +32,7 @@ export async function createThread(
         .insert({
             title: 'New Chat',
             model,
-            reasoning_effort: reasoningEffort,
+            ...(reasoningEffort === undefined ? {} : { reasoning_effort: reasoningEffort }),
             system_prompt: systemPrompt?.trim() || null,
             user_id: user.id,
         })

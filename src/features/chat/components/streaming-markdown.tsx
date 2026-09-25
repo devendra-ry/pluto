@@ -48,6 +48,36 @@ function useLazyMarkdownStylesheets(content: string) {
  */
 const STREAMING_DEBOUNCE_MS = 120;
 
+/**
+ * During a stream we can render completed, standalone paragraphs once and keep
+ * reparsing only the unfinished tail. Be deliberately conservative: block
+ * syntax and reference links can depend on surrounding Markdown, so those
+ * paragraphs stay in the live tail and are rendered together at completion.
+ */
+function takeFinalizedParagraphs(source: string): { blocks: string[]; consumed: number } {
+    const blocks: string[] = [];
+    let consumed = 0;
+    const separator = /\n[ \t]*\n+/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = separator.exec(source)) !== null) {
+        const block = source.slice(consumed, match.index).trim();
+        if (!block) {
+            consumed = separator.lastIndex;
+            continue;
+        }
+        // Freeze only single-line inline Markdown paragraphs. Fences, lists,
+        // quotes, tables, headings, math, HTML, and cross-block references stay in tail.
+        const hasBlockSyntax = /^(?:#{1,6}(?:\s|$)|>|[-*+]\s|\d+[.)]\s|```|~~~|\$\$)|\|.*\||\\\[|\\\(/.test(block);
+        const hasCrossBlockSyntax = /\]\s*\[[^\]]*\]|\[\^[^\]]+\]|</.test(block);
+        if (block.includes('\n') || hasBlockSyntax || hasCrossBlockSyntax) break;
+        blocks.push(block);
+        consumed = separator.lastIndex;
+    }
+
+    return { blocks, consumed };
+}
+
 interface StreamingMarkdownProps {
     /** Raw markdown text (may grow on every frame during streaming). */
     content: string;
@@ -77,9 +107,12 @@ function StreamingMarkdownInner({
     className,
     components,
 }: StreamingMarkdownProps) {
-    // `renderedContent` is what ReactMarkdown actually receives.
-    // During streaming it lags behind `content` by up to STREAMING_DEBOUNCE_MS.
-    const [renderedContent, setRenderedContent] = useState(content);
+    // Frozen paragraphs are rendered once as separate memoized Markdown trees;
+    // only the unfinished tail is re-parsed as content streams in.
+    const [frozenBlocks, setFrozenBlocks] = useState<string[]>([]);
+    const [renderedTail, setRenderedTail] = useState(content);
+    const processedLengthRef = useRef(0);
+    const previousContentRef = useRef(content);
 
     // Refs to track latest values without re-triggering effects.
     const latestContentRef = useRef(content);
@@ -90,24 +123,44 @@ function StreamingMarkdownInner({
         latestContentRef.current = content;
     }, [content]);
 
-    useLazyMarkdownStylesheets(renderedContent);
+    useLazyMarkdownStylesheets(isStreaming ? renderedTail : content);
 
     useEffect(() => {
         if (!isStreaming) {
-            // Not streaming → flush immediately and clear any pending timer.
             if (timerRef.current !== null) {
                 clearTimeout(timerRef.current);
                 timerRef.current = null;
             }
-            setRenderedContent(content);
+            // At completion render the exact full document once, preserving
+            // cross-block Markdown semantics such as reference definitions.
+            setFrozenBlocks([]);
+            setRenderedTail(content);
+            processedLengthRef.current = content.length;
+            previousContentRef.current = content;
             return;
         }
+
+        if (!content.startsWith(previousContentRef.current)) {
+            // A replacement/reset stream starts a fresh document.
+            processedLengthRef.current = 0;
+            setFrozenBlocks([]);
+        }
+        previousContentRef.current = content;
 
         // Streaming → schedule a debounced flush if one isn't already pending.
         if (timerRef.current === null) {
             timerRef.current = setTimeout(() => {
                 timerRef.current = null;
-                setRenderedContent(latestContentRef.current);
+                const latest = latestContentRef.current;
+                const unprocessed = latest.slice(processedLengthRef.current);
+                const finalized = takeFinalizedParagraphs(unprocessed);
+                if (finalized.consumed > 0) {
+                    processedLengthRef.current += finalized.consumed;
+                    if (finalized.blocks.length > 0) {
+                        setFrozenBlocks((previous) => [...previous, ...finalized.blocks]);
+                    }
+                }
+                setRenderedTail(latest.slice(processedLengthRef.current));
             }, STREAMING_DEBOUNCE_MS);
         }
 
@@ -123,14 +176,23 @@ function StreamingMarkdownInner({
         };
     }, []);
 
-    if (!renderedContent) return null;
+    if (frozenBlocks.length === 0 && !renderedTail) return null;
 
     return (
         <div className={className}>
-            <MemoizedMarkdownRenderer
-                content={renderedContent}
-                components={components ?? undefined}
-            />
+            {frozenBlocks.map((block, index) => (
+                <MemoizedMarkdownRenderer
+                    key={index}
+                    content={block}
+                    components={components ?? undefined}
+                />
+            ))}
+            {renderedTail && (
+                <MemoizedMarkdownRenderer
+                    content={renderedTail}
+                    components={components ?? undefined}
+                />
+            )}
         </div>
     );
 }

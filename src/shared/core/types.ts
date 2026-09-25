@@ -28,7 +28,7 @@ export function toReasoningEffort(value: unknown): ReasoningEffort | undefined {
 const MessageRoleSchema = z.enum(['user', 'assistant']);
 
 // File attachment metadata saved with a message
-const AttachmentSchema = z.object({
+export const AttachmentSchema = z.object({
     id: z.string().min(1, 'Attachment id is required').max(MAX_ATTACHMENT_ID_CHARS),
     name: z.string().min(1, 'Attachment name is required').max(MAX_ATTACHMENT_NAME_CHARS),
     mimeType: z.string().min(1, 'Attachment MIME type is required').max(MAX_ATTACHMENT_MIME_TYPE_CHARS),
@@ -61,14 +61,18 @@ export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export const ChatRequestSchema = z.object({
     threadId: z.string().min(1).max(MAX_THREAD_ID_CHARS),
     userMessageId: z.string().min(1).max(MAX_THREAD_ID_CHARS),
+    // Accepted for compatibility with older clients. The server uses canonical
+    // persisted history so long conversations aren't uploaded on every turn.
     messages: z.array(ChatMessageSchema)
         .min(1, 'At least one message is required')
-        .max(MAX_CHAT_MESSAGES, 'Too many messages in one request'),
+        .max(MAX_CHAT_MESSAGES, 'Too many messages in one request')
+        .optional(),
     model: z.string().min(1, 'Model is required').max(MAX_MODEL_ID_CHARS),
     reasoningEffort: ReasoningEffortSchema.optional(),
     systemPrompt: z.string().max(50000, 'System prompt must be 50000 characters or less').optional(),
 }).superRefine((value, context) => {
-    const totalTextChars = value.messages.reduce((total, message) => total + message.content.length, 0);
+    const messages = value.messages ?? [];
+    const totalTextChars = messages.reduce((total, message) => total + message.content.length, 0);
     if (totalTextChars > MAX_CHAT_REQUEST_TEXT_CHARS) {
         context.addIssue({
             code: 'custom',
@@ -77,7 +81,7 @@ export const ChatRequestSchema = z.object({
         });
     }
 
-    const totalAttachments = value.messages.reduce(
+    const totalAttachments = messages.reduce(
         (total, message) => total + (message.attachments?.length ?? 0),
         0
     );

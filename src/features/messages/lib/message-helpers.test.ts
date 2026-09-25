@@ -20,8 +20,8 @@ describe('message-helpers', () => {
 
              const merged = mergeMessagesSorted(existing, incoming);
              assert.strictEqual(merged.length, 2);
-             assert.strictEqual(merged[0].id, '1');
-             assert.strictEqual(merged[1].id, '2');
+             assert.strictEqual(merged.at(0)?.id, '1');
+             assert.strictEqual(merged.at(1)?.id, '2');
         });
 
         test('updates existing messages', () => {
@@ -30,7 +30,7 @@ describe('message-helpers', () => {
 
              const merged = mergeMessagesSorted(existing, incoming);
              assert.strictEqual(merged.length, 1);
-             assert.strictEqual(merged[0].content, 'new');
+             assert.strictEqual(merged.at(0)?.content, 'new');
         });
     });
 

@@ -41,12 +41,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     return (
         <ToastContext.Provider value={{ showToast }}>
             {children}
-            <div className="fixed bottom-4 right-4 z-[200] flex flex-col gap-2">
+            <div
+                className="pointer-events-none fixed inset-x-4 bottom-4 z-[200] flex flex-col items-end gap-2 sm:left-auto sm:right-4 sm:w-[min(24rem,calc(100vw-2rem))]"
+                role="region"
+                aria-label="Notifications"
+            >
                 {toasts.map(toast => (
                     <ToastItem
                         key={toast.id}
                         toast={toast}
-                        onClose={() => removeToast(toast.id)}
+                        onClose={removeToast}
                     />
                 ))}
             </div>
@@ -54,39 +58,42 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     );
 }
 
-function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
+function ToastItem({ toast, onClose }: { toast: Toast; onClose: (id: string) => void }) {
     useEffect(() => {
-        const timer = setTimeout(onClose, 4000);
+        const timer = setTimeout(() => onClose(toast.id), 4000);
         return () => clearTimeout(timer);
-    }, [onClose]);
+    }, [onClose, toast.id]);
 
     const icons = {
-        success: <CheckCircle className="h-4 w-4 text-emerald-400" />,
-        error: <AlertCircle className="h-4 w-4 text-red-400" />,
-        info: <Info className="h-4 w-4 text-blue-400" />,
+        success: <CheckCircle className="h-4 w-4 shrink-0 text-success" aria-hidden="true" />,
+        error: <AlertCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />,
+        info: <Info className="h-4 w-4 shrink-0 text-info" aria-hidden="true" />,
     };
 
     const backgrounds = {
-        success: 'border-emerald-500/20 bg-emerald-950/80',
-        error: 'border-red-500/20 bg-red-950/80',
-        info: 'border-blue-500/20 bg-blue-950/80',
+        success: 'border-success/25 bg-card',
+        error: 'border-destructive/30 bg-card',
+        info: 'border-info/25 bg-card',
     };
 
     return (
         <div
+            role={toast.type === 'error' ? 'alert' : 'status'}
             className={cn(
-                'flex items-center gap-3 px-4 py-3 rounded-xl border backdrop-blur-lg shadow-2xl',
+                'pointer-events-auto flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-card-foreground shadow-xl',
                 'animate-in slide-in-from-right-5 fade-in duration-300',
                 backgrounds[toast.type]
             )}
         >
             {icons[toast.type]}
-            <span className="text-base text-zinc-100">{toast.message}</span>
+            <span className="min-w-0 flex-1 break-words text-sm">{toast.message}</span>
             <button
-                onClick={onClose}
-                className="ml-2 p-1 rounded-lg hover:bg-white/10 text-zinc-400 hover:text-zinc-200 transition-colors"
+                onClick={() => onClose(toast.id)}
+                type="button"
+                aria-label="Dismiss notification"
+                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
-                <X className="h-3.5 w-3.5" />
+                <X className="h-4 w-4" aria-hidden="true" />
             </button>
         </div>
     );

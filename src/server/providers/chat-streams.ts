@@ -7,6 +7,7 @@ import { logModelLimits, resolveOutputTokenCap } from '@/server/providers/limits
 import type { RequestTokenEstimates } from '@/server/providers/provider-types';
 import type { ReasoningEffort } from '@/shared/core/types';
 import { sharedTextEncoder } from '@/shared/lib/text-encoder';
+import { serializeChatStreamEvent } from '@/shared/contracts/chat-stream';
 import { logger } from '@/server/logging/logger';
 
 const TRANSIENT_RETRY_DELAYS_MS = [500, 1500];
@@ -46,7 +47,9 @@ export async function retryTransientProviderRequest<T>(
                 throw error;
             }
             logger.warn('[chat] provider temporarily unavailable; retrying', { attempt: attempt + 1 });
-            await waitForRetry(retryDelaysMs[attempt], signal);
+            const retryDelay = retryDelaysMs[attempt];
+            if (retryDelay === undefined) throw error;
+            await waitForRetry(retryDelay, signal);
         }
     }
 }
@@ -149,12 +152,11 @@ export async function getGoogleStream(
                 for await (const chunk of response) {
                     if (signal?.aborted) break;
 
-                    const usageMetadata = (chunk as { usageMetadata?: unknown }).usageMetadata;
-                    if (usageMetadata && typeof usageMetadata === 'object') {
-                        const usageRecord = usageMetadata as Record<string, unknown>;
-                        const inputTokens = toNonNegativeInt(usageRecord.promptTokenCount);
-                        const outputTokens = toNonNegativeInt(usageRecord.candidatesTokenCount);
-                        const totalTokens = toNonNegativeInt(usageRecord.totalTokenCount);
+                    const usageMetadata = chunk.usageMetadata;
+                    if (usageMetadata) {
+                        const inputTokens = toNonNegativeInt(usageMetadata.promptTokenCount);
+                        const outputTokens = toNonNegativeInt(usageMetadata.candidatesTokenCount);
+                        const totalTokens = toNonNegativeInt(usageMetadata.totalTokenCount);
                         if (inputTokens !== undefined || outputTokens !== undefined || totalTokens !== undefined) {
                             usage = { inputTokens, outputTokens, totalTokens };
                         }
@@ -164,19 +166,21 @@ export async function getGoogleStream(
                     if (!candidate?.content?.parts) continue;
                     for (const part of candidate.content.parts) {
                         if (!part.text) continue;
-                        const data = JSON.stringify(part.thought ? { r: part.text } : { c: part.text });
+                        const data = serializeChatStreamEvent(part.thought
+                            ? { type: 'delta', content: '', reasoning: part.text }
+                            : { type: 'delta', content: part.text, reasoning: '' });
                         controller.enqueue(sharedTextEncoder.encode(`data: ${data}\n\n`));
                     }
                 }
                 if (!signal?.aborted) {
                     if (usage) {
-                        const usageEvent = JSON.stringify({
-                            meta: 'usage',
+                        const usageEvent = serializeChatStreamEvent({
+                            type: 'usage',
                             usage: {
                                 source: 'provider',
-                                inputTokens: usage.inputTokens,
-                                outputTokens: usage.outputTokens,
-                                totalTokens: usage.totalTokens,
+                                ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
+                                ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
+                                ...(usage.totalTokens === undefined ? {} : { totalTokens: usage.totalTokens }),
                             }
                         });
                         controller.enqueue(sharedTextEncoder.encode(`data: ${usageEvent}\n\n`));

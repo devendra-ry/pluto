@@ -45,7 +45,7 @@ describe('trimMessagesToInputBudget', () => {
         const result = trimMessagesToInputBudget(messages, limits);
 
         assert.ok(result.messages.length > 0);
-        assert.strictEqual(result.messages[0].role, 'user');
+        assert.strictEqual(result.messages.at(0)?.role, 'user');
     });
 
     test('falls back to the last message for assistant-only input', () => {

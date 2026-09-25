@@ -2,27 +2,29 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt } from '@/features/threads';
-import { addMessage } from '@/features/messages';
-import { enqueueGenerationJob } from '@/features/chat';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT } from '@/shared/core/constants';
+import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt, cleanupEmptyThreads, triggerThreadRefresh } from '@/features/threads';
+import { startChatWithMessage, type StartChatWithMessageInput } from '@/features/chat';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, type CategoryIconName } from '@/shared/core/constants';
 import { ChatInput, type ChatInputHandle } from '@/features/chat';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
-import { Wand2, BookOpen, Code, GraduationCap, type LucideIcon } from 'lucide-react';
+import { Wand2, BookOpen, Code, GraduationCap, Loader2, type LucideIcon } from 'lucide-react';
+import { z } from 'zod';
 
 function toErrorRecord(error: unknown): Record<string, unknown> {
-  return (typeof error === 'object' && error !== null) ? (error as Record<string, unknown>) : {};
+  if (error instanceof Error) return { message: error.message };
+  const result = z.record(z.string(), z.unknown()).safeParse(error);
+  return result.success ? result.data : {};
 }
 
 // Map icon names to components
-const ICON_MAP: Record<string, LucideIcon> = {
+const ICON_MAP = {
   Wand2,
   BookOpen,
   Code,
   GraduationCap,
-};
+} satisfies Record<CategoryIconName, LucideIcon>;
 
 export default function HomePage() {
   const router = useRouter();
@@ -33,6 +35,8 @@ export default function HomePage() {
   const reasoningEffortRef = useRef<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingSubmission, setPendingSubmission] = useState<Pick<StartChatWithMessageInput, 'content' | 'attachments'> | null>(null);
+  const submissionInFlightRef = useRef(false);
   const [draftThreadId, setDraftThreadId] = useState<string | null>(null);
   const draftThreadIdRef = useRef<string | null>(null);
   const ensureThreadPromiseRef = useRef<Promise<string> | null>(null);
@@ -132,21 +136,17 @@ export default function HomePage() {
     value: string,
     attachments: Attachment[],
   ) => {
-    if (!value.trim() && attachments.length === 0) return false;
+    if ((!value.trim() && attachments.length === 0) || submissionInFlightRef.current) return false;
     const effectiveModel = modelRef.current;
 
+    submissionInFlightRef.current = true;
     setIsLoading(true);
+    setPendingSubmission({ content: value.trim(), attachments });
     try {
-      // 1. Ensure thread exists (attachments may have already created one)
-      const threadId = await ensureThread();
-
-      // 2. Add the user message
-      const userMessage = await addMessage(threadId, 'user', value.trim(), undefined, effectiveModel, attachments);
-
-      // 3. Persist durable generation context for chat-page handoff.
-      await enqueueGenerationJob({
-        threadId,
-        userMessageId: userMessage.id,
+      const { threadId } = await startChatWithMessage({
+        threadId: draftThreadIdRef.current,
+        content: value.trim(),
+        attachments,
         modelId: effectiveModel,
         reasoningEffort: reasoningEffortRef.current,
         systemPrompt: systemPrompt.trim().length > 0
@@ -154,8 +154,14 @@ export default function HomePage() {
           : null,
       });
 
-      // 4. Navigate to the new chat.
-      // The ChatPageClient claims the queued generation job and starts generating.
+      draftThreadIdRef.current = threadId;
+      setDraftThreadId(threadId);
+      triggerThreadRefresh();
+      void cleanupEmptyThreads(threadId).catch((cleanupError) => {
+        console.warn('[threads] Failed to cleanup empty threads after chat start:', cleanupError);
+      });
+
+      // The new route hydrates the committed message and claims its already queued job.
       router.push(`/c/${threadId}`);
       return true;
     } catch (error: unknown) {
@@ -170,6 +176,8 @@ export default function HomePage() {
         console.error('Failed to create chat:', error);
       }
       showToast(errorMessage || 'Failed to create chat', 'error');
+      submissionInFlightRef.current = false;
+      setPendingSubmission(null);
       setIsLoading(false);
       return false;
     }
@@ -183,8 +191,25 @@ export default function HomePage() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#1a1520]">
-      <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center p-4">
+    <div className="flex flex-col h-full bg-plum-900">
+      <div className={`flex-1 overflow-y-auto flex flex-col items-center p-4 ${pendingSubmission ? 'justify-start' : 'justify-center'}`}>
+        {pendingSubmission ? (
+          <div className="w-full max-w-3xl px-4 pt-8">
+            <div className="mb-6 flex justify-end">
+              <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-plum-700/80 px-4 py-3 text-zinc-100">
+                {pendingSubmission.content || (
+                  <span className="text-zinc-300">
+                    {pendingSubmission.attachments.map((attachment) => attachment.name).join(', ')}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 py-2 text-sm text-zinc-400" role="status" aria-live="polite">
+              <Loader2 className="h-4 w-4 animate-spin text-brand-300" aria-hidden="true" />
+              <span>Starting your response…</span>
+            </div>
+          </div>
+        ) : (
         <div className="w-full max-w-3xl flex flex-col items-start px-4">
           {/* Main heading */}
           <h1 className="text-3xl md:text-4xl font-semibold text-zinc-100 mb-8 tracking-tight text-center md:text-left">
@@ -201,7 +226,7 @@ export default function HomePage() {
                   key={cat.label}
                   variant="ghost"
                   onClick={() => handleSuggestionClick(cat.prompt)}
-                  className="h-10 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-[#2a2035] border border-[#3a3045] rounded-full text-[15px] font-medium transition-all hover:text-zinc-100"
+                  className="h-10 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-plum-700 border border-plum-600 rounded-full text-[15px] font-medium transition-all hover:text-zinc-100"
                 >
                   <IconComponent className="h-4 w-4" />
                   {cat.label}
@@ -223,16 +248,17 @@ export default function HomePage() {
             ))}
           </div>
         </div>
+        )}
 
         {/* Terms and Privacy Policy */}
-        <div className="absolute bottom-24 left-0 right-0 text-center">
+        {!pendingSubmission && <div className="absolute bottom-24 left-0 right-0 text-center">
           <p className="text-xs text-zinc-500">
             Make sure you agree to our{' '}
             <span className="underline cursor-pointer hover:text-zinc-400">Terms</span>
             {' '}and our{' '}
             <span className="underline cursor-pointer hover:text-zinc-400">Privacy Policy</span>
           </p>
-        </div>
+        </div>}
       </div>
 
       <ChatInput

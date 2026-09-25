@@ -13,7 +13,7 @@ describe('buildSseReplayResponse', () => {
             '{"type":"text-delta","id":"text-1","delta":"Hello"}',
             '{"type":"text-delta","id":"text-1","delta":" world"}',
         ];
-        const offset = eventBytes(events[0]);
+        const offset = eventBytes(events[0] ?? '');
 
         const response = buildSseReplayResponse(events, offset);
         const body = await response.text();

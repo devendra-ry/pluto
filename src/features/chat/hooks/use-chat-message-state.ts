@@ -12,13 +12,16 @@ function areAttachmentListsEqual(left: Attachment[] | undefined, right: Attachme
     const b = right ?? [];
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i += 1) {
+        const leftAttachment = a[i];
+        const rightAttachment = b[i];
+        if (!leftAttachment || !rightAttachment) return false;
         if (
-            a[i].id !== b[i].id
-            || a[i].name !== b[i].name
-            || a[i].mimeType !== b[i].mimeType
-            || a[i].size !== b[i].size
-            || a[i].path !== b[i].path
-            || a[i].url !== b[i].url
+            leftAttachment.id !== rightAttachment.id
+            || leftAttachment.name !== rightAttachment.name
+            || leftAttachment.mimeType !== rightAttachment.mimeType
+            || leftAttachment.size !== rightAttachment.size
+            || leftAttachment.path !== rightAttachment.path
+            || leftAttachment.url !== rightAttachment.url
         ) {
             return false;
         }
@@ -50,14 +53,15 @@ function shouldPreserveStats(previous: ChatViewMessage | undefined, message: Mes
 }
 
 function mapStoredMessageToViewMessage(message: Message, previousStats?: ChatResponseStats): ChatViewMessage {
+    const stats = message.reply_stats ?? previousStats;
     return {
         id: message.id,
         role: message.role,
         content: message.content,
         attachments: message.attachments ?? [],
-        reasoning: message.reasoning,
-        model_id: message.model_id,
-        stats: message.reply_stats ?? previousStats,
+        ...(message.reasoning === undefined ? {} : { reasoning: message.reasoning }),
+        ...(message.model_id === undefined ? {} : { model_id: message.model_id }),
+        ...(stats === undefined ? {} : { stats }),
     };
 }
 
@@ -94,9 +98,10 @@ export function useChatMessageState({
     const applyStoredMessages = useCallback((nextStoredMessages: Message[]) => {
         setMessages((prev) => {
             if (prev.length === nextStoredMessages.length) {
-                const unchanged = prev.every((message, index) =>
-                    isSameMessageSnapshot(message, nextStoredMessages[index])
-                );
+                const unchanged = prev.every((message, index) => {
+                    const nextMessage = nextStoredMessages[index];
+                    return nextMessage !== undefined && isSameMessageSnapshot(message, nextMessage);
+                });
                 if (unchanged) {
                     return prev;
                 }

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Brain, Check, ScrollText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/input';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -13,11 +14,11 @@ import { cn } from '@/shared/core/utils';
 import type { ReasoningEffort } from '@/shared/core/types';
 import { useToast } from '@/components/ui/toast';
 
-const REASONING_OPTIONS: { value: ReasoningEffort; label: string; pro?: boolean }[] = [
+const REASONING_OPTIONS = [
     { value: 'low', label: 'Low' },
     { value: 'medium', label: 'Medium' },
     { value: 'high', label: 'High' },
-];
+] as const satisfies readonly { value: ReasoningEffort; label: string; pro?: boolean }[];
 
 interface ReasoningSelectorProps {
     reasoningEffort: ReasoningEffort;
@@ -33,7 +34,7 @@ export function ReasoningSelector({ reasoningEffort, onReasoningEffortChange }: 
                 <DropdownMenuTrigger asChild>
                     <Button
                         variant="ghost"
-                        className="h-8 px-2 md:px-3 gap-1.5 md:gap-2 text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border border-white/10 rounded-xl md:rounded-full transition-all text-sm font-semibold"
+                        className="h-8 px-2 md:px-3 gap-1.5 md:gap-2 text-brand-100 hover:text-white bg-plum-700/30 hover:bg-plum-700/50 border border-white/10 rounded-xl md:rounded-full transition-all text-sm font-semibold"
                     >
                         <Brain className="h-3.5 w-3.5 md:h-4 md:w-4" />
                         <span className="capitalize hidden md:inline">{selectedReasoning.label}</span>
@@ -42,15 +43,15 @@ export function ReasoningSelector({ reasoningEffort, onReasoningEffortChange }: 
                 <DropdownMenuContent
                     align="start"
                     side="top"
-                    className="w-44 bg-[#1a1520] border-[#3a3045] shadow-2xl mb-2"
+                    className="w-44 bg-plum-900 border-plum-600 shadow-2xl mb-2"
                 >
                     {REASONING_OPTIONS.map((option) => (
                         <DropdownMenuItem
                             key={option.value}
                             onClick={() => onReasoningEffortChange(option.value)}
                             className={cn(
-                                'flex items-center gap-3 py-2 px-3 cursor-pointer focus:bg-[#2a2535]',
-                                option.value === reasoningEffort && 'bg-[#2a2535]'
+                                'flex items-center gap-3 py-2 px-3 cursor-pointer focus:bg-plum-700',
+                                option.value === reasoningEffort && 'bg-plum-700'
                             )}
                         >
                             <Brain className="h-4 w-4 text-zinc-400 shrink-0" />
@@ -64,8 +65,8 @@ export function ReasoningSelector({ reasoningEffort, onReasoningEffortChange }: 
             </DropdownMenu>
 
             <div className="absolute bottom-full mb-2 hidden group-hover/reasoning:block z-50 pointer-events-none">
-                <div className="bg-[#1a1520]/95 backdrop-blur-md text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
-                    <span className="text-[#fce7ef]">Reasoning Effort</span>
+                <div className="bg-plum-900/95 backdrop-blur-md text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
+                    <span className="text-brand-100">Reasoning Effort</span>
                 </div>
             </div>
         </div>
@@ -133,8 +134,8 @@ export function SystemPromptSelector({ systemPrompt, onSystemPromptChange }: Sys
                     className={cn(
                         "shrink-0 h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl md:rounded-full transition-all text-sm font-semibold",
                         hasSystemPrompt
-                            ? "text-white bg-[#3d2d4a] hover:bg-[#4a3558] border-[#7a58a3]/70"
-                            : "text-[#fce7ef] hover:text-white bg-[#2a2035]/30 hover:bg-[#2a2035]/50 border-white/10"
+                            ? "text-white bg-plum-600 hover:bg-plum-600 border-brand-400/70"
+                            : "text-brand-100 hover:text-white bg-plum-700/30 hover:bg-plum-700/50 border-white/10"
                     )}
                 >
                     <ScrollText className="h-3.5 w-3.5 md:h-4 md:w-4" />
@@ -144,18 +145,18 @@ export function SystemPromptSelector({ systemPrompt, onSystemPromptChange }: Sys
             <DropdownMenuContent
                 align="start"
                 side="top"
-                className="w-[min(90vw,420px)] p-3 bg-[#1a1520] border-[#3a3045] shadow-2xl mb-2"
+                className="w-[min(90vw,420px)] p-3 bg-plum-900 border-plum-600 shadow-2xl mb-2"
                 onCloseAutoFocus={(e) => e.preventDefault()}
             >
                 <div className="space-y-2">
                     <p className="text-xs text-zinc-300 font-semibold tracking-tight">
                         System Prompt (chat only)
                     </p>
-                    <textarea
+                    <Textarea
                         value={systemPromptDraft}
                         onChange={(e) => setSystemPromptDraft(e.target.value)}
                         placeholder="Set behavior, rules, or lore for this thread..."
-                        className="w-full min-h-[120px] max-h-[260px] resize-y rounded-xl bg-[#120f18] border border-[#3a3045]/70 p-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-[#7a58a3]/70"
+                        className="min-h-[120px] max-h-[260px] resize-y rounded-xl bg-plum-950 text-zinc-100 placeholder:text-zinc-500 focus-visible:ring-primary/70"
                     />
                     <p className="text-[11px] text-zinc-500">
                         Applied to responses in this thread.
@@ -166,7 +167,7 @@ export function SystemPromptSelector({ systemPrompt, onSystemPromptChange }: Sys
                             variant="ghost"
                             onClick={() => void handleClearSystemPrompt()}
                             disabled={isSavingSystemPrompt || (!hasSystemPrompt && systemPromptDraft.length === 0)}
-                            className="h-8 px-3 text-zinc-300 hover:text-zinc-100 hover:bg-[#2a2535]"
+                            className="h-8 px-3 text-zinc-300 hover:text-zinc-100 hover:bg-plum-700"
                         >
                             Clear
                         </Button>
@@ -174,7 +175,7 @@ export function SystemPromptSelector({ systemPrompt, onSystemPromptChange }: Sys
                             type="button"
                             onClick={() => void handleSaveSystemPrompt()}
                             disabled={isSavingSystemPrompt}
-                            className="h-8 px-3 bg-[#3a283e] hover:bg-[#4a354e] text-pink-200"
+                            className="h-8 px-3 bg-plum-600 hover:bg-plum-600 text-brand-200"
                         >
                             Save
                         </Button>

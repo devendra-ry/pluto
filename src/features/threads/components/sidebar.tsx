@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo, memo, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog';
 import {
     Plus,
     PanelLeftClose,
@@ -50,7 +52,7 @@ function SidebarRow({ index, style, ariaAttributes, virtualItems, renderThreadIt
     if (item.type === 'header') {
         return (
             <div style={style} {...ariaAttributes}>
-                <h3 className="text-sm font-semibold text-pink-500/90 px-4 py-2 mt-4 mb-1 first:mt-0">
+                <h3 className="text-sm font-semibold text-brand-500/90 px-4 py-2 mt-4 mb-1 first:mt-0">
                     {item.label}
                 </h3>
             </div>
@@ -75,9 +77,10 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
     const [searchQuery, setSearchQuery] = useState('');
     const [deleteConfirm, setDeleteConfirm] = useState<Thread | null>(null);
     const [deletePending, setDeletePending] = useState(false);
+    const [hiddenDeletedThreadIds, setHiddenDeletedThreadIds] = useState<Set<string>>(() => new Set());
     const [user, setUser] = useState<SupabaseUser | null>(initialUser);
     const debouncedSearch = useDebouncedValue(searchQuery, 300);
-    const { threads } = useThreads();
+    const { threads, loadMoreThreads, hasMoreThreads } = useThreads();
     const { showToast } = useToast();
 
     const [supabase] = useState(() => createClient());
@@ -90,8 +93,12 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         return () => subscription.unsubscribe();
     }, [supabase]);
 
-    const pinnedThreads = useMemo(() => threads.filter(t => t.is_pinned), [threads]);
-    const unpinnedThreads = useMemo(() => threads.filter(t => !t.is_pinned), [threads]);
+    const visibleThreads = useMemo(
+        () => threads.filter((thread) => !hiddenDeletedThreadIds.has(thread.id)),
+        [threads, hiddenDeletedThreadIds]
+    );
+    const pinnedThreads = useMemo(() => visibleThreads.filter(t => t.is_pinned), [visibleThreads]);
+    const unpinnedThreads = useMemo(() => visibleThreads.filter(t => !t.is_pinned), [visibleThreads]);
     const groupedThreads = useMemo(() => groupThreadsByDate(unpinnedThreads), [unpinnedThreads]);
     const pathname = usePathname();
     const router = useRouter();
@@ -114,6 +121,17 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         )
     })).filter(g => g.threads.length > 0), [groupedThreads, debouncedSearch]);
 
+    useEffect(() => {
+        if (!debouncedSearch.trim() || !hasMoreThreads) return;
+        let active = true;
+        void (async () => {
+            while (active && await loadMoreThreads()) {
+                // Searching spans older pages; normal browsing loads them on scroll.
+            }
+        })();
+        return () => { active = false; };
+    }, [debouncedSearch, hasMoreThreads, loadMoreThreads]);
+
     // Flatten filtered threads and headers into items for virtualization
     const virtualItems = useMemo(() => {
         const items: VirtualItem[] = [];
@@ -130,6 +148,12 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
 
         return items;
     }, [filteredPinned, filteredGroups]);
+
+    const handleRowsRendered = useCallback(({ stopIndex }: { startIndex: number; stopIndex: number }) => {
+        if (hasMoreThreads && stopIndex >= Math.max(0, virtualItems.length - 12)) {
+            void loadMoreThreads();
+        }
+    }, [hasMoreThreads, loadMoreThreads, virtualItems.length]);
 
     const collapseSidebar = useCallback(() => {
         if (isMobileSize) {
@@ -165,15 +189,21 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         if (!deleteConfirm) return;
 
         const threadId = deleteConfirm.id;
+        setHiddenDeletedThreadIds((previous) => new Set(previous).add(threadId));
+        setDeletePending(true);
+        if (pathname === `/c/${threadId}`) {
+            router.push('/');
+        }
         try {
-            setDeletePending(true);
             await deleteThread(threadId);
             setDeleteConfirm(null);
-
-            if (pathname === `/c/${threadId}`) {
-                router.push('/');
-            }
         } catch (err) {
+            setHiddenDeletedThreadIds((previous) => {
+                const next = new Set(previous);
+                next.delete(threadId);
+                return next;
+            });
+            setDeleteConfirm(null);
             console.error('[Sidebar] Error in handleDeleteConfirm:', err);
             showToast('Failed to delete thread', 'error');
         } finally {
@@ -210,8 +240,8 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                 className={cn(
                     "group relative rounded-lg transition-colors",
                     isActive
-                        ? "bg-[#2a1f2f]"
-                        : "hover:bg-[#1f1623]"
+                        ? "bg-plum-700"
+                        : "hover:bg-plum-800"
                 )}
             >
                 <Link
@@ -240,9 +270,12 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         <Button
                             variant="ghost"
                             size="icon"
+                            type="button"
+                            aria-label={thread.is_pinned ? 'Unpin thread' : 'Pin thread'}
+                            title={thread.is_pinned ? 'Unpin thread' : 'Pin thread'}
                             className={cn(
                                 "h-7 w-7 transition-colors rounded-md",
-                                thread.is_pinned ? "text-pink-500 hover:bg-pink-500/10" : "text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
+                                thread.is_pinned ? "text-brand-500 hover:bg-brand-500/10" : "text-zinc-500 hover:text-brand-400 hover:bg-brand-500/10"
                             )}
                             onClick={(e) => handleTogglePin(e, thread.id, !!thread.is_pinned)}
                         >
@@ -258,6 +291,9 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         <Button
                             variant="ghost"
                             size="icon"
+                            type="button"
+                            aria-label="Delete thread"
+                            title="Delete thread"
                             className="h-8 w-8 text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all"
                             onClick={(e) => handleDeleteClick(e, thread)}
                         >
@@ -293,7 +329,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
             {/* Animated Sidebar */}
             <aside
                 className={cn(
-                    'h-screen flex flex-col bg-[#0f0a12] border-[#2a1f2f] overflow-hidden whitespace-nowrap z-40 border-r',
+                    'h-screen flex flex-col bg-plum-950 border-plum-700 overflow-hidden whitespace-nowrap z-40 border-r',
                     'transition-[width,transform,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
                     isMobileSize ? 'fixed left-0 top-0 shadow-2xl' : 'relative',
                     isCollapsed
@@ -308,8 +344,10 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         <Button
                             variant="ghost"
                             size="icon"
+                            aria-label="Collapse sidebar"
+                            title="Collapse sidebar"
                             onClick={collapseSidebar}
-                            className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f]"
+                            className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-plum-700"
                         >
                             <PanelLeftClose className="h-5 w-5" />
                         </Button>
@@ -321,7 +359,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                     <div className="px-3 pb-2 pt-2">
                         <Button
                             onClick={handleNewChat}
-                            className="w-full h-9 bg-gradient-to-r from-pink-700/90 to-pink-600/90 hover:from-pink-600/90 hover:to-pink-500/90 text-pink-100 font-medium rounded-lg border border-pink-500/20 shadow-pink-500/10 shadow-sm text-sm transition-all"
+                            className="w-full h-9 bg-gradient-to-r from-brand-700/90 to-brand-600/90 hover:from-brand-600/90 hover:to-brand-500/90 text-brand-100 font-medium rounded-lg border border-brand-500/20 shadow-brand-500/10 shadow-sm text-sm transition-all"
                         >
                             New Chat
                         </Button>
@@ -331,12 +369,12 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                     <div className="px-3 pb-4">
                         <div className="flex items-center gap-2 px-3 py-2 text-zinc-500 group bg-zinc-900/30 rounded-lg border border-white/[0.03]">
                             <Search className="h-5 w-5 text-zinc-500 group-focus-within:text-zinc-300 transition-colors shrink-0" />
-                            <input
+                            <Input
                                 type="text"
                                 placeholder="Search conversations..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="flex-1 bg-transparent text-base text-zinc-300 placeholder:text-zinc-600 focus:outline-none"
+                                className="h-auto flex-1 border-0 bg-transparent px-0 py-0 text-base text-zinc-300 shadow-none placeholder:text-zinc-600 focus-visible:outline-none"
                             />
                         </div>
                     </div>
@@ -357,6 +395,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                                             <List
                                                 rowCount={virtualItems.length}
                                                 rowHeight={42}
+                                                onRowsRendered={handleRowsRendered}
                                                 className="scrollbar-none"
                                                 rowComponent={SidebarRow}
                                                 rowProps={rowProps}
@@ -370,12 +409,12 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                     </div>
 
                     {/* Footer / Login */}
-                    <div className="mt-auto border-t border-[#2a1f2f] p-4">
+                    <div className="mt-auto border-t border-plum-700 p-4">
                         {user ? (
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2 overflow-hidden">
-                                    <div className="w-8 h-8 rounded-full bg-pink-500/20 flex items-center justify-center shrink-0">
-                                        <User className="h-4 w-4 text-pink-500" />
+                                    <div className="w-8 h-8 rounded-full bg-brand-500/20 flex items-center justify-center shrink-0">
+                                        <User className="h-4 w-4 text-brand-500" />
                                     </div>
                                     <span className="text-base text-zinc-300 truncate">
                                         {user.email}
@@ -384,6 +423,8 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                                 <Button
                                     variant="ghost"
                                     size="icon"
+                                    aria-label="Sign out"
+                                    title="Sign out"
                                     className="h-8 w-8 text-zinc-500 hover:text-zinc-200"
                                     onClick={() => supabase.auth.signOut()}
                                 >
@@ -391,7 +432,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                                 </Button>
                             </div>
                         ) : (
-                            <Link href="/login" className="flex items-center gap-3 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f] rounded-lg transition-colors">
+                            <Link href="/login" className="flex items-center gap-3 px-3 py-2 text-zinc-400 hover:text-zinc-100 hover:bg-plum-700 rounded-lg transition-colors">
                                 <LogIn className="h-5 w-5" />
                                 <span className="text-base font-medium">Sign in</span>
                             </Link>
@@ -403,7 +444,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
             {/* Floating Pill for Collapsed State */}
             <div
                 className={cn(
-                    'fixed top-3 left-3 z-[100] flex items-center gap-0.5 bg-[#1a1121]/90 backdrop-blur-xl p-1.5 rounded-xl border border-pink-500/20 shadow-2xl shadow-pink-500/5 ring-1 ring-white/10',
+                    'fixed top-3 left-3 z-[100] flex items-center gap-0.5 bg-plum-900/90 backdrop-blur-xl p-1.5 rounded-xl border border-brand-500/20 shadow-2xl shadow-brand-500/5 ring-1 ring-white/10',
                     'transition-all duration-200 ease-out',
                     isCollapsed ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-3 pointer-events-none'
                 )}
@@ -411,55 +452,51 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                 <Button
                     variant="ghost"
                     size="icon"
+                    aria-label="Expand sidebar"
+                    title="Expand sidebar"
                     onClick={expandSidebar}
-                    className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f] transition-all rounded-lg"
+                    className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-plum-700 transition-all rounded-lg"
                 >
                     <PanelLeft className="h-5 w-5" />
                 </Button>
 
-                <div className="w-px h-4 bg-[#2a1f2f] mx-0.5" />
+                <div className="w-px h-4 bg-plum-700 mx-0.5" />
 
                 <Button
                     variant="ghost"
                     size="icon"
+                    aria-label="Search conversations"
+                    title="Search conversations"
                     onClick={expandSidebar}
-                    className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-[#2a1f2f] transition-all rounded-lg"
+                    className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-plum-700 transition-all rounded-lg"
                 >
                     <Search className="h-5 w-5" />
                 </Button>
 
-                <div className="w-px h-4 bg-[#2a1f2f] mx-0.5" />
+                <div className="w-px h-4 bg-plum-700 mx-0.5" />
 
                 <Button
                     variant="ghost"
                     size="icon"
+                    aria-label="New chat"
+                    title="New chat"
                     onClick={handleNewChat}
-                    className="h-9 w-9 text-pink-500 hover:text-pink-400 hover:bg-pink-500/10 transition-all rounded-lg"
+                    className="h-9 w-9 text-brand-500 hover:text-brand-400 hover:bg-brand-500/10 transition-all rounded-lg"
                 >
                     <Plus className="h-5 w-5" />
                 </Button>
             </div>
 
             {/* Delete confirmation modal */}
-            {deleteConfirm && (
-                <div
-                    className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
-                    onClick={handleDeleteCancel}
-                >
-                    <div
-                        className="w-full max-w-md rounded-xl border border-[#3a2a40] bg-[#17101c] p-5 shadow-2xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-150"
-                        onClick={(e) => e.stopPropagation()}
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="delete-thread-title"
-                    >
-                        <h2 id="delete-thread-title" className="text-base font-semibold text-zinc-100">
+            <Dialog open={Boolean(deleteConfirm)} onOpenChange={(open) => { if (!open) handleDeleteCancel(); }}>
+                <DialogContent>
+                    <DialogTitle>
                             Confirm deletion
-                        </h2>
-                        <p className="mt-2 text-sm text-zinc-400 break-words">
-                            Are you sure you want to delete <span className="text-zinc-300">&ldquo;{deleteConfirm.title}&rdquo;</span>? This action cannot be undone.
-                        </p>
-                        <div className="mt-5 flex items-center justify-end gap-2">
+                    </DialogTitle>
+                    <DialogDescription className="break-words">
+                            Are you sure you want to delete <span className="text-zinc-300">&ldquo;{deleteConfirm?.title ?? ''}&rdquo;</span>? This action cannot be undone.
+                    </DialogDescription>
+                    <DialogFooter>
                             <Button
                                 variant="ghost"
                                 className="text-zinc-300 hover:text-zinc-100"
@@ -469,16 +506,15 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                                 Cancel
                             </Button>
                             <Button
-                                className="bg-red-600 hover:bg-red-500 text-white"
+                                variant="destructive"
                                 onClick={handleDeleteConfirm}
                                 disabled={deletePending}
                             >
                                 {deletePending ? 'Deleting...' : 'Confirm'}
                             </Button>
-                        </div>
-                    </div>
-                </div>
-            )}
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </>
     );
 });

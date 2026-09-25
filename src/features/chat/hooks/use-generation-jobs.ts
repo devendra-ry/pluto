@@ -1,17 +1,50 @@
 'use client';
 
 import { createClient } from '@/shared/lib/supabase/client';
-
-import { toReasoningEffort, type ReasoningEffort } from '@/shared/core/types';
+import { toReasoningEffort, type Attachment, type ReasoningEffort } from '@/shared/core/types';
+import type { Json } from '@/shared/lib/supabase/database.types';
 
 type JobStatus = 'completed' | 'failed';
 
-export interface EnqueueGenerationJobInput {
+export interface StartChatWithMessageInput {
+    threadId?: string | null;
+    content: string;
+    modelId: string;
+    reasoningEffort: ReasoningEffort;
+    systemPrompt: string | null;
+    attachments: Attachment[];
+}
+
+export interface StartedChat {
     threadId: string;
     userMessageId: string;
-    modelId?: string | null;
-    reasoningEffort?: ReasoningEffort | null;
-    systemPrompt?: string | null;
+}
+
+export async function startChatWithMessage(input: StartChatWithMessageInput): Promise<StartedChat> {
+    const supabase = createClient();
+    const attachments = JSON.parse(JSON.stringify(input.attachments)) as Json;
+    const { data, error } = await supabase.rpc('start_chat_with_message', {
+        p_thread_id: input.threadId ?? null,
+        p_content: input.content,
+        p_model: input.modelId,
+        p_reasoning_effort: input.reasoningEffort,
+        p_system_prompt: input.systemPrompt,
+        p_attachments: attachments,
+    });
+
+    if (error) {
+        throw new Error(`Failed to start chat (${error.message}). Apply the Supabase migrations and retry.`);
+    }
+
+    const startedChat = data?.[0];
+    if (!startedChat || !startedChat.thread_id || !startedChat.user_message_id) {
+        throw new Error('The chat could not be started. Please try again.');
+    }
+
+    return {
+        threadId: startedChat.thread_id,
+        userMessageId: startedChat.user_message_id,
+    };
 }
 
 export interface ClaimedGenerationJob {
@@ -20,25 +53,6 @@ export interface ClaimedGenerationJob {
     modelId: string | null;
     reasoningEffort: ReasoningEffort | null;
     systemPrompt: string | null;
-}
-
-export async function enqueueGenerationJob(input: EnqueueGenerationJobInput): Promise<void> {
-    const supabase = createClient();
-
-    const { error } = await supabase
-        .from('generation_jobs')
-        .insert({
-            thread_id: input.threadId,
-            user_message_id: input.userMessageId,
-            model_id: input.modelId ?? null,
-            reasoning_effort: input.reasoningEffort ?? null,
-            system_prompt: input.systemPrompt ?? null,
-            status: 'pending',
-        });
-
-    if (error) {
-        throw new Error(`Failed to enqueue generation job (${error.message}). Apply the Supabase migrations and retry.`);
-    }
 }
 
 export async function claimPendingGenerationJob(threadId: string, userMessageId?: string): Promise<ClaimedGenerationJob | null> {
