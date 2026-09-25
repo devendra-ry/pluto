@@ -329,7 +329,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
             {/* Animated Sidebar */}
             <aside
                 className={cn(
-                    'h-screen flex flex-col bg-plum-950 border-plum-700 overflow-hidden whitespace-nowrap z-40 border-r',
+                    'h-dvh flex flex-col bg-plum-950 border-plum-700 overflow-hidden whitespace-nowrap z-40 border-r',
                     'transition-[width,transform,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
                     isMobileSize ? 'fixed left-0 top-0 shadow-2xl' : 'relative',
                     isCollapsed

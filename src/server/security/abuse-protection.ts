@@ -4,6 +4,7 @@ import { logger } from '@/server/logging/logger';
 
 import { ApiRequestError } from '@/server/http/api-security';
 import { getRedisClient, redisKey } from '@/server/redis/client';
+import { incrWithTtl } from '@/server/redis/atomic';
 import { readPositiveInt } from '@/shared/lib/read-positive-int';
 
 const ABUSE_WINDOW_MS = readPositiveInt(process.env.ABUSE_SIGNAL_WINDOW_MS, 10 * 60 * 1000);
@@ -40,10 +41,7 @@ export async function recordAbuseSignal(userId: string, scope: string, reason: s
     const cKey = counterKey(userId, scope);
     const bKey = blockKey(userId, scope);
     try {
-        const count = await redis.incr(cKey);
-        if (count === 1) {
-            await redis.pexpire(cKey, ABUSE_WINDOW_MS);
-        }
+        const count = await incrWithTtl(redis, cKey, ABUSE_WINDOW_MS);
 
         if (count >= ABUSE_THRESHOLD) {
             await redis.set(bKey, reason, { px: ABUSE_BLOCK_MS });

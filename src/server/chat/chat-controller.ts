@@ -17,7 +17,7 @@ import { resolveModelLimits } from '@/server/providers/model-limits';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
 import { isTransientProviderError } from '@/server/providers/chat-streams';
 import { ChatRequestSchema, type ChatMessage } from '@/shared/core/types';
-import { MESSAGE_SELECT_COLUMNS, mapMessageRowToMessage } from '@/features/messages/lib/message-helpers';
+import { MESSAGE_SELECT_COLUMNS, mapMessageRowToMessage } from '@/features/messages/server';
 import {
     MAX_CHAT_MESSAGES,
     MAX_CHAT_REQUEST_ATTACHMENTS,
@@ -402,12 +402,47 @@ export async function handleChatRequest(
                 let pipeBuffer = '';
                 let responseContent = '';
                 let responseReasoning = '';
-                let responseUsage: { outputTokens?: number; inputTokens?: number; totalTokens?: number } | null = null;
+                const responseUsage: { current: { outputTokens?: number; inputTokens?: number; totalTokens?: number } | null } = { current: null };
                 const responseStartedAt = performance.now();
                 let firstTokenAt: number | null = null;
                 let lastTokenAt: number | null = null;
                 let providerStreamCompleted = false;
                 let firstProviderTokenLogged = false;
+                const processProviderLine = (rawLine: string) => {
+                    const line = rawLine.trimEnd();
+                    if (!line.startsWith('data: ')) return;
+                    const event = line.substring(6);
+                    captureEvent?.(event);
+                    if (event === '[DONE]') return;
+                    const parsed = parseChatStreamEvent(event);
+                    if (!parsed) return;
+
+                    if (parsed.type === 'error') {
+                        throw new Error(parsed.message);
+                    }
+                    if (parsed.type === 'delta' && (parsed.content || parsed.reasoning)) {
+                        const now = performance.now();
+                        firstTokenAt ??= now;
+                        lastTokenAt = now;
+                        if (!firstProviderTokenLogged) {
+                            firstProviderTokenLogged = true;
+                            timing.providerFirstTokenMs = now - requestStartedAt;
+                            logger.info('[chat][perf] first provider token', {
+                                model: modelForMetrics,
+                                ...timing,
+                            });
+                        }
+                        responseContent += parsed.content;
+                        responseReasoning += parsed.reasoning;
+                    }
+                    if (parsed.type === 'usage') {
+                        responseUsage.current = {
+                            ...(parsed.usage.inputTokens === undefined ? {} : { inputTokens: parsed.usage.inputTokens }),
+                            ...(parsed.usage.outputTokens === undefined ? {} : { outputTokens: parsed.usage.outputTokens }),
+                            ...(parsed.usage.totalTokens === undefined ? {} : { totalTokens: parsed.usage.totalTokens }),
+                        };
+                    }
+                };
                 try {
                     while (true) {
                         if (signal.aborted) break;
@@ -423,44 +458,18 @@ export async function handleChatRequest(
                         while ((nlIdx = pipeBuffer.indexOf('\n', searchFrom)) !== -1) {
                             const line = pipeBuffer.substring(searchFrom, nlIdx).trimEnd();
                             searchFrom = nlIdx + 1;
-                            if (!line.startsWith('data: ')) continue;
-                            const event = line.substring(6);
-                            captureEvent?.(event);
-                            if (event === '[DONE]') continue;
-                            const parsed = parseChatStreamEvent(event);
-                            if (!parsed) continue;
-
-                            if (parsed.type === 'error') {
-                                throw new Error(parsed.message);
-                            }
-                            if (parsed.type === 'delta' && (parsed.content || parsed.reasoning)) {
-                                const now = performance.now();
-                                firstTokenAt ??= now;
-                                lastTokenAt = now;
-                                if (!firstProviderTokenLogged) {
-                                    firstProviderTokenLogged = true;
-                                    timing.providerFirstTokenMs = now - requestStartedAt;
-                                    logger.info('[chat][perf] first provider token', {
-                                        model: modelForMetrics,
-                                        ...timing,
-                                    });
-                                }
-                                responseContent += parsed.content;
-                                responseReasoning += parsed.reasoning;
-                            }
-                            if (parsed.type === 'usage') {
-                                responseUsage = {
-                                    ...(parsed.usage.inputTokens === undefined ? {} : { inputTokens: parsed.usage.inputTokens }),
-                                    ...(parsed.usage.outputTokens === undefined ? {} : { outputTokens: parsed.usage.outputTokens }),
-                                    ...(parsed.usage.totalTokens === undefined ? {} : { totalTokens: parsed.usage.totalTokens }),
-                                };
-                            }
+                            processProviderLine(line);
                         }
                         pipeBuffer = searchFrom > 0 ? pipeBuffer.substring(searchFrom) : pipeBuffer;
 
                         // Enqueue the original bytes directly — no re-encode.
                         safeEnqueue(controller, value);
                     }
+                    // Streams may end with a final SSE line that has no newline.
+                    // Flush the decoder and parse that tail before persisting the
+                    // response so the last provider token is not silently lost.
+                    pipeBuffer += pipeDecoder.decode();
+                    if (pipeBuffer.length > 0) processProviderLine(pipeBuffer);
                 } finally {
                     reader.releaseLock();
                 }
@@ -468,14 +477,14 @@ export async function handleChatRequest(
                 if ((providerStreamCompleted || signal.aborted) && (responseContent || responseReasoning)) {
                     const endTime = lastTokenAt ?? performance.now();
                     const seconds = Math.max((endTime - (firstTokenAt ?? responseStartedAt)) / 1000, 0.001);
-                    const outputTokens = responseUsage?.outputTokens;
+                    const outputTokens = responseUsage.current?.outputTokens;
                     const replyStats = outputTokens === undefined ? undefined : {
                         outputTokens,
                         seconds,
                         tokensPerSecond: outputTokens / seconds,
                         ttfbSeconds: firstTokenAt === null ? undefined : Math.max((firstTokenAt - responseStartedAt) / 1000, 0),
-                        inputTokens: responseUsage?.inputTokens,
-                        totalTokens: responseUsage?.totalTokens,
+                        inputTokens: responseUsage.current?.inputTokens,
+                        totalTokens: responseUsage.current?.totalTokens,
                         source: 'provider',
                     } satisfies Record<string, unknown>;
                     await persistAssistantResponse(

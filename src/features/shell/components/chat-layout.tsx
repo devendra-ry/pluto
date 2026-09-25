@@ -25,9 +25,9 @@ export function ChatLayout({ children, initialUser }: { children: React.ReactNod
     }, []);
 
     return (
-        <div className="flex h-screen bg-plum-900">
+        <div className="flex h-dvh min-h-0 bg-plum-900">
             <SidebarClient isMobileSize={isMobile} initialUser={initialUser} />
-            <main className="flex-1 overflow-hidden relative">
+            <main className="relative min-w-0 flex-1 overflow-hidden">
                 <ErrorBoundary
                     onError={(error) => {
                         console.error('[ui] main-content-boundary', error);

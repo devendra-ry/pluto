@@ -168,7 +168,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                     side="top"
                     sideOffset={12}
                     collisionPadding={20}
-                    className="w-[calc(100vw-32px)] md:w-[580px] h-[80vh] md:h-[500px] p-0 bg-plum-900 border-plum-700/80 shadow-2xl mb-2 rounded-xl overflow-hidden"
+                    className="w-[calc(100vw-32px)] md:w-[580px] h-[min(500px,80dvh)] md:h-[500px] p-0 bg-plum-900 border-plum-700/80 shadow-2xl mb-2 rounded-xl overflow-hidden"
                 >
 
                     <div className="flex h-full">

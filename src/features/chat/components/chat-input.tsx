@@ -179,6 +179,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     }, [onEnsureThread, threadId, updateItem]);
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
+        // Enter can be part of an active IME composition (for example, to
+        // choose a Japanese or Chinese candidate). Let the browser finish it.
+        if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             if (!isLoading && !hasUploadingAttachments && !hasFailedAttachments && (value.trim() || uploadedAttachments.length > 0)) {
@@ -377,9 +380,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     };
 
     return (
-        <div className="pb-4 px-4 pt-0 bg-plum-900">
+        <div className="px-4 pt-0 pb-[max(1rem,env(safe-area-inset-bottom))] bg-plum-900">
             <div className="max-w-3xl mx-auto">
-                <div className="relative rounded-2xl bg-plum-800 border border-plum-700/60 shadow-xl transition-all duration-200">
+                <div className="relative rounded-2xl bg-plum-800 border border-plum-700/60 shadow-xl transition-all duration-200 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/35">
                     <input
                         ref={fileInputRef}
                         type="file"
@@ -396,7 +399,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         onKeyDown={handleKeyDown}
                         onPaste={handlePaste}
                         placeholder="Type your message here..."
-                        className="w-full px-5 pt-4 pb-3 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
+                        className="w-full px-5 pt-4 pb-3 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus-visible:outline-none resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
                     />
 
                     <AttachmentList
@@ -405,9 +408,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         onRetry={handleRetryAttachment}
                     />
 
-                    <div className="flex items-center justify-between gap-2 px-3 md:px-4 pb-3 pt-1">
-                        <div className="flex min-w-0 items-center gap-1.5 md:gap-3">
-                            <div className="shrink-0">
+                    <div className="flex items-center justify-between gap-2 px-2 md:px-4 pb-3 pt-1">
+                        <div className="flex min-w-0 flex-1 items-center gap-1 md:gap-3">
+                            <div className="min-w-0">
                                 <ModelSelector
                                     currentModel={currentModel}
                                     onModelChange={onModelChange}

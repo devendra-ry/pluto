@@ -34,6 +34,11 @@ const MARKDOWN_COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = 
     li: ({ children }) => (
         <li className="text-zinc-200/90 my-1">{children}</li>
     ),
+    table: ({ children }) => (
+        <div className="my-4 max-w-full overflow-x-auto">
+            <table className="w-max min-w-full">{children}</table>
+        </div>
+    ),
 };
 
 interface AssistantMessageProps {

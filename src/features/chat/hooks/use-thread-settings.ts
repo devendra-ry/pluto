@@ -58,6 +58,8 @@ export function useThreadSettings({ chatId, thread, showToast }: UseThreadSettin
     }, []);
 
     const resetThreadScopedState = useCallback(() => {
+        modelRef.current = DEFAULT_MODEL;
+        setModel(DEFAULT_MODEL);
         reasoningEffortRef.current = DEFAULT_REASONING_EFFORT;
         setReasoningEffort(DEFAULT_REASONING_EFFORT);
         setSystemPrompt('');

@@ -18,6 +18,7 @@ import {
     assertContentLengthWithinLimit,
     assertJsonRequest,
     assertValidPostOrigin,
+    parseFormDataRequest,
     parseJsonObjectRequest,
     requireUser,
     toJsonErrorResponse,
@@ -174,8 +175,13 @@ export async function POST(req: Request) {
 
     let formData: FormData;
     try {
-        formData = await req.formData();
-    } catch {
+        formData = await parseFormDataRequest(
+            req,
+            MAX_ATTACHMENT_SIZE_BYTES + MAX_MULTIPART_OVERHEAD_BYTES
+        );
+    } catch (error) {
+        const response = toJsonErrorResponse(error);
+        if (response) return response;
         return jsonResponse({ error: 'Invalid multipart form data' }, 400);
     }
     const threadId = formData.get('threadId');

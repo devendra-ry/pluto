@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useCallback, useLayoutEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 
 import { deleteMessagesByIds } from '@/features/messages';
 import type { ChatViewMessage } from '@/shared/contracts/chat';
@@ -36,7 +36,9 @@ export function useRetryLogic({
     confirmDestructiveDelete,
 }: UseRetryLogicParams) {
     const messagesRef = useRef(messages);
-    messagesRef.current = messages;
+    useLayoutEffect(() => {
+        messagesRef.current = messages;
+    }, [messages]);
 
     const handleRetry = useCallback(async (messageId: string) => {
         setIsLoading(true);

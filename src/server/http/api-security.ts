@@ -154,6 +154,53 @@ export async function parseJsonObjectRequest(req: Request, maxBytes: number = MA
     return body as Record<string, unknown>;
 }
 
+/**
+ * Parse multipart bodies with an actual streaming size limit. Content-Length is
+ * optional for chunked requests, so checking only that header lets an
+ * caller make formData() buffer an unbounded request body.
+ */
+export async function parseFormDataRequest(req: Request, maxBytes: number): Promise<FormData> {
+    assertContentLengthWithinLimit(req, maxBytes);
+    const contentType = req.headers.get('content-type');
+    if (contentType?.toLowerCase().split(';', 1)[0]?.trim() !== 'multipart/form-data') {
+        throw new ApiRequestError(415, 'Content-Type must be multipart/form-data');
+    }
+    if (!req.body) {
+        throw new ApiRequestError(400, 'Invalid multipart form data');
+    }
+
+    const reader = req.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            totalBytes += value.byteLength;
+            if (totalBytes > maxBytes) {
+                void reader.cancel().catch(() => undefined);
+                throw new ApiRequestError(413, 'Request body is too large');
+            }
+            chunks.push(value);
+        }
+    } finally {
+        reader.releaseLock();
+    }
+
+    const bytes = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+
+    try {
+        return await new Response(bytes, { headers: { 'Content-Type': contentType } }).formData();
+    } catch {
+        throw new ApiRequestError(400, 'Invalid multipart form data');
+    }
+}
+
 export function toJsonErrorResponse(error: unknown) {
     if (error instanceof ApiRequestError) {
         return new Response(JSON.stringify({ error: error.message }), {

@@ -90,8 +90,7 @@ export function useThreads() {
         const runId = backfillRunRef.current;
         const isCurrentRun = () => backfillRunRef.current === runId;
         const offset = nextOffsetRef.current;
-        let loadPromise!: Promise<boolean>;
-        loadPromise = (async () => {
+        const loadPromise = Promise.resolve().then(async () => {
             try {
                 const { data, error } = await fetchThreadsPage(userId, offset);
                 if (!isCurrentRun()) return false;
@@ -125,7 +124,7 @@ export function useThreads() {
                     loadMorePromiseRef.current = null;
                 }
             }
-        })();
+        });
         loadMorePromiseRef.current = loadPromise;
         return loadPromise;
     }, [currentUserId, hasMoreThreads, fetchThreadsPage]);
@@ -293,23 +292,30 @@ export function useThreads() {
 }
 
 export function useThread(id: string | null, initialThread?: Thread) {
-    const [thread, setThread] = useState<Thread | undefined>(initialThread);
+    const [threadState, setThreadState] = useState<{ id: string | null; thread?: Thread }>(() => ({
+        id,
+        ...(initialThread ? { thread: initialThread } : {}),
+    }));
     const [supabase] = useState(() => createClient());
 
     useEffect(() => {
-        if (!id) return;
+        if (!id) {
+            setThreadState({ id: null });
+            return;
+        }
         let cancelled = false;
+        setThreadState({ id, ...(initialThread ? { thread: initialThread } : {}) });
         const fetchThread = async () => {
             const { data } = await supabase
                 .from('threads')
                 .select(THREAD_SELECT_COLUMNS)
                 .eq('id', id)
                 .single();
-            if (data && !cancelled) setThread(mapThreadRowToThread(data));
+            if (data && !cancelled) setThreadState({ id, thread: mapThreadRowToThread(data) });
         };
         void fetchThread();
         return () => { cancelled = true; };
-    }, [id, supabase]);
+    }, [id, initialThread, supabase]);
 
-    return thread;
+    return threadState.id === id ? threadState.thread : initialThread;
 }

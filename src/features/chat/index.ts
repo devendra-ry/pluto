@@ -4,6 +4,7 @@ export * from './components/chat-header';
 export * from './components/chat-input';
 export type { LocalAttachmentItem, LocalAttachmentStatus } from './components/chat-input-attachments';
 export * from './components/chat-message-list';
+export * from './components/chat-stream-message-store';
 export * from './hooks/use-chat-message-state';
 export * from './hooks/use-chat-scroll';
 export * from './hooks/use-chat-stream';

@@ -38,3 +38,46 @@ test('parseJsonRequest enforces streamed body bounds', async (t) => {
         );
     });
 });
+
+test('parseFormDataRequest enforces streamed body bounds without Content-Length', async (t) => {
+    const { ApiRequestError, parseFormDataRequest } = await import('../src/server/http/api-security');
+
+    await t.test('parses a multipart body within the limit', async () => {
+        const body = [
+            '--b',
+            'Content-Disposition: form-data; name="threadId"',
+            '',
+            'thread-1',
+            '--b',
+            'Content-Disposition: form-data; name="file"; filename="note.txt"',
+            'Content-Type: text/plain',
+            '',
+            'small file',
+            '--b--',
+            '',
+        ].join('\r\n');
+        const request = new Request('https://example.com/api/uploads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'multipart/form-data; boundary=b' },
+            body,
+        });
+        assert.equal(request.headers.has('content-length'), false);
+
+        const parsed = await parseFormDataRequest(request, 1024);
+        assert.equal(parsed.get('threadId'), 'thread-1');
+        assert.equal((parsed.get('file') as File).name, 'note.txt');
+    });
+
+    await t.test('rejects a chunked multipart body over the limit', async () => {
+        const request = new Request('https://example.com/api/uploads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'multipart/form-data; boundary=b' },
+            body: `--b\r\n${'x'.repeat(100)}\r\n--b--\r\n`,
+        });
+        assert.equal(request.headers.has('content-length'), false);
+        await assert.rejects(
+            parseFormDataRequest(request, 32),
+            (error: unknown) => error instanceof ApiRequestError && error.status === 413,
+        );
+    });
+});

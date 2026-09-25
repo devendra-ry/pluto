@@ -20,7 +20,7 @@ import { useDestructiveDeleteConfirm } from '@/features/chat';
 import { addMessage, editUserMessageAtomically, refreshThreadMessage, refreshThreadReply, useMessages } from '@/features/messages';
 import { usePendingGeneration } from '@/features/chat';
 import { useRetryLogic } from '@/features/chat';
-import { ChatStreamMessageStoreProvider } from '@/features/chat/components/chat-stream-message-store';
+import { ChatStreamMessageStoreProvider } from '@/features/chat';
 import { useThread, branchThread, type Thread } from '@/features/threads';
 import { useThreadSettings } from '@/features/chat';
 import { type ChatViewMessage } from '@/features/chat';

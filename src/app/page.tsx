@@ -191,8 +191,8 @@ export default function HomePage() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-plum-900">
-      <div className={`flex-1 overflow-y-auto flex flex-col items-center p-4 ${pendingSubmission ? 'justify-start' : 'justify-center'}`}>
+    <div className="flex h-full min-h-0 flex-col bg-plum-900">
+      <div className={`flex min-h-0 flex-1 flex-col items-center overflow-y-auto p-4 ${pendingSubmission ? 'justify-start' : 'justify-center'}`}>
         {pendingSubmission ? (
           <div className="w-full max-w-3xl px-4 pt-8">
             <div className="mb-6 flex justify-end">
@@ -217,7 +217,7 @@ export default function HomePage() {
           </h1>
 
           {/* Category buttons */}
-          <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-10">
+          <div className="mb-10 grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-start">
 
             {CATEGORIES.map((cat) => {
               const IconComponent = ICON_MAP[cat.icon];
@@ -226,7 +226,7 @@ export default function HomePage() {
                   key={cat.label}
                   variant="ghost"
                   onClick={() => handleSuggestionClick(cat.prompt)}
-                  className="h-10 px-4 gap-2 text-zinc-400 bg-transparent hover:bg-plum-700 border border-plum-600 rounded-full text-[15px] font-medium transition-all hover:text-zinc-100"
+                  className="h-10 justify-center gap-2 rounded-full border border-plum-600 bg-transparent px-3 text-[15px] font-medium text-zinc-400 transition-all hover:bg-plum-700 hover:text-zinc-100 sm:px-4"
                 >
                   <IconComponent className="h-4 w-4" />
                   {cat.label}
@@ -250,15 +250,6 @@ export default function HomePage() {
         </div>
         )}
 
-        {/* Terms and Privacy Policy */}
-        {!pendingSubmission && <div className="absolute bottom-24 left-0 right-0 text-center">
-          <p className="text-xs text-zinc-500">
-            Make sure you agree to our{' '}
-            <span className="underline cursor-pointer hover:text-zinc-400">Terms</span>
-            {' '}and our{' '}
-            <span className="underline cursor-pointer hover:text-zinc-400">Privacy Policy</span>
-          </p>
-        </div>}
       </div>
 
       <ChatInput
@@ -274,6 +265,12 @@ export default function HomePage() {
         systemPrompt={systemPrompt}
         onSystemPromptChange={handleSystemPromptChange}
       />
+      {!pendingSubmission && (
+        <p className="px-4 pb-3 text-center text-xs text-zinc-500">
+          Make sure you agree to our <span className="underline">Terms</span> and our{' '}
+          <span className="underline">Privacy Policy</span>
+        </p>
+      )}
     </div>
   );
 }
