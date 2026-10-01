@@ -25,8 +25,9 @@ export function useChatScroll({ chatId, messagesReady, messageCount, virtuosoRef
     }, [chatId]);
 
     const scrollToBottom = useCallback(() => {
-        if (virtuosoRef.current) {
-            virtuosoRef.current.scrollToIndex({ index: messageCount - 1, align: 'end', behavior: 'smooth' });
+        if (virtuosoRef.current && messageCount > 0) {
+            const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            virtuosoRef.current.scrollToIndex({ index: messageCount - 1, align: 'end', behavior: reduceMotion ? 'auto' : 'smooth' });
             setIsAtBottom(true);
         }
     }, [messageCount, virtuosoRef]);

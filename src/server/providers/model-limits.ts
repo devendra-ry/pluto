@@ -98,8 +98,11 @@ function getFallbackLimits(): ResolvedModelLimits {
 }
 
 export async function resolveModelLimits(model: string, modelConfig: ModelConfig, signal?: AbortSignal): Promise<ResolvedModelLimits> {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
     const cacheKey = `${modelConfig.provider}:${model}`;
     const cached = await getCachedLimits(cacheKey);
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     if (cached) return cached;
 
     const provider = resolveChatProvider(modelConfig);
@@ -107,8 +110,11 @@ export async function resolveModelLimits(model: string, modelConfig: ModelConfig
     try {
         resolved = await provider.resolveModelLimits({ model, signal });
     } catch (error) {
+        if (signal?.aborted) throw error;
         logger.warn(`[chat] failed to resolve provider limits for model=${model} provider=${provider.id}`, { error: error });
     }
+
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
     const finalLimits = resolved ?? getFallbackLimits();
     logModelLimits('resolved-model-limits', {

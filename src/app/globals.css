@@ -6,6 +6,9 @@
 @custom-variant dark (&:is(.dark, .dark *));
 
 @theme inline {
+  --ease-fluid: cubic-bezier(0.22, 1, 0.36, 1);
+  --default-transition-duration: 180ms;
+  --default-transition-timing-function: var(--motion-ease);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -21,6 +24,7 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -47,6 +51,7 @@
   --color-plum-600: var(--plum-600);
   --color-success: var(--success);
   --color-info: var(--info);
+  --color-warning: var(--warning);
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --radius-sm: calc(var(--radius) - 4px);
@@ -61,6 +66,10 @@
 /* Pluto is intentionally dark-only. Keep every surface and shared primitive
    on the same plum palette; brand colors are reserved for emphasis/actions. */
 :root {
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-duration-fast: 160ms;
+  --motion-duration-normal: 280ms;
+  --motion-duration-slow: 420ms;
   color-scheme: dark;
   --radius: 0.625rem;
 
@@ -70,27 +79,28 @@
   --card-foreground: #faf7fb;
   --popover: #1a1520;
   --popover-foreground: #faf7fb;
-  --primary: #e91e63;
+  --primary: #d81b60;
   --primary-foreground: #fff;
   --secondary: #221c26;
-  --secondary-foreground: #fce7ef;
+  --secondary-foreground: var(--foreground);
   --muted: #1f1623;
   --muted-foreground: #b0a6b4;
   --accent: #2a2035;
   --accent-foreground: #fff;
-  --destructive: #e5484d;
+  --destructive: #f87171;
+  --destructive-foreground: #0f0a12;
   --border: #2a1f2f;
   --input: #3a3045;
   --ring: #f06292;
 
-  --sidebar: #0f0a12;
-  --sidebar-foreground: #faf7fb;
-  --sidebar-primary: #e91e63;
-  --sidebar-primary-foreground: #fff;
-  --sidebar-accent: #1f1623;
-  --sidebar-accent-foreground: #faf7fb;
-  --sidebar-border: #2a1f2f;
-  --sidebar-ring: #f06292;
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--muted);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 
   --brand-100: #fce7ef;
   --brand-200: #f8bbd0;
@@ -100,15 +110,16 @@
   --brand-600: #c2185b;
   --brand-700: #ad1457;
 
-  --plum-950: #0f0a12;
-  --plum-900: #1a1520;
-  --plum-850: #17101c;
-  --plum-800: #221c26;
-  --plum-700: #2a2035;
-  --plum-600: #3a3045;
+  --plum-950: var(--background);
+  --plum-900: var(--popover);
+  --plum-850: var(--card);
+  --plum-800: var(--secondary);
+  --plum-700: var(--accent);
+  --plum-600: var(--input);
 
   --success: #34d399;
   --info: #60a5fa;
+  --warning: #fbbf24;
 }
 
 @layer base {
@@ -124,13 +135,54 @@
     @apply bg-background text-foreground;
   }
 
+  ::selection {
+    background: var(--brand-700);
+    color: var(--foreground);
+  }
+
   :where(button, a, input, textarea, select, [role="button"], [tabindex]):focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
 }
 
+/* highlight.js loads on demand. Keep its code canvas on our theme even
+   when the external stylesheet is inserted after the global stylesheet. */
+pre code.hljs {
+  background: transparent;
+  color: var(--foreground);
+}
+
+.prose {
+  --tw-prose-invert-hr: var(--border);
+  --tw-prose-invert-th-borders: var(--input);
+  --tw-prose-invert-td-borders: var(--border);
+  --tw-prose-invert-bullets: var(--muted-foreground);
+  --tw-prose-invert-counters: var(--muted-foreground);
+}
+
 @layer utilities {
+  .motion-surface {
+    transform-origin: var(--radix-dropdown-menu-content-transform-origin, var(--radix-tooltip-content-transform-origin, center));
+    animation: surface-enter var(--motion-duration-normal) var(--motion-ease) both;
+  }
+
+  .motion-surface[data-state="closed"] {
+    animation: surface-exit var(--motion-duration-fast) var(--motion-ease) both;
+  }
+
+  .motion-overlay[data-state="open"] {
+    animation: overlay-enter var(--motion-duration-normal) var(--motion-ease) both;
+  }
+
+  .motion-overlay[data-state="closed"] {
+    animation: overlay-exit var(--motion-duration-fast) var(--motion-ease) both;
+  }
+
+  .thinking-dot {
+    animation: thinking-wave 1.4s ease-in-out infinite;
+  }
+
   .scrollbar-none {
     -ms-overflow-style: none;
     scrollbar-width: none;
@@ -150,7 +202,45 @@
   }
 }
 
+.motion-control {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: var(--motion-duration-fast);
+  transition-timing-function: var(--motion-ease);
+}
+
+.motion-control:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+@keyframes surface-enter {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes surface-exit {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(3px) scale(0.985); }
+}
+
+@keyframes overlay-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes overlay-exit {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes thinking-wave {
+  0%, 60%, 100% { opacity: 0.45; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .motion-control:active:not(:disabled) {
+    transform: none;
+  }
   *,
   *::before,
   *::after {

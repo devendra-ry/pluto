@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect, forwardRef, useState, useImperativeHandle, useCallback, useMemo } from 'react';
+import { useRef, useEffect, useLayoutEffect, forwardRef, useState, useImperativeHandle, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ArrowUp, Square, Paperclip } from 'lucide-react';
 import { AVAILABLE_MODELS } from '@/shared/core/constants';
@@ -8,7 +8,6 @@ import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_TOTAL_ATTACHMENT_BYTES, isImageAttachment } from '@/features/attachments';
 import { startUploadFileForThread } from '@/features/uploads';
 import { useToast } from '@/components/ui/toast';
-import { scheduleFrame } from '@/shared/lib/animation-frame';
 import { AttachmentList, type LocalAttachmentItem } from './chat-input-attachments';
 import { ReasoningSelector, SystemPromptSelector } from './chat-input-settings';
 import { ModelSelector } from './model-selector';
@@ -54,10 +53,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     onSystemPromptChange,
 }, ref) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const resizeAnimationRef = useRef<Animation | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const uploadTasksRef = useRef<Map<string, () => void>>(new Map());
     const valueRef = useRef(initialValue);
     const attachmentItemsRef = useRef<LocalAttachmentItem[]>([]);
+    const submissionInFlightRef = useRef(false);
+    const draftRevisionRef = useRef(0);
+    const mountedRef = useRef(true);
+    const previousThreadIdRef = useRef(threadId);
     const [value, setValue] = useState(initialValue);
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
     const { showToast } = useToast();
@@ -87,17 +91,39 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const hasFailedAttachments = activeAttachmentItems.some((item) => item.status === 'failed');
 
 
-    useEffect(() => {
-        if (textareaRef.current) {
-            textareaRef.current.style.height = 'auto';
-            textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
-        }
+    const resizeTextarea = useCallback(() => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+
+        // Start from the currently visible height so rapid typing or clearing
+        // reverses an in-flight resize without jumping to its old destination.
+        const previousHeight = textarea.getBoundingClientRect().height;
+        resizeAnimationRef.current?.cancel();
+        textarea.style.height = 'auto';
+        const nextHeight = Math.min(Math.max(textarea.scrollHeight, 60), 200);
+        textarea.style.height = `${nextHeight}px`;
+
+        if (Math.abs(previousHeight - nextHeight) < 1
+            || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+        resizeAnimationRef.current = textarea.animate(
+            [{ height: `${previousHeight}px` }, { height: `${nextHeight}px` }],
+            { duration: 240, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+        );
+    }, []);
+
+    useLayoutEffect(() => {
+        resizeTextarea();
         valueRef.current = value;
-    }, [value]);
+    }, [value, resizeTextarea]);
+
+    useEffect(() => () => resizeAnimationRef.current?.cancel(), []);
 
     useEffect(() => {
+        mountedRef.current = true;
         const tasks = uploadTasksRef.current;
         return () => {
+            mountedRef.current = false;
             for (const cancel of tasks.values()) {
                 cancel();
             }
@@ -105,76 +131,56 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         };
     }, []);
 
-    useEffect(() => {
-        attachmentItemsRef.current = attachmentItems;
-    }, [attachmentItems]);
+    useLayoutEffect(() => {
+        const previousThreadId = previousThreadIdRef.current;
+        previousThreadIdRef.current = threadId;
+        // null -> id is creation of the same draft; switching existing chats
+        // must cancel every pending task, including thread preparation.
+        if (previousThreadId && threadId && previousThreadId !== threadId) {
+            for (const cancel of uploadTasksRef.current.values()) cancel();
+            uploadTasksRef.current.clear();
+            attachmentItemsRef.current = [];
+            setAttachmentItems([]);
+            draftRevisionRef.current += 1;
+        }
+    }, [threadId]);
 
     const updateItem = useCallback((localId: string, updater: (item: LocalAttachmentItem) => LocalAttachmentItem) => {
-        setAttachmentItems((prev) => prev.map((item) => (item.localId === localId ? updater(item) : item)));
+        const items = attachmentItemsRef.current.map(item => item.localId === localId ? updater(item) : item);
+        attachmentItemsRef.current = items;
+        setAttachmentItems(items);
     }, []);
 
     const uploadLocalFile = useCallback(async (localId: string, file: File) => {
-        updateItem(localId, (item) => ({
-            localId: item.localId,
-            file: item.file,
-            status: 'uploading',
-            progress: 0,
-        }));
-
-        let targetThreadId = threadId ?? null;
-        if (!targetThreadId && onEnsureThread) {
-            try {
-                targetThreadId = await onEnsureThread();
-            } catch (error) {
-                const message = error instanceof Error ? error.message : 'Failed to prepare upload thread';
-                updateItem(localId, (item) => ({
-                    localId: item.localId,
-                    file: item.file,
-                    status: 'failed',
-                    progress: 0,
-                    error: message,
-                }));
-                return;
-            }
-        }
-
-        if (!targetThreadId) {
-            updateItem(localId, (item) => ({
-                localId: item.localId,
-                file: item.file,
-                status: 'failed',
-                progress: 0,
-                error: 'Thread is not ready for uploads',
-            }));
-            return;
-        }
-
+        // Register cancellation before thread preparation, not just after XHR starts.
+        uploadTasksRef.current.get(localId)?.();
+        let canceled = false;
+        let cancelTransfer = () => {};
+        const cancel = () => { canceled = true; cancelTransfer(); };
+        uploadTasksRef.current.set(localId, cancel);
+        const updateActiveItem = (updater: (item: LocalAttachmentItem) => LocalAttachmentItem) => {
+            if (!canceled && uploadTasksRef.current.get(localId) === cancel) updateItem(localId, updater);
+        };
+        updateActiveItem(item => ({ localId: item.localId, file: item.file, status: 'uploading', progress: 0 }));
         try {
-            const uploadTask = startUploadFileForThread(targetThreadId, file, (progress) => {
-                updateItem(localId, (item) => item.status === 'uploading' ? { ...item, progress } : item);
+            const targetThreadId = threadId ?? await onEnsureThread?.();
+            if (canceled) return;
+            if (!targetThreadId) throw new Error('Thread is not ready for uploads');
+            const uploadTask = startUploadFileForThread(targetThreadId, file, progress => {
+                updateActiveItem(item => item.status === 'uploading' ? { ...item, progress } : item);
             });
-            uploadTasksRef.current.set(localId, uploadTask.cancel);
-
+            cancelTransfer = uploadTask.cancel;
             const attachment = await uploadTask.promise;
-
-            updateItem(localId, (item) => ({
-                localId: item.localId,
-                file: item.file,
-                status: 'uploaded',
-                progress: 100,
-                attachment,
+            updateActiveItem(item => ({
+                localId: item.localId, file: item.file, status: 'uploaded', progress: 100, attachment,
             }));
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Upload failed';
-            updateItem(localId, (item) => ({
-                localId: item.localId,
-                file: item.file,
-                status: 'failed',
-                progress: 0,
-                error: message,
+            updateActiveItem(item => ({
+                localId: item.localId, file: item.file, status: 'failed', progress: 0, error: message,
             }));
         } finally {
-            uploadTasksRef.current.delete(localId);
+            if (uploadTasksRef.current.get(localId) === cancel) uploadTasksRef.current.delete(localId);
         }
     }, [onEnsureThread, threadId, updateItem]);
 
@@ -192,23 +198,29 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         const newValue = e.target.value;
+        draftRevisionRef.current += 1;
+        valueRef.current = newValue;
         setValue(newValue);
         onInputChange?.(newValue);
     };
 
     const handleSubmit = async () => {
-        if ((!value.trim() && uploadedAttachments.length === 0) || hasUploadingAttachments || hasFailedAttachments || isLoading) {
+        if (submissionInFlightRef.current || (!value.trim() && uploadedAttachments.length === 0) || hasUploadingAttachments || hasFailedAttachments || isLoading) {
             return;
         }
 
         const submittedValue = value;
         const submittedItems = attachmentItems;
         const submittedAttachments = uploadedAttachments;
+        const submittedRevision = draftRevisionRef.current;
+        submissionInFlightRef.current = true;
 
         // Clear immediately so user can start typing the next prompt while generation runs.
         setValue('');
+        valueRef.current = '';
         onInputChange?.('');
         setAttachmentItems([]);
+        attachmentItemsRef.current = [];
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
         }
@@ -217,10 +229,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             const submitted = await onSubmit(submittedValue, submittedAttachments);
             if (submitted === false) {
                 // Restore only if user has not started drafting a new message yet.
-                if (valueRef.current.trim().length === 0 && attachmentItemsRef.current.length === 0) {
+                if (mountedRef.current && draftRevisionRef.current === submittedRevision && valueRef.current.trim().length === 0 && attachmentItemsRef.current.length === 0) {
+                    valueRef.current = submittedValue;
                     setValue(submittedValue);
                     onInputChange?.(submittedValue);
                     setAttachmentItems(submittedItems);
+                    attachmentItemsRef.current = submittedItems;
                     if (fileInputRef.current) {
                         fileInputRef.current.value = '';
                     }
@@ -233,26 +247,26 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             }
             // Parent handles toast/error feedback.
             // Restore only if user has not started drafting a new message yet.
-            if (valueRef.current.trim().length === 0 && attachmentItemsRef.current.length === 0) {
+            if (mountedRef.current && draftRevisionRef.current === submittedRevision && valueRef.current.trim().length === 0 && attachmentItemsRef.current.length === 0) {
+                valueRef.current = submittedValue;
                 setValue(submittedValue);
                 onInputChange?.(submittedValue);
                 setAttachmentItems(submittedItems);
+                attachmentItemsRef.current = submittedItems;
                 if (fileInputRef.current) {
                     fileInputRef.current.value = '';
                 }
             }
+        } finally {
+            submissionInFlightRef.current = false;
         }
     };
 
     useImperativeHandle(ref, () => ({
         setValue: (newValue: string) => {
+            draftRevisionRef.current += 1;
+            valueRef.current = newValue;
             setValue(newValue);
-            scheduleFrame(() => {
-                if (textareaRef.current) {
-                    textareaRef.current.style.height = 'auto';
-                    textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
-                }
-            });
         },
         focus: () => textareaRef.current?.focus(),
     }), []);
@@ -269,8 +283,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             return;
         }
 
-        const availableSlots = Math.max(0, MAX_ATTACHMENTS_PER_MESSAGE - activeAttachmentItems.length);
-        const currentBytes = activeAttachmentItems.reduce((total, item) => total + item.file.size, 0);
+        const availableSlots = Math.max(0, MAX_ATTACHMENTS_PER_MESSAGE - attachmentItemsRef.current.length);
+        const currentBytes = attachmentItemsRef.current.reduce((total, item) => total + item.file.size, 0);
         const selectedFiles = files.slice(0, availableSlots).filter((file, index, selected) => {
             const previousBytes = selected.slice(0, index).reduce((total, previous) => total + previous.size, 0);
             return currentBytes + previousBytes + file.size <= MAX_TOTAL_ATTACHMENT_BYTES;
@@ -305,7 +319,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             };
         });
 
-        setAttachmentItems((prev) => [...prev, ...nextItems]);
+        draftRevisionRef.current += 1;
+        attachmentItemsRef.current = [...attachmentItemsRef.current, ...nextItems];
+        setAttachmentItems(attachmentItemsRef.current);
         for (const item of nextItems) {
             if (item.status === 'uploading') {
                 void uploadLocalFile(item.localId, item.file);
@@ -327,7 +343,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         supportsPdfs,
         supportsTexts,
         uploadLocalFile,
-        activeAttachmentItems,
         showToast,
     ]);
 
@@ -365,12 +380,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     };
 
     const handleRemoveAttachment = (localId: string) => {
+        draftRevisionRef.current += 1;
         const cancel = uploadTasksRef.current.get(localId);
         if (cancel) {
             cancel();
             uploadTasksRef.current.delete(localId);
         }
-        setAttachmentItems((prev) => prev.filter((item) => item.localId !== localId));
+        attachmentItemsRef.current = attachmentItemsRef.current.filter(item => item.localId !== localId);
+        setAttachmentItems(attachmentItemsRef.current);
     };
 
     const handleRetryAttachment = (localId: string) => {
@@ -380,9 +397,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     };
 
     return (
-        <div className="px-4 pt-0 pb-[max(1rem,env(safe-area-inset-bottom))] bg-plum-900">
+        <div className="px-3 md:px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] bg-background">
             <div className="max-w-3xl mx-auto">
-                <div className="relative rounded-2xl bg-plum-800 border border-plum-700/60 shadow-xl transition-all duration-200 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/35">
+                <div className="relative rounded-2xl bg-card border border-input shadow-lg transition-[border-color,box-shadow] duration-200 ease-fluid focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
                     <input
                         ref={fileInputRef}
                         type="file"
@@ -394,12 +411,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
                     <textarea
                         ref={textareaRef}
+                        rows={1}
                         value={value}
                         onChange={handleChange}
                         onKeyDown={handleKeyDown}
                         onPaste={handlePaste}
                         placeholder="Type your message here..."
-                        className="w-full px-5 pt-4 pb-3 bg-transparent text-zinc-100 placeholder:text-zinc-500/80 focus-visible:outline-none resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
+                        aria-label="Message"
+                        className="block w-full px-4 md:px-5 pt-4 pb-3 bg-transparent text-foreground placeholder:text-muted-foreground focus-visible:outline-none resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
                     />
 
                     <AttachmentList
@@ -441,13 +460,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                         || !supportsAttachments
                                         || activeAttachmentItems.length >= MAX_ATTACHMENTS_PER_MESSAGE
                                     }
-                                    className="h-8 w-8 md:w-11 p-0 text-brand-100 hover:text-white bg-plum-700/30 hover:bg-plum-700/50 border border-white/10 rounded-xl md:rounded-full transition-all flex items-center justify-center"
+                                    className="h-8 w-8 md:w-11 p-0 text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent border border-border rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] flex items-center justify-center"
                                 >
                                     <Paperclip className="h-3.5 w-3.5 md:h-4 md:w-4" />
                                 </Button>
 
-                                <div className="absolute bottom-full mb-2 hidden group-hover/attach:block z-50 pointer-events-none">
-                                    <div className="bg-plum-900/95 backdrop-blur-md text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-white/10 font-semibold tracking-tight animate-in fade-in zoom-in-95 duration-200">
+                                <div className="absolute bottom-full mb-2 hidden group-hover/attach:block group-focus-within/attach:block z-50 pointer-events-none">
+                                    <div className="bg-popover backdrop-blur-md text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-2xl border border-border font-semibold tracking-tight motion-surface">
                                         <span className="text-brand-100">
                                             {supportsAttachments
                                                 ? 'Attach file'
@@ -464,7 +483,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 size="icon"
                                 aria-label="Stop generating"
                                 onClick={onStop}
-                                className="shrink-0 h-8 w-8 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-all border border-red-500/20"
+                                className="shrink-0 h-9 w-9 rounded-xl bg-destructive/10 hover:bg-destructive/20 text-destructive transition-colors border border-destructive/30"
                             >
                                 <Square className="h-3.5 w-3.5 fill-current" />
                             </Button>
@@ -480,7 +499,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                     hasFailedAttachments ||
                                     (!value.trim() && uploadedAttachments.length === 0)
                                 }
-                                className="shrink-0 h-8 w-8 rounded-lg bg-plum-600 hover:bg-plum-600 text-brand-300/80 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="shrink-0 h-9 w-9 rounded-xl bg-primary hover:bg-brand-600 text-primary-foreground transition-colors disabled:bg-secondary disabled:text-muted-foreground disabled:opacity-100 disabled:cursor-not-allowed"
                             >
                                 <ArrowUp className="h-4 w-4" />
                             </Button>

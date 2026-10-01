@@ -50,9 +50,18 @@ export async function branchThread(
         createdAtById,
         new Date().toISOString(),
     );
-    const { error: messageError } = await supabase.from('messages').insert(messageRows);
-    if (messageError) {
-        await supabase.from('threads').delete().eq('id', newThread.id);
+    try {
+        const { error: messageError } = await supabase.from('messages').insert(messageRows);
+        if (messageError) throw messageError;
+    } catch (messageError) {
+        try {
+            const { error: cleanupError } = await supabase.from('threads').delete().eq('id', newThread.id);
+            if (cleanupError) {
+                console.error('[threads] Failed to remove incomplete branch thread:', cleanupError);
+            }
+        } catch (cleanupError) {
+            console.error('[threads] Failed to remove incomplete branch thread:', cleanupError);
+        }
         throw messageError;
     }
 

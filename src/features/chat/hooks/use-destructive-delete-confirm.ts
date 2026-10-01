@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type DestructiveDeleteAction = 'retry' | 'edit';
 
@@ -12,27 +12,35 @@ export type DestructiveDeleteConfirm = {
 
 export function useDestructiveDeleteConfirm() {
     const [deleteConfirm, setDeleteConfirm] = useState<DestructiveDeleteConfirm | null>(null);
+    const pendingRef = useRef<DestructiveDeleteConfirm | null>(null);
+
+    useEffect(() => () => {
+        pendingRef.current?.resolve(false);
+        pendingRef.current = null;
+    }, []);
 
     const confirmDestructiveDelete = useCallback((context: {
         action: DestructiveDeleteAction;
         deleteCount: number;
     }) => {
         return new Promise<boolean>((resolve) => {
-            setDeleteConfirm({
+            // Replacing a dialog must also settle its previous caller.
+            pendingRef.current?.resolve(false);
+            const next = {
                 action: context.action,
                 deleteCount: context.deleteCount,
                 resolve,
-            });
+            };
+            pendingRef.current = next;
+            setDeleteConfirm(next);
         });
     }, []);
 
     const closeDeleteConfirm = useCallback((confirmed: boolean) => {
-        setDeleteConfirm((current) => {
-            if (current) {
-                current.resolve(confirmed);
-            }
-            return null;
-        });
+        const current = pendingRef.current;
+        pendingRef.current = null;
+        current?.resolve(confirmed);
+        setDeleteConfirm(null);
     }, []);
 
     return {

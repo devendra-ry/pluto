@@ -3,6 +3,8 @@
 import { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import { cn } from '@/shared/core/utils';
 import { X, AlertCircle, CheckCircle, Info } from 'lucide-react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { FLUID_TRANSITION } from '@/shared/lib/motion';
 
 type ToastType = 'success' | 'error' | 'info';
 
@@ -46,19 +48,22 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 role="region"
                 aria-label="Notifications"
             >
-                {toasts.map(toast => (
-                    <ToastItem
-                        key={toast.id}
-                        toast={toast}
-                        onClose={removeToast}
-                    />
-                ))}
+                <AnimatePresence initial={false}>
+                    {toasts.map(toast => (
+                        <ToastItem
+                            key={toast.id}
+                            toast={toast}
+                            onClose={removeToast}
+                        />
+                    ))}
+                </AnimatePresence>
             </div>
         </ToastContext.Provider>
     );
 }
 
 function ToastItem({ toast, onClose }: { toast: Toast; onClose: (id: string) => void }) {
+    const reduceMotion = useReducedMotion();
     useEffect(() => {
         const timer = setTimeout(() => onClose(toast.id), 4000);
         return () => clearTimeout(timer);
@@ -77,11 +82,15 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: (id: string) => 
     };
 
     return (
-        <div
+        <motion.div
+            layout="position"
+            initial={{ opacity: 0, y: reduceMotion ? 0 : 12, scale: reduceMotion ? 1 : 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: reduceMotion ? 0 : 6, scale: reduceMotion ? 1 : 0.98 }}
+            transition={reduceMotion ? { duration: 0 } : FLUID_TRANSITION}
             role={toast.type === 'error' ? 'alert' : 'status'}
             className={cn(
                 'pointer-events-auto flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-card-foreground shadow-xl',
-                'animate-in slide-in-from-right-5 fade-in duration-300',
                 backgrounds[toast.type]
             )}
         >
@@ -91,10 +100,10 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: (id: string) => 
                 onClick={() => onClose(toast.id)}
                 type="button"
                 aria-label="Dismiss notification"
-                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
                 <X className="h-4 w-4" aria-hidden="true" />
             </button>
-        </div>
+        </motion.div>
     );
 }

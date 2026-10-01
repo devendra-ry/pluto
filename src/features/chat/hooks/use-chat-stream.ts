@@ -3,6 +3,7 @@
 import {
     useCallback,
     useEffect,
+    useLayoutEffect,
     useReducer,
     useRef,
     useState,
@@ -44,6 +45,13 @@ interface UseChatStreamParams {
     showToast: (message: string, type?: ToastType) => void;
 }
 
+interface ActiveStreamRun {
+    generation: number;
+    chatId: string;
+    controller: AbortController;
+    assistantMessageId?: string;
+}
+
 export function useChatStream({
     chatId,
     model,
@@ -57,10 +65,39 @@ export function useChatStream({
     const [streamedMessageStore] = useState(() => new ChatStreamMessageStore());
     const stateRef = useRef(state);
     const abortControllerRef = useRef<AbortController | null>(null);
+    const generationRef = useRef(0);
+    const lifecycleRef = useRef(0);
+    const chatIdRef = useRef(chatId);
+    const activeRunRef = useRef<ActiveStreamRun | null>(null);
 
     useEffect(() => {
         stateRef.current = state;
     }, [state]);
+
+    useLayoutEffect(() => {
+        chatIdRef.current = chatId;
+        return () => {
+            // A route change or unmount makes every outstanding continuation stale.
+            generationRef.current += 1;
+            lifecycleRef.current += 1;
+            const activeRun = activeRunRef.current;
+            activeRunRef.current = null;
+            activeRun?.controller.abort();
+            if (activeRun?.assistantMessageId) {
+                streamedMessageStore.clear(activeRun.assistantMessageId);
+            }
+            abortControllerRef.current = null;
+        };
+    }, [chatId, streamedMessageStore]);
+
+    const isCurrentRun = useCallback((generation: number, runChatId: string) => (
+        generationRef.current === generation
+        && chatIdRef.current === runChatId
+        && activeRunRef.current?.generation === generation
+    ), []);
+    const isCurrentLifecycle = useCallback((lifecycle: number, runChatId: string) => (
+        lifecycleRef.current === lifecycle && chatIdRef.current === runChatId
+    ), []);
 
     const setIsLoading = useCallback((next: SetStateAction<boolean>) => {
         const currentlyLoading = stateRef.current.phase !== 'idle';
@@ -73,12 +110,16 @@ export function useChatStream({
     }, []);
 
     const resetStreamState = useCallback(() => {
-        if (abortControllerRef.current) {
-            abortControllerRef.current.abort();
-            abortControllerRef.current = null;
-        }
+        generationRef.current += 1;
+        lifecycleRef.current += 1;
+        const activeRun = activeRunRef.current;
+        activeRunRef.current = null;
+        activeRun?.controller.abort();
+        if (activeRun?.assistantMessageId) streamedMessageStore.clear(activeRun.assistantMessageId);
+        abortControllerRef.current = null;
+        stateRef.current = INITIAL_STREAM_STATE;
         dispatch({ type: 'RESET' });
-    }, []);
+    }, [streamedMessageStore]);
 
     const handleStop = useCallback(() => {
         if (abortControllerRef.current) {
@@ -97,7 +138,7 @@ export function useChatStream({
         if (!lastMsg || lastMsg.role !== 'user') return false;
 
         const machine = stateRef.current;
-        if (machine.phase !== 'idle' && machine.phase !== 'preparing') {
+        if (activeRunRef.current || (machine.phase !== 'idle' && machine.phase !== 'preparing')) {
             // Never overlap runs. Prevent duplicate run for same anchor message.
             if (machine.activeUserMessageId === lastMsg.id) {
                 return false;
@@ -112,10 +153,16 @@ export function useChatStream({
 
         const willThink = supportsReasoning && !(selectedModel?.usesThinkingParam && effectiveReasoningEffort === 'low');
 
+        const generation = ++generationRef.current;
+        const lifecycle = lifecycleRef.current;
+        const controller = new AbortController();
+        const run: ActiveStreamRun = { generation, chatId, controller };
+        activeRunRef.current = run;
+        abortControllerRef.current = controller;
         dispatch({ type: 'BEGIN', messageId: lastMsg.id, thinking: willThink });
-        abortControllerRef.current = new AbortController();
 
         const assistantMsgId = crypto.randomUUID();
+        run.assistantMessageId = assistantMsgId;
         const assistantMsg: ChatViewMessage = {
             id: assistantMsgId,
             role: 'assistant',
@@ -126,6 +173,7 @@ export function useChatStream({
         // Store the index once — the assistant message is always appended at the end.
         let assistantMsgIdx = -1;
         setMessages(prev => {
+            if (!isCurrentLifecycle(lifecycle, chatId)) return prev;
             assistantMsgIdx = prev.length;
             return [...prev, assistantMsg];
         });
@@ -223,8 +271,10 @@ export function useChatStream({
         const assistantFlushCoalescer = new FrameCoalescer(flushAssistantUpdate, scheduleAssistantFlush);
 
         const commitAssistantMessage = () => {
+            if (!isCurrentRun(generation, chatId)) return;
             const stats = buildReplyStats();
             setMessages((prev) => {
+                if (!isCurrentLifecycle(lifecycle, chatId)) return prev;
                 // Use the stored index for O(1) lookup.
                 // Fallback to a scan only if the index is stale (e.g. messages were deleted).
                 let idx = assistantMsgIdx;
@@ -269,10 +319,11 @@ export function useChatStream({
                 model: activeModelId,
                 reasoningEffort: effectiveReasoningEffort,
                 systemPrompt: effectiveSystemPrompt || undefined,
-                signal: abortControllerRef.current.signal,
+                signal: controller.signal,
             });
 
             for await (const chunk of stream) {
+                if (!isCurrentRun(generation, chatId)) return false;
                 if (chunk.type === 'reasoning') {
                     if (supportsReasoning) {
                         const now = performance.now();
@@ -312,31 +363,41 @@ export function useChatStream({
             assistantFlushCoalescer.flushNow();
             if (!fullContent && !fullReasoning) {
                 hasPendingAssistantUpdate = false;
-                setMessages(currentMessages);
+                setMessages(prev => isCurrentLifecycle(lifecycle, chatId)
+                    ? prev.filter(message => message.id !== assistantMsgId)
+                    : prev);
                 requestFailed = true;
-                showToast('No response returned. Please try again.', 'error');
+                if (isCurrentRun(generation, chatId)) showToast('No response returned. Please try again.', 'error');
                 return false;
             }
             commitAssistantMessage();
             requestSucceeded = true;
-            const refreshResult = await refreshPersistedReply(lastMsg.id);
-            if (!refreshResult.ok) {
+            const refreshResult = isCurrentRun(generation, chatId)
+                ? await refreshPersistedReply(lastMsg.id)
+                : null;
+            if (refreshResult && !refreshResult.ok && isCurrentRun(generation, chatId)) {
                 console.warn('[chat] assistant response persisted but refresh failed:', refreshResult.error);
             }
         } catch (error) {
+
+            if (!isCurrentRun(generation, chatId)) return false;
 
             if (error instanceof Error && error.name === 'AbortError') {
                 assistantFlushCoalescer.flushNow();
                 if (!fullContent && !fullReasoning) {
                     requestFailed = true;
                     hasPendingAssistantUpdate = false;
-                    setMessages(currentMessages);
+                    setMessages(prev => isCurrentLifecycle(lifecycle, chatId)
+                        ? prev.filter(message => message.id !== assistantMsgId)
+                        : prev);
                     return false;
                 }
                 commitAssistantMessage();
                 requestSucceeded = true;
-                const refreshResult = await refreshPersistedReply(lastMsg.id);
-                if (!refreshResult.ok) {
+                const refreshResult = isCurrentRun(generation, chatId)
+                    ? await refreshPersistedReply(lastMsg.id)
+                    : null;
+                if (refreshResult && !refreshResult.ok && isCurrentRun(generation, chatId)) {
                     console.warn('[chat] partial assistant response persisted but refresh failed:', refreshResult.error);
                 }
             } else {
@@ -352,15 +413,32 @@ export function useChatStream({
                     requestFailed = true;
                 }
                 hasPendingAssistantUpdate = false;
-                setMessages(currentMessages);
+                setMessages(prev => isCurrentLifecycle(lifecycle, chatId)
+                    ? prev.filter(message => message.id !== assistantMsgId)
+                    : prev);
                 if (!shouldRegenerate) return false;
             }
         } finally {
             assistantFlushCoalescer.close();
-            abortControllerRef.current = null;
+            const wasCurrentRun = isCurrentRun(generation, chatId);
+            if (activeRunRef.current?.generation === generation) {
+                activeRunRef.current = null;
+                if (abortControllerRef.current === controller) abortControllerRef.current = null;
+            }
             streamedMessageStore.clear(assistantMsgId);
-            dispatch({ type: 'COMPLETE', failed: requestFailed });
-            if (shouldRegenerate) {
+            if (wasCurrentRun) {
+                // Clear the synchronous guard before a recovery run is invoked. Keep
+                // the ref aligned with the reducer while its completion is queued.
+                stateRef.current = {
+                    ...stateRef.current,
+                    phase: 'idle',
+                    isThinking: false,
+                    activeUserMessageId: null,
+                    lastRequestFailed: requestFailed,
+                };
+                dispatch({ type: 'COMPLETE', failed: requestFailed });
+            }
+            if (shouldRegenerate && chatIdRef.current === chatId) {
                 void generateResponseRef.current(
                     currentMessages,
                     forcedModelId,
@@ -369,7 +447,7 @@ export function useChatStream({
             }
         }
         return requestSucceeded;
-    }, [chatId, model, reasoningEffortRef, systemPrompt, showToast, setMessages, refreshPersistedReply, streamedMessageStore]);
+    }, [chatId, model, reasoningEffortRef, systemPrompt, showToast, setMessages, refreshPersistedReply, streamedMessageStore, isCurrentRun, isCurrentLifecycle]);
 
     // Latest-ref pattern so the auto-regeneration in `finally` can re-invoke
     // the current callback without a circular dependency.

@@ -3,6 +3,7 @@ import 'server-only';
 import { logger } from '@/server/logging/logger';
 
 import { prepareMessageAttachments } from '@/server/chat/chat-attachments';
+import { persistThenEmitTerminal } from '@/server/chat/chat-stream-lifecycle';
 import {
     CONTEXT_RETRY_SCALE,
     estimatePreparedConversationTokens,
@@ -100,7 +101,7 @@ export async function handleChatRequest(
     const requestStartedAt = performance.now();
     const timing: Record<string, number> = {};
     let modelForMetrics = 'unknown';
-    const signal = req.signal;
+    const requestSignal = req.signal;
     let streamClosed = false;
     const streamId = readChatStreamId(req);
     const resumeOffset = readChatResumeOffset(req);
@@ -146,6 +147,12 @@ export async function handleChatRequest(
         }
     }
 
+    const abortController = new AbortController();
+    const signal = abortController.signal;
+    const onRequestAbort = () => abortController.abort(requestSignal.reason);
+    if (requestSignal.aborted) onRequestAbort();
+    else requestSignal.addEventListener('abort', onRequestAbort, { once: true });
+
     const safeEnqueue = (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
         try {
             if (signal.aborted || streamClosed) return;
@@ -171,8 +178,22 @@ export async function handleChatRequest(
         }
     };
 
+    let responseCancelled = false;
     const stream = new ReadableStream({
-        async start(controller) {
+        start(controller) {
+            void run(controller).catch((error) => {
+                logger.error('[chat] stream lifecycle failed', { error });
+                if (!responseCancelled) safeClose(controller);
+            });
+        },
+        cancel(reason) {
+            responseCancelled = true;
+            streamClosed = true;
+            if (!signal.aborted) abortController.abort(reason);
+        },
+    });
+
+    async function run(controller: ReadableStreamDefaultController) {
             let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
             let writer: ChatStreamEventWriter | null = null;
             let requestUserMessageId: string | null = null;
@@ -203,9 +224,8 @@ export async function handleChatRequest(
                 }
             };
 
-            if (signal.aborted) return;
-
             try {
+                if (signal.aborted) return;
                 const bodyParseStartedAt = performance.now();
                 let body: unknown;
                 try {
@@ -394,9 +414,8 @@ export async function handleChatRequest(
                     ? (event: string) => { writer!.push(event); }
                     : undefined;
 
-                // Provider streams arrive in final SSE format with content and
-                // reasoning already separated. Pipe bytes directly — no JSON
-                // round-trip needed.
+                // Parse provider SSE as it arrives and forward complete lines.
+                // The terminal event is held until persistence succeeds.
                 const pipeDecoder = new TextDecoder();
                 const reader = sourceStream.getReader();
                 let pipeBuffer = '';
@@ -408,14 +427,25 @@ export async function handleChatRequest(
                 let lastTokenAt: number | null = null;
                 let providerStreamCompleted = false;
                 let firstProviderTokenLogged = false;
+                let terminalDelimiterPending = false;
                 const processProviderLine = (rawLine: string) => {
                     const line = rawLine.trimEnd();
-                    if (!line.startsWith('data: ')) return;
+                    if (!line.startsWith('data: ')) {
+                        if (!line && terminalDelimiterPending) {
+                            terminalDelimiterPending = false;
+                            return false;
+                        }
+                        return true;
+                    }
                     const event = line.substring(6);
+                    if (event === '[DONE]') {
+                        terminalDelimiterPending = true;
+                        return false;
+                    }
+                    terminalDelimiterPending = false;
                     captureEvent?.(event);
-                    if (event === '[DONE]') return;
                     const parsed = parseChatStreamEvent(event);
-                    if (!parsed) return;
+                    if (!parsed) return true;
 
                     if (parsed.type === 'error') {
                         throw new Error(parsed.message);
@@ -442,35 +472,45 @@ export async function handleChatRequest(
                             ...(parsed.usage.totalTokens === undefined ? {} : { totalTokens: parsed.usage.totalTokens }),
                         };
                     }
+                    return true;
                 };
                 try {
                     while (true) {
                         if (signal.aborted) break;
                         const { done, value } = await reader.read();
                         if (done) {
-                            providerStreamCompleted = true;
+                            providerStreamCompleted = !signal.aborted;
                             break;
                         }
 
                         pipeBuffer += pipeDecoder.decode(value, { stream: true });
                         let nlIdx: number;
                         let searchFrom = 0;
+                        let forwardBuffer = '';
                         while ((nlIdx = pipeBuffer.indexOf('\n', searchFrom)) !== -1) {
-                            const line = pipeBuffer.substring(searchFrom, nlIdx).trimEnd();
+                            const rawLine = pipeBuffer.substring(searchFrom, nlIdx);
                             searchFrom = nlIdx + 1;
-                            processProviderLine(line);
+                            if (processProviderLine(rawLine)) forwardBuffer += `${rawLine}\n`;
                         }
                         pipeBuffer = searchFrom > 0 ? pipeBuffer.substring(searchFrom) : pipeBuffer;
 
-                        // Enqueue the original bytes directly — no re-encode.
-                        safeEnqueue(controller, value);
+                        if (forwardBuffer) safeEnqueue(controller, forwardBuffer);
                     }
                     // Streams may end with a final SSE line that has no newline.
                     // Flush the decoder and parse that tail before persisting the
                     // response so the last provider token is not silently lost.
                     pipeBuffer += pipeDecoder.decode();
-                    if (pipeBuffer.length > 0) processProviderLine(pipeBuffer);
+                    if (pipeBuffer.length > 0 && processProviderLine(pipeBuffer)) {
+                        safeEnqueue(controller, pipeBuffer);
+                    }
                 } finally {
+                    if (!providerStreamCompleted) {
+                        try {
+                            await reader.cancel(signal.reason);
+                        } catch {
+                            // The provider may already have errored or been cancelled.
+                        }
+                    }
                     reader.releaseLock();
                 }
 
@@ -487,31 +527,40 @@ export async function handleChatRequest(
                         totalTokens: responseUsage.current?.totalTokens,
                         source: 'provider',
                     } satisfies Record<string, unknown>;
-                    await persistAssistantResponse(
-                        supabase,
-                        user.id,
-                        threadId,
-                        userMessageId,
-                        model,
-                        responseContent,
-                        responseReasoning,
-                        replyStats as Json | undefined,
-                    );
-                    await finishGenerationJob('completed');
-                    generationCompleted = true;
-                    await supabase
-                        .from('threads')
-                        .update({ updated_at: new Date().toISOString() })
-                        .eq('id', threadId)
-                        .eq('user_id', user.id);
+                    await persistThenEmitTerminal(async () => {
+                        await persistAssistantResponse(
+                            supabase,
+                            user.id,
+                            threadId,
+                            userMessageId,
+                            model,
+                            responseContent,
+                            responseReasoning,
+                            replyStats as Json | undefined,
+                        );
+                        await finishGenerationJob('completed');
+                        generationCompleted = true;
+                        try {
+                            const { error } = await supabase
+                                .from('threads')
+                                .update({ updated_at: new Date().toISOString() })
+                                .eq('id', threadId)
+                                .eq('user_id', user.id);
+                            if (error) logger.warn('[chat] failed to update thread timestamp', { error });
+                        } catch (error) {
+                            logger.warn('[chat] failed to update thread timestamp', { error });
+                        }
+                    }, async () => {
+                        if (providerStreamCompleted && !signal.aborted) {
+                            captureEvent?.('[DONE]');
+                            if (writer) await writer.close();
+                            safeEnqueue(controller, 'data: [DONE]\n\n');
+                        }
+                    });
                 } else if (signal.aborted || providerStreamCompleted) {
                     await finishGenerationJob('failed', 'Generation ended before a response was produced');
                 }
 
-                if (heartbeatInterval) {
-                    clearInterval(heartbeatInterval);
-                    heartbeatInterval = undefined;
-                }
                 if (!signal.aborted) {
                     safeClose(controller);
                 }
@@ -521,15 +570,7 @@ export async function handleChatRequest(
                     responseCharacters: responseContent.length + responseReasoning.length,
                     ...timing,
                 });
-                if (writer) {
-                    await writer.close();
-                }
             } catch (error) {
-                if (heartbeatInterval) {
-                    clearInterval(heartbeatInterval);
-                    heartbeatInterval = undefined;
-                }
-
                 if (!signal.aborted) {
                     logger.warn('[chat][perf] stream failed', {
                         model: modelForMetrics,
@@ -551,16 +592,29 @@ export async function handleChatRequest(
                 if (signal.aborted && !generationCompleted && requestUserMessageId) {
                     await finishGenerationJob('failed', 'Generation was interrupted');
                 }
-                if (writer) {
-                    await writer.close();
-                }
             } finally {
-                if (streamId) {
-                    await releaseChatStreamLock(user.id, streamId, streamLockToken);
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                    heartbeatInterval = undefined;
                 }
+                if (writer) {
+                    try {
+                        await writer.close();
+                    } catch (error) {
+                        logger.warn('[chat] failed to close stream event writer', { error });
+                    }
+                }
+                if (streamId) {
+                    try {
+                        await releaseChatStreamLock(user.id, streamId, streamLockToken);
+                    } catch (error) {
+                        logger.warn('[chat] failed to release stream lock', { error });
+                    }
+                }
+                requestSignal.removeEventListener('abort', onRequestAbort);
+                if (!responseCancelled) safeClose(controller);
             }
-        }
-    });
+    }
 
     return new Response(stream, {
         headers: {

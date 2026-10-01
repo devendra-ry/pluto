@@ -248,12 +248,21 @@ export function useThread(id: string | null, initialThread?: Thread) {
         let cancelled = false;
         setThreadState({ id, ...(initialThread ? { thread: initialThread } : {}) });
         const fetchThread = async () => {
-            const { data } = await supabase
-                .from('threads')
-                .select(THREAD_SELECT_COLUMNS)
-                .eq('id', id)
-                .single();
-            if (data && !cancelled) setThreadState({ id, thread: mapThreadRowToThread(data) });
+            try {
+                const { data, error } = await supabase
+                    .from('threads')
+                    .select(THREAD_SELECT_COLUMNS)
+                    .eq('id', id)
+                    .single();
+                if (cancelled) return;
+                if (error) {
+                    console.error('[useThread] Error fetching thread:', error);
+                    return;
+                }
+                if (data) setThreadState({ id, thread: mapThreadRowToThread(data) });
+            } catch (error) {
+                if (!cancelled) console.error('[useThread] Unexpected error fetching thread:', error);
+            }
         };
         void fetchThread();
         return () => { cancelled = true; };

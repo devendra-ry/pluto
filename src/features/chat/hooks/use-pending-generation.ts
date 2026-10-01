@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { claimPendingGenerationJob, completeGenerationJob } from './use-generation-jobs';
 import type { ChatViewMessage } from '@/shared/contracts/chat';
 import { type ReasoningEffort } from '@/shared/core/types';
@@ -33,6 +33,12 @@ export function usePendingGeneration({
     generateResponse,
 }: UsePendingGenerationParams) {
     const inFlightRef = useRef<{ chatId: string; messageId: string } | null>(null);
+    const activeChatIdRef = useRef<string | null>(chatId);
+
+    useLayoutEffect(() => {
+        activeChatIdRef.current = chatId;
+        return () => { activeChatIdRef.current = null; };
+    }, [chatId]);
 
     useEffect(() => {
         // React Strict Mode re-runs effects on mount. Keep the same claim
@@ -63,12 +69,14 @@ export function usePendingGeneration({
                     return await claimPendingGenerationJob(chatId, lastMessage.id);
                 } catch (error) {
                     console.error('Failed to claim generation job:', error);
-                    showToast('Could not start the response. Refresh this chat to retry.', 'error');
+                    if (activeChatIdRef.current === chatId && inFlightRef.current === run) {
+                        showToast('Could not start the response. Refresh this chat to retry.', 'error');
+                    }
                     return null;
                 }
             })();
 
-            if (inFlightRef.current !== run || !claimedJob) {
+            if (activeChatIdRef.current !== chatId || inFlightRef.current !== run || !claimedJob) {
                 return;
             }
 
@@ -89,7 +97,7 @@ export function usePendingGeneration({
                 succeeded = false;
             }
 
-            if (inFlightRef.current !== run) {
+            if (activeChatIdRef.current !== chatId || inFlightRef.current !== run) {
                 return;
             }
 
@@ -99,6 +107,9 @@ export function usePendingGeneration({
                 succeeded ? undefined : 'Generation did not complete'
             );
         })()
+            .catch((error) => {
+                console.error('Failed to finish pending generation job:', error);
+            })
             .finally(() => {
                 if (inFlightRef.current === run) {
                     inFlightRef.current = null;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt, cleanupEmptyThreads, triggerThreadRefresh } from '@/features/threads';
 import { startChatWithMessage, type StartChatWithMessageInput } from '@/features/chat';
@@ -11,11 +11,29 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { Wand2, BookOpen, Code, GraduationCap, Loader2, type LucideIcon } from 'lucide-react';
 import { z } from 'zod';
+import { SerialValueWriter } from '@/shared/lib/serial-value-writer';
 
 function toErrorRecord(error: unknown): Record<string, unknown> {
   if (error instanceof Error) return { message: error.message };
   const result = z.record(z.string(), z.unknown()).safeParse(error);
   return result.success ? result.data : {};
+}
+
+async function persistCreatedValue<T>(
+  writer: SerialValueWriter<T>,
+  createdValue: T,
+  requestedValue: T,
+  persist: (value: T) => Promise<void>,
+  restoreLatestValue: (value: T) => void,
+  reportFailure: (error: unknown) => void,
+) {
+  if (Object.is(requestedValue, createdValue)) return;
+
+  const result = await writer.write(requestedValue, persist);
+  if (!result.ok && writer.isLatest(result.revision)) {
+    restoreLatestValue(result.value);
+    reportFailure(result.error);
+  }
 }
 
 // Map icon names to components
@@ -34,6 +52,17 @@ export default function HomePage() {
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   const reasoningEffortRef = useRef<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   const [systemPrompt, setSystemPrompt] = useState('');
+  const systemPromptRef = useRef('');
+  const mountedRef = useRef(true);
+  const [writers] = useState(() => ({
+    model: new SerialValueWriter<string>(DEFAULT_MODEL),
+    reasoning: new SerialValueWriter<ReasoningEffort>(DEFAULT_REASONING_EFFORT),
+    prompt: new SerialValueWriter(''),
+  }));
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [isLoading, setIsLoading] = useState(false);
   const [pendingSubmission, setPendingSubmission] = useState<Pick<StartChatWithMessageInput, 'content' | 'attachments'> | null>(null);
   const submissionInFlightRef = useRef(false);
@@ -43,10 +72,6 @@ export default function HomePage() {
   const { showToast } = useToast();
 
   useEffect(() => {
-    draftThreadIdRef.current = draftThreadId;
-  }, [draftThreadId]);
-
-  useEffect(() => {
     modelRef.current = model;
   }, [model]);
   useEffect(() => {
@@ -54,18 +79,75 @@ export default function HomePage() {
   }, [reasoningEffort]);
 
   const ensureThread = useCallback(async () => {
-    if (draftThreadIdRef.current) {
-      return draftThreadIdRef.current;
-    }
-
     if (ensureThreadPromiseRef.current) {
       return ensureThreadPromiseRef.current;
     }
 
+    if (draftThreadIdRef.current) {
+      return draftThreadIdRef.current;
+    }
+
     const createPromise = (async () => {
-      const thread = await createThread(modelRef.current, reasoningEffortRef.current, systemPrompt);
+      const savedModel = modelRef.current;
+      const savedEffort = reasoningEffortRef.current;
+      const savedPrompt = systemPromptRef.current;
+      const thread = await createThread(savedModel, savedEffort, savedPrompt);
+
+      // Creation stored the values captured above. Establish those as the
+      // confirmed writer baselines before later UI changes can enqueue writes.
+      writers.model.synchronize(savedModel);
+      writers.reasoning.synchronize(savedEffort);
+      writers.prompt.synchronize(savedPrompt);
+      // Keep ensureThread callers coalesced until reconciliation settles. The
+      // ref lets setting handlers queue later choices behind the initial writes.
       draftThreadIdRef.current = thread.id;
-      setDraftThreadId(thread.id);
+
+      await Promise.all([
+        persistCreatedValue(
+          writers.model,
+          savedModel,
+          modelRef.current,
+          value => updateThreadModel(thread.id, value),
+          value => {
+            if (!mountedRef.current) return;
+            modelRef.current = value;
+            setModel(value);
+          },
+          error => {
+            if (mountedRef.current) showToast(error instanceof Error ? error.message : 'Failed to update model', 'error');
+          },
+        ),
+        persistCreatedValue(
+          writers.reasoning,
+          savedEffort,
+          reasoningEffortRef.current,
+          value => updateReasoningEffort(thread.id, value),
+          value => {
+            if (!mountedRef.current) return;
+            reasoningEffortRef.current = value;
+            setReasoningEffort(value);
+          },
+          error => {
+            if (mountedRef.current) showToast(error instanceof Error ? error.message : 'Failed to update reasoning effort', 'error');
+          },
+        ),
+        persistCreatedValue(
+          writers.prompt,
+          savedPrompt,
+          systemPromptRef.current,
+          value => updateThreadSystemPrompt(thread.id, value),
+          value => {
+            if (!mountedRef.current) return;
+            systemPromptRef.current = value;
+            setSystemPrompt(value);
+          },
+          error => {
+            if (mountedRef.current) showToast(error instanceof Error ? error.message : 'Failed to update system prompt', 'error');
+          },
+        ),
+      ]);
+
+      if (mountedRef.current) setDraftThreadId(thread.id);
       return thread.id;
     })();
 
@@ -77,59 +159,45 @@ export default function HomePage() {
         ensureThreadPromiseRef.current = null;
       }
     }
-  }, [systemPrompt]);
+  }, [showToast, writers]);
 
   const handleSystemPromptChange = async (nextPrompt: string) => {
-    const previousPrompt = systemPrompt;
+    systemPromptRef.current = nextPrompt;
     setSystemPrompt(nextPrompt);
-    if (draftThreadId) {
-      try {
-        await updateThreadSystemPrompt(draftThreadId, nextPrompt);
-      } catch (error) {
-        setSystemPrompt(previousPrompt);
-        const message = error instanceof Error ? error.message : 'Failed to update system prompt';
-        showToast(message, 'error');
-      }
+    const targetThreadId = draftThreadIdRef.current;
+    if (!targetThreadId) { writers.prompt.synchronize(nextPrompt); return; }
+    const result = await writers.prompt.write(nextPrompt, value => updateThreadSystemPrompt(targetThreadId, value));
+    if (!result.ok && mountedRef.current && writers.prompt.isLatest(result.revision)) {
+      systemPromptRef.current = result.value;
+      setSystemPrompt(result.value);
+      throw result.error;
     }
   };
 
-  const handleModelChange = (nextModel: string) => {
-    const previousModel = modelRef.current;
+  const handleModelChange = async (nextModel: string) => {
     modelRef.current = nextModel;
     setModel(nextModel);
-    if (!draftThreadId) return;
-
-    void (async () => {
-      try {
-        await updateThreadModel(draftThreadId, nextModel);
-      } catch (error) {
-        setModel((current) => {
-          const resolved = current === nextModel ? previousModel : current;
-          modelRef.current = resolved;
-          return resolved;
-        });
-        const message = error instanceof Error ? error.message : 'Failed to update model';
-        showToast(message, 'error');
-      }
-    })();
+    const targetThreadId = draftThreadIdRef.current;
+    if (!targetThreadId) { writers.model.synchronize(nextModel); return; }
+    const result = await writers.model.write(nextModel, value => updateThreadModel(targetThreadId, value));
+    if (!result.ok && mountedRef.current && writers.model.isLatest(result.revision)) {
+      modelRef.current = result.value;
+      setModel(result.value);
+      showToast(result.error instanceof Error ? result.error.message : 'Failed to update model', 'error');
+    }
   };
 
-  const handleReasoningEffortChange = (nextEffort: ReasoningEffort) => {
-    const previousEffort = reasoningEffort;
+  const handleReasoningEffortChange = async (nextEffort: ReasoningEffort) => {
     reasoningEffortRef.current = nextEffort;
     setReasoningEffort(nextEffort);
-    if (!draftThreadId) return;
-
-    void (async () => {
-      try {
-        await updateReasoningEffort(draftThreadId, nextEffort);
-      } catch (error) {
-        reasoningEffortRef.current = previousEffort;
-        setReasoningEffort((current) => current === nextEffort ? previousEffort : current);
-        const message = error instanceof Error ? error.message : 'Failed to update reasoning effort';
-        showToast(message, 'error');
-      }
-    })();
+    const targetThreadId = draftThreadIdRef.current;
+    if (!targetThreadId) { writers.reasoning.synchronize(nextEffort); return; }
+    const result = await writers.reasoning.write(nextEffort, value => updateReasoningEffort(targetThreadId, value));
+    if (!result.ok && mountedRef.current && writers.reasoning.isLatest(result.revision)) {
+      reasoningEffortRef.current = result.value;
+      setReasoningEffort(result.value);
+      showToast(result.error instanceof Error ? result.error.message : 'Failed to update reasoning effort', 'error');
+    }
   };
 
   const handleSend = async (
@@ -149,11 +217,12 @@ export default function HomePage() {
         attachments,
         modelId: effectiveModel,
         reasoningEffort: reasoningEffortRef.current,
-        systemPrompt: systemPrompt.trim().length > 0
-          ? systemPrompt.trim()
+        systemPrompt: systemPromptRef.current.trim().length > 0
+          ? systemPromptRef.current.trim()
           : null,
       });
 
+      if (!mountedRef.current) return true;
       draftThreadIdRef.current = threadId;
       setDraftThreadId(threadId);
       triggerThreadRefresh();
@@ -165,6 +234,9 @@ export default function HomePage() {
       router.push(`/c/${threadId}`);
       return true;
     } catch (error: unknown) {
+      submissionInFlightRef.current = false;
+      if (!mountedRef.current) return false;
+
       const errorRecord = toErrorRecord(error);
 
       const errorMessage = typeof errorRecord.message === 'string'
@@ -176,7 +248,6 @@ export default function HomePage() {
         console.error('Failed to create chat:', error);
       }
       showToast(errorMessage || 'Failed to create chat', 'error');
-      submissionInFlightRef.current = false;
       setPendingSubmission(null);
       setIsLoading(false);
       return false;
@@ -191,28 +262,28 @@ export default function HomePage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-plum-900">
+    <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
       <div className={`flex min-h-0 flex-1 flex-col items-center overflow-y-auto p-4 ${pendingSubmission ? 'justify-start' : 'justify-center'}`}>
         {pendingSubmission ? (
           <div className="w-full max-w-3xl px-4 pt-8">
             <div className="mb-6 flex justify-end">
-              <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-plum-700/80 px-4 py-3 text-zinc-100">
+              <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-border bg-secondary px-4 py-3 text-secondary-foreground shadow-sm">
                 {pendingSubmission.content || (
-                  <span className="text-zinc-300">
+                  <span className="text-muted-foreground">
                     {pendingSubmission.attachments.map((attachment) => attachment.name).join(', ')}
                   </span>
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-2 py-2 text-sm text-zinc-400" role="status" aria-live="polite">
-              <Loader2 className="h-4 w-4 animate-spin text-brand-300" aria-hidden="true" />
+            <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground" role="status" aria-live="polite">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
               <span>Starting your response…</span>
             </div>
           </div>
         ) : (
         <div className="w-full max-w-3xl flex flex-col items-start px-4">
           {/* Main heading */}
-          <h1 className="text-3xl md:text-4xl font-semibold text-zinc-100 mb-8 tracking-tight text-center md:text-left">
+          <h1 className="text-3xl md:text-4xl font-semibold text-foreground mb-8 tracking-tight text-center md:text-left">
             How can I help you?
           </h1>
 
@@ -226,7 +297,7 @@ export default function HomePage() {
                   key={cat.label}
                   variant="ghost"
                   onClick={() => handleSuggestionClick(cat.prompt)}
-                  className="h-10 justify-center gap-2 rounded-full border border-plum-600 bg-transparent px-3 text-[15px] font-medium text-zinc-400 transition-all hover:bg-plum-700 hover:text-zinc-100 sm:px-4"
+                  className="h-11 justify-center gap-2 rounded-full border border-border bg-card px-3 text-[15px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring sm:px-4"
                 >
                   <IconComponent className="h-4 w-4" />
                   {cat.label}
@@ -241,7 +312,7 @@ export default function HomePage() {
               <button
                 key={i}
                 onClick={() => handleSuggestionClick(prompt)}
-                className="w-full text-left px-0 py-2.5 text-base text-zinc-400/90 hover:text-zinc-200 transition-colors"
+                className="w-full rounded-md px-2 py-3 text-left text-base text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {prompt}
               </button>
@@ -266,7 +337,7 @@ export default function HomePage() {
         onSystemPromptChange={handleSystemPromptChange}
       />
       {!pendingSubmission && (
-        <p className="px-4 pb-3 text-center text-xs text-zinc-500">
+        <p className="px-4 pb-3 text-center text-xs text-muted-foreground">
           Make sure you agree to our <span className="underline">Terms</span> and our{' '}
           <span className="underline">Privacy Policy</span>
         </p>

@@ -35,22 +35,22 @@ export function AttachmentList({ items, onRemove, onRetry }: AttachmentListProps
                 {items.map((item) => (
                     <div
                         key={item.localId}
-                        className="rounded-xl bg-plum-700/60 border border-white/10 px-3 py-2"
+                        className="rounded-xl bg-accent border border-border px-3 py-2"
                     >
                         <div className="flex items-center gap-2">
                             {item.status === 'failed' ? (
-                                <AlertCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
+                                <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
                             ) : (
-                                <Paperclip className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+                                <Paperclip className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                             )}
-                            <span className="text-xs text-zinc-200 truncate flex-1">{item.file.name}</span>
-                            <span className="text-[11px] text-zinc-400">{formatFileSize(item.file.size)}</span>
+                            <span className="text-xs text-foreground truncate flex-1">{item.file.name}</span>
+                            <span className="text-[11px] text-muted-foreground">{formatFileSize(item.file.size)}</span>
 
                             {item.status === 'failed' && (
                                 <button
                                     type="button"
                                     onClick={() => onRetry(item.localId)}
-                                    className="text-zinc-400 hover:text-zinc-100 transition-colors"
+                                    className="text-muted-foreground hover:text-foreground transition-colors"
                                     aria-label={`Retry ${item.file.name}`}
                                 >
                                     <RotateCcw className="h-3.5 w-3.5" />
@@ -60,7 +60,7 @@ export function AttachmentList({ items, onRemove, onRetry }: AttachmentListProps
                             <button
                                 type="button"
                                 onClick={() => onRemove(item.localId)}
-                                className="text-zinc-400 hover:text-zinc-100 transition-colors"
+                                className="text-muted-foreground hover:text-foreground transition-colors"
                                 aria-label={`Remove ${item.file.name}`}
                             >
                                 <X className="h-3.5 w-3.5" />
@@ -69,28 +69,28 @@ export function AttachmentList({ items, onRemove, onRetry }: AttachmentListProps
 
                         {item.status === 'uploading' && (
                             <div className="mt-1.5">
-                                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                                <div className="h-1.5 rounded-full bg-input overflow-hidden">
                                     <div
-                                        className="h-full bg-brand-400/80 transition-all duration-200"
+                                        className="h-full bg-brand-400/80 transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-200"
                                         style={{ width: `${item.progress}%` }}
                                     />
                                 </div>
-                                <p className="mt-1 text-[10px] text-zinc-400">Uploading {item.progress}%</p>
+                                <p className="mt-1 text-[10px] text-muted-foreground">Uploading {item.progress}%</p>
                             </div>
                         )}
 
                         {item.status === 'uploaded' && (
-                            <p className="mt-1 text-[10px] text-emerald-300">Uploaded</p>
+                            <p className="mt-1 text-[10px] text-success">Uploaded</p>
                         )}
 
                         {item.status === 'failed' && (
-                            <p className="mt-1 text-[10px] text-red-300">{item.error || 'Upload failed'}</p>
+                            <p className="mt-1 text-[10px] text-destructive">{item.error || 'Upload failed'}</p>
                         )}
                     </div>
                 ))}
             </div>
             {hasFailedAttachments && (
-                <p className="text-[11px] text-red-300/90">
+                <p className="text-[11px] text-destructive">
                     Retry or remove failed files before sending.
                 </p>
             )}

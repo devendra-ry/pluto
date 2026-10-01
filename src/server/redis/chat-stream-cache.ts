@@ -71,7 +71,8 @@ export class ChatStreamEventWriter {
     private buffer: string[] = [];
     private timer: ReturnType<typeof setInterval> | null = null;
     private closed = false;
-    private flushPromise: Promise<void> | null = null;
+    private flushPromise: Promise<void> = Promise.resolve();
+    private closePromise: Promise<void> | null = null;
 
     constructor(
         private readonly key: string,
@@ -93,35 +94,28 @@ export class ChatStreamEventWriter {
 
     /** Flush remaining events, set EXPIRE, and stop the timer. */
     async close(): Promise<void> {
+        if (this.closePromise) return this.closePromise;
         if (this.closed) return;
         this.closed = true;
         if (this.timer !== null) {
             clearInterval(this.timer);
             this.timer = null;
         }
-        // Wait for any in-flight flush to finish before the final one.
-        if (this.flushPromise) {
-            await this.flushPromise;
-        }
-        await this.flushWithExpire();
+        // Queue the final batch after every earlier write. Multiple threshold
+        // or timer flushes can be requested while Redis is still processing.
+        const batch = this.buffer;
+        this.buffer = [];
+        this.closePromise = this.flushPromise.then(() => this.executePipeline(batch, true));
+        this.flushPromise = this.closePromise;
+        await this.closePromise;
     }
 
     private async flush(): Promise<void> {
-        if (this.buffer.length === 0) return;
+        if (this.buffer.length === 0) return this.flushPromise;
         const batch = this.buffer;
         this.buffer = [];
-        this.flushPromise = this.executePipeline(batch, false);
-        try {
-            await this.flushPromise;
-        } finally {
-            this.flushPromise = null;
-        }
-    }
-
-    private async flushWithExpire(): Promise<void> {
-        const batch = this.buffer;
-        this.buffer = [];
-        await this.executePipeline(batch, true);
+        this.flushPromise = this.flushPromise.then(() => this.executePipeline(batch, false));
+        return this.flushPromise;
     }
 
     private async executePipeline(batch: string[], expire: boolean): Promise<void> {

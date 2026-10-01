@@ -62,6 +62,14 @@ export type ChatServiceStreamChunk =
 const MAX_STREAM_RESUME_ATTEMPTS = 2;
 const IS_DEV = process.env.NODE_ENV !== 'production';
 
+function createAbortError(): Error {
+    return new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function isAbortError(error: unknown): error is Error {
+    return error instanceof Error && error.name === 'AbortError';
+}
+
 function readNonNegativeInt(value: unknown): number | undefined {
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
     return Math.floor(value);
@@ -127,22 +135,28 @@ class ChatService {
         let resumeByteOffset = 0;
 
         while (true) {
-            const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Idempotency-Key': streamId,
-                    ...(resumeByteOffset > 0 ? { 'X-Chat-Resume-Offset': String(resumeByteOffset) } : {}),
-                },
-                body: JSON.stringify({
-                    threadId,
-                    userMessageId,
-                    model,
-                    reasoningEffort,
-                    systemPrompt,
-                }),
-                ...(signal ? { signal } : {}),
-            });
+            let response: Response;
+            try {
+                response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Idempotency-Key': streamId,
+                        ...(resumeByteOffset > 0 ? { 'X-Chat-Resume-Offset': String(resumeByteOffset) } : {}),
+                    },
+                    body: JSON.stringify({
+                        threadId,
+                        userMessageId,
+                        model,
+                        reasoningEffort,
+                        systemPrompt,
+                    }),
+                    ...(signal ? { signal } : {}),
+                });
+            } catch (error) {
+                if (signal?.aborted) throw createAbortError();
+                throw error;
+            }
 
             if (!response.ok) {
                 let message = `Failed to get response (${response.status})`;
@@ -174,13 +188,17 @@ class ChatService {
                     try {
                         readResult = await reader.read();
                     } catch (readError) {
+                        if (signal?.aborted) throw createAbortError();
+                        if (isAbortError(readError)) throw readError;
                         const message = readError instanceof Error ? readError.message : 'stream read failure';
                         throw new Error(`RESUMEABLE_STREAM_READ:${message}`);
                     }
 
                     const { done, value } = readResult;
                     if (done) {
-                        return;
+                        // EOF alone cannot confirm that the server saved the reply.
+                        // Resume a truncated connection until its terminal event arrives.
+                        throw new Error('RESUMEABLE_STREAM_READ:Chat stream ended before completion');
                     }
 
                     for (const line of lineDecoder.push(value)) {
@@ -191,7 +209,7 @@ class ChatService {
                         // boundary drift from partial UTF-8 chunks.
                         resumeByteOffset += sharedTextEncoder.encode(`data: ${data}\n\n`).byteLength;
 
-                        if (data === '[DONE]') continue;
+                        if (data === '[DONE]') return;
 
                         try {
                             // Fast path: check for error responses first (rare).
@@ -243,6 +261,8 @@ class ChatService {
                     }
                 }
             } catch (error) {
+                if (signal?.aborted) throw createAbortError();
+                if (isAbortError(error)) throw error;
                 const isResumeableReadError =
                     error instanceof Error
                     && error.message.startsWith('RESUMEABLE_STREAM_READ:');
@@ -255,6 +275,20 @@ class ChatService {
                 }
 
                 attempts += 1;
+            } finally {
+                // A consumer can stop iterating early, the signal can abort a pending
+                // read, and [DONE] can arrive before the HTTP body closes. In each case
+                // cancel the source and release the lock so the connection is freed.
+                try {
+                    void reader.cancel().catch(() => undefined);
+                } catch {
+                    // Cancellation is best effort; releasing the lock is still useful.
+                }
+                try {
+                    reader.releaseLock();
+                } catch {
+                    // A pending read owns the lock until its rejection settles.
+                }
             }
         }
     }

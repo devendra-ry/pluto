@@ -51,12 +51,30 @@ function canonicalizeAttachmentUrls<TMessage extends MessageWithAttachments>(
 
 const SIGNED_ATTACHMENT_URL_TTL_SECONDS = 60 * 60; // 1 hour
 const SIGNED_ATTACHMENT_URL_BATCH_SIZE = 100;
+const ATTACHMENT_PERSIST_CONCURRENCY = 8;
 const ATTACHMENTS_BUCKET = process.env.NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET?.trim() || DEFAULT_ATTACHMENTS_BUCKET;
+
+/** Run background writes in bounded batches and retain every failure for logging. */
+export async function runInBatches<T>(
+    items: T[],
+    batchSize: number,
+    operation: (item: T) => Promise<void>,
+): Promise<PromiseSettledResult<void>[]> {
+    const safeBatchSize = Number.isFinite(batchSize) ? Math.max(1, Math.floor(batchSize)) : 1;
+    const results: PromiseSettledResult<void>[] = [];
+    for (let i = 0; i < items.length; i += safeBatchSize) {
+        results.push(...await Promise.allSettled(
+            items.slice(i, i + safeBatchSize).map((item) => Promise.resolve().then(() => operation(item))),
+        ));
+    }
+    return results;
+}
 
 async function refreshAttachmentUrls(
     supabase: SupabaseClient<Database>,
     messages: Message[],
-    threadId: string
+    threadId: string,
+    signal?: AbortSignal,
 ) {
     const attachmentPaths = new Set<string>();
     for (const message of messages) {
@@ -72,6 +90,7 @@ async function refreshAttachmentUrls(
 
     const signedUrlByPath = new Map<string, string>();
     for (let i = 0; i < uniquePaths.length; i += SIGNED_ATTACHMENT_URL_BATCH_SIZE) {
+        if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
         const batchPaths = uniquePaths.slice(i, i + SIGNED_ATTACHMENT_URL_BATCH_SIZE);
         if (batchPaths.length === 0) continue;
 
@@ -94,6 +113,8 @@ async function refreshAttachmentUrls(
         }
     }
 
+    if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+
     const { messages: refreshedMessages, messagesToPersist } = canonicalizeAttachmentUrls(
         messages,
         threadId,
@@ -101,8 +122,10 @@ async function refreshAttachmentUrls(
     );
 
     if (messagesToPersist.length > 0) {
-        void Promise.all(
-            messagesToPersist.map(async ({ id, attachments }) => {
+        void runInBatches(
+            messagesToPersist,
+            ATTACHMENT_PERSIST_CONCURRENCY,
+            async ({ id, attachments }) => {
                 const { error } = await supabase
                     .from('messages')
                     .update({ attachments: attachments as Database['public']['Tables']['messages']['Row']['attachments'] })
@@ -114,8 +137,14 @@ async function refreshAttachmentUrls(
                         error: error.message,
                     });
                 }
-            })
-        );
+            },
+        ).then((results) => {
+            for (const result of results) {
+                if (result.status === 'rejected' && process.env.NODE_ENV !== 'production') {
+                    console.warn('[messages] Failed to persist canonical attachment URLs', result.reason);
+                }
+            }
+        });
     }
 
     return refreshedMessages;
@@ -128,9 +157,10 @@ async function refreshAttachmentUrls(
  */
 export async function loadThreadMessages(
     supabase: SupabaseClient<Database>,
-    threadId: string
+    threadId: string,
+    signal?: AbortSignal,
 ): Promise<Message[]> {
-    const { data, error } = await supabase
+    const request = supabase
         .from('messages')
         .select(MESSAGE_SELECT_COLUMNS)
         .eq('thread_id', threadId)
@@ -138,7 +168,10 @@ export async function loadThreadMessages(
         .order('created_at', { ascending: true })
         .order('id', { ascending: true });
 
+    if (signal) request.abortSignal(signal);
+    const { data, error } = await request;
+
     if (error) throw error;
     const messages = (data ?? []).map(mapMessageRowToMessage);
-    return refreshAttachmentUrls(supabase, messages, threadId);
+    return refreshAttachmentUrls(supabase, messages, threadId, signal);
 }

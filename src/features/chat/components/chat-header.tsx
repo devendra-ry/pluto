@@ -1,6 +1,8 @@
 'use client';
 
 import { ChevronDown } from 'lucide-react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { FLUID_TRANSITION } from '@/shared/lib/motion';
 
 interface ChatHeaderProps {
     showScrollButton: boolean;
@@ -9,19 +11,29 @@ interface ChatHeaderProps {
 }
 
 export function ChatHeader({ showScrollButton, hasMessages, onScrollToBottom }: ChatHeaderProps) {
+    const reduceMotion = useReducedMotion();
     return (
         <div className="relative w-full max-w-3xl mx-auto px-4">
-            {showScrollButton && hasMessages && (
-                <div className="absolute -top-14 left-1/2 -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                    <button
-                        onClick={onScrollToBottom}
-                        className="h-9 px-4 rounded-full bg-zinc-900/60 backdrop-blur-lg border border-white/5 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/80 shadow-2xl transition-all flex items-center gap-2 group"
+            <AnimatePresence>
+                {showScrollButton && hasMessages && (
+                    <motion.div
+                        key="scroll-to-bottom"
+                        initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: reduceMotion ? 0 : 4 }}
+                        transition={reduceMotion ? { duration: 0 } : FLUID_TRANSITION}
+                        className="absolute -top-14 left-1/2 -translate-x-1/2"
                     >
-                        <span className="text-sm font-semibold tracking-tight">Scroll to bottom</span>
-                        <ChevronDown className="h-4 w-4 transition-transform group-hover:translate-y-0.5" />
-                    </button>
-                </div>
-            )}
+                        <button
+                            onClick={onScrollToBottom}
+                            className="h-9 px-4 rounded-full bg-card backdrop-blur-lg border border-border text-foreground hover:text-foreground hover:bg-accent shadow-2xl transition-[color,background-color,border-color,box-shadow,opacity,transform] flex items-center gap-2 group"
+                        >
+                            <span className="text-sm font-semibold tracking-tight">Scroll to bottom</span>
+                            <ChevronDown className="h-4 w-4 transition-transform group-hover:translate-y-0.5" />
+                        </button>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

@@ -25,6 +25,7 @@ import { useThread, branchThread, type Thread } from '@/features/threads';
 import { useThreadSettings } from '../hooks/use-thread-settings';
 import { type ChatViewMessage } from '@/shared/contracts/chat';
 import { type Attachment } from '@/shared/core/types';
+import { ChatActionGate } from '../lib/chat-action-gate';
 
 interface ChatPageClientProps {
     chatId: string;
@@ -35,6 +36,29 @@ const ChatMessageList = dynamic(
     () => import('./chat-message-list').then((mod) => mod.ChatMessageList),
     { ssr: false }
 );
+
+function restoreMissingMessages(
+    currentMessages: ChatViewMessage[],
+    originalMessages: ChatViewMessage[],
+    removeIds: ReadonlySet<string>,
+): ChatViewMessage[] {
+    const restored = currentMessages.filter(message => !removeIds.has(message.id));
+    const presentIds = new Set(restored.map(message => message.id));
+
+    originalMessages.forEach((message, index) => {
+        if (removeIds.has(message.id) || presentIds.has(message.id)) return;
+        const nextOriginal = originalMessages
+            .slice(index + 1)
+            .find(candidate => presentIds.has(candidate.id));
+        const insertAt = nextOriginal
+            ? restored.findIndex(candidate => candidate.id === nextOriginal.id)
+            : restored.length;
+        restored.splice(insertAt < 0 ? restored.length : insertAt, 0, message);
+        presentIds.add(message.id);
+    });
+
+    return restored;
+}
 
 export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
     const router = useRouter();
@@ -52,6 +76,8 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
     const justAddedMessageIdRef = useRef<string | null>(null);
     const locallyDeletedMessageIdsRef = useRef<Set<string>>(new Set());
     const prevChatIdRef = useRef<string | null>(null);
+    const actionGateRef = useRef<ChatActionGate<string> | null>(null);
+    if (!actionGateRef.current) actionGateRef.current = new ChatActionGate<string>();
     const { showToast } = useToast();
 
     const {
@@ -124,11 +150,22 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
         generateResponse,
         locallyDeletedMessageIdsRef,
         confirmDestructiveDelete,
+        actionGate: actionGateRef.current,
+        isLoading,
     });
+
+    useLayoutEffect(() => {
+        const gate = actionGateRef.current;
+        gate?.setScope(chatId);
+        return () => gate?.invalidate();
+    }, [chatId]);
 
     useLayoutEffect(() => {
         // Only reset when actually switching between different chats, not on initial mount.
         if (prevChatIdRef.current !== null && prevChatIdRef.current !== chatId) {
+            closeDeleteConfirm(false);
+            justAddedMessageIdRef.current = null;
+            locallyDeletedMessageIdsRef.current.clear();
             setMessages([]);
             chatInputRef.current?.setValue('');
             resetStreamState();
@@ -136,7 +173,7 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
             setIsAtBottom(true);
         }
         prevChatIdRef.current = chatId;
-    }, [chatId, resetStreamState, resetThreadScopedState, setIsAtBottom]);
+    }, [chatId, closeDeleteConfirm, resetStreamState, resetThreadScopedState, setIsAtBottom]);
 
     usePendingGeneration({
         chatId,
@@ -155,6 +192,10 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
         attachments: Attachment[],
         existingMessages: ChatViewMessage[],
     ) => {
+        const gate = actionGateRef.current;
+        const lease = gate?.acquire(chatId);
+        if (!gate || !lease) return false;
+
         setIsLoading(true);
         // Reset the failure flag when user manually sends a message.
         clearLastRequestFailure();
@@ -169,22 +210,34 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
         };
 
         const updatedMessages = [...existingMessages, userMsg];
-        setMessages(updatedMessages);
+        setMessages(prev => gate.isValid(lease) ? [...prev, userMsg] : prev);
 
         try {
             const persistedUser = await addMessage(chatId, 'user', userMessage, undefined, targetModel, attachments);
+            if (!gate.isCurrent(lease)) return false;
             const persistedMessages = updatedMessages.map((m) =>
                 m.id === userMsg.id ? { ...m, id: persistedUser.id } : m
             );
-            setMessages(persistedMessages);
+            setMessages(prev => gate.isValid(lease)
+                ? prev.map(message => message.id === userMsg.id ? { ...message, id: persistedUser.id } : message)
+                : prev);
 
+            if (!gate.isCurrent(lease)) return false;
             await generateResponse(persistedMessages, targetModel);
             return true;
         } catch (error) {
-            setIsLoading(false);
-            console.error('Failed to send message:', error);
-            showToast('Failed to send message. Please try again.', 'error');
+            if (gate.isCurrent(lease)) {
+                setIsLoading(false);
+                setMessages(prev => gate.isValid(lease)
+                    ? prev.filter(message => message.id !== userMsg.id)
+                    : prev);
+                console.error('Failed to send message:', error);
+                showToast('Failed to send message. Please try again.', 'error');
+            }
             return false;
+        } finally {
+            if (gate.isCurrent(lease)) setIsLoading(false);
+            gate.release(lease);
         }
     }, [chatId, generateResponse, showToast, setIsLoading, clearLastRequestFailure, modelRef]);
 
@@ -202,16 +255,23 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
     }, []);
 
     const handleEdit = useCallback(async (messageId: string, newContent: string) => {
+        if (isLoading) return;
+        const gate = actionGateRef.current;
+        const lease = gate?.acquire(chatId);
+        if (!gate || !lease) return;
+
         setIsLoading(true);
         const localMessages = messagesRef.current;
         const msgIndex = localMessages.findIndex(m => m.id === messageId);
         if (msgIndex === -1) {
             setIsLoading(false);
+            gate.release(lease);
             return;
         }
         const editedMessage = localMessages[msgIndex];
         if (!editedMessage) {
             setIsLoading(false);
+            gate.release(lease);
             return;
         }
         const editedMessageAttachments = editedMessage.attachments ?? [];
@@ -227,12 +287,14 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
             attachments: editedMessageAttachments,
             model_id: editModelId,
         };
+        let editCommitted = false;
         try {
             if (deleteIds.length > 0) {
                 const confirmed = await confirmDestructiveDelete({
                     action: 'edit',
                     deleteCount: deleteIds.length,
                 });
+                if (!gate.isCurrent(lease)) return;
                 if (!confirmed) {
                     setIsLoading(false);
                     return;
@@ -241,8 +303,10 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
             if (deleteIds.length > 0) {
                 deleteIds.forEach((id) => locallyDeletedMessageIdsRef.current.add(id));
             }
-            const optimisticMessages = [...keptMessages, optimisticMessage];
-            setMessages(optimisticMessages);
+            const deleteIdSet = new Set(deleteIds);
+            setMessages(prev => gate.isValid(lease)
+                ? [...prev.filter(message => !deleteIdSet.has(message.id)), optimisticMessage]
+                : prev);
 
             const result = await editUserMessageAtomically({
                 threadId: chatId,
@@ -251,28 +315,52 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
                 modelId: editModelId,
                 attachments: editedMessageAttachments,
             });
+            if (!gate.isCurrent(lease)) return;
+            editCommitted = true;
             result.deletedMessageIds.forEach((id) => locallyDeletedMessageIdsRef.current.add(id));
             const updatedMessages = [...keptMessages, { ...optimisticMessage, id: result.userMessageId }];
 
-            setMessages(updatedMessages);
+            setMessages(prev => gate.isValid(lease)
+                ? prev.map(message => message.id === optimisticMessageId
+                    ? { ...message, id: result.userMessageId }
+                    : message)
+                : prev);
             justAddedMessageIdRef.current = result.userMessageId;
             void (async () => {
                 const refreshResult = await refreshThreadMessage(chatId, result.userMessageId);
-                if (!refreshResult.ok) {
+                if (!refreshResult.ok && gate.isCurrent(lease)) {
                     showToast(refreshResult.error, 'error');
                 }
             })();
 
+            if (!gate.isCurrent(lease)) return;
             await generateResponse(updatedMessages, editModelId);
         } catch (error) {
-            setIsLoading(false);
-            deleteIds.forEach((id) => locallyDeletedMessageIdsRef.current.delete(id));
-            setMessages(localMessages);
-            console.error('Failed to edit message:', error);
-            showToast('Failed to edit message history. Please try again.', 'error');
+            if (gate.isCurrent(lease)) {
+                setIsLoading(false);
+                if (!editCommitted) {
+                    deleteIds.forEach((id) => locallyDeletedMessageIdsRef.current.delete(id));
+                    setMessages(prev => gate.isValid(lease)
+                        ? restoreMissingMessages(
+                            prev.filter(message => message.id !== optimisticMessageId),
+                            localMessages,
+                            new Set(),
+                        )
+                        : prev);
+                    console.error('Failed to edit message:', error);
+                    showToast('Failed to edit message history. Please try again.', 'error');
+                } else {
+                    console.error('Failed to generate edited response:', error);
+                    showToast('Failed to generate response. Please try again.', 'error');
+                }
+            }
+        } finally {
+            if (gate.isCurrent(lease)) setIsLoading(false);
+            gate.release(lease);
         }
     }, [
         chatId,
+        isLoading,
         showToast,
         generateResponse,
         setIsLoading,
@@ -281,20 +369,27 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
     ]);
 
     const handleBranch = useCallback(async (messageId: string) => {
-        if (!thread) return;
+        if (!thread || isLoading) return;
+        const gate = actionGateRef.current;
+        const lease = gate?.acquire(chatId);
+        if (!gate || !lease) return;
+
         setIsLoading(true);
         showToast('Branching conversation...', 'info');
         try {
             const newThread = await branchThread(chatId, messageId, thread, messagesRef.current);
+            if (!gate.isCurrent(lease)) return;
             showToast('Conversation branched successfully!', 'success');
             router.push(`/c/${newThread.id}`);
         } catch (error) {
+            if (!gate.isCurrent(lease)) return;
             console.error('Failed to branch conversation:', error);
             showToast('Failed to branch conversation. Please try again.', 'error');
         } finally {
-            setIsLoading(false);
+            if (gate.isCurrent(lease)) setIsLoading(false);
+            gate.release(lease);
         }
-    }, [chatId, thread, showToast, router, setIsLoading]);
+    }, [chatId, thread, isLoading, showToast, router, setIsLoading]);
 
     const shouldShowEmptyState = messagesReady && visibleMessages.length === 0 && !isThinking;
     // Keep Virtuoso permanently mounted so it never loses scroll position or

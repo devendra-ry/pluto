@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { SerialValueWriter } from '@/shared/lib/serial-value-writer';
 
 import {
     updateReasoningEffort,
@@ -31,6 +32,19 @@ export function useThreadSettings({ chatId, thread, showToast }: UseThreadSettin
     const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
     const reasoningEffortRef = useRef<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
     const [systemPrompt, setSystemPrompt] = useState('');
+    const systemPromptRef = useRef('');
+    const writers = useMemo(() => ({
+        model: new SerialValueWriter<string>(DEFAULT_MODEL),
+        reasoning: new SerialValueWriter<ReasoningEffort>(DEFAULT_REASONING_EFFORT),
+        prompt: new SerialValueWriter(''),
+        scope: chatId,
+    }), [chatId]);
+    const activeWritersRef = useRef<typeof writers | null>(writers);
+
+    useLayoutEffect(() => {
+        activeWritersRef.current = writers;
+        return () => { activeWritersRef.current = null; };
+    }, [writers]);
 
     useEffect(() => {
         modelRef.current = model;
@@ -41,16 +55,19 @@ export function useThreadSettings({ chatId, thread, showToast }: UseThreadSettin
     }, [reasoningEffort]);
 
     useEffect(() => {
-        if (thread?.model && isSelectableChatModel(thread.model)) {
+        if (thread?.model && isSelectableChatModel(thread.model) && writers.model.synchronize(thread.model)) {
             modelRef.current = thread.model;
             setModel(thread.model);
         }
-        if (thread?.reasoning_effort) {
+        if (thread?.reasoning_effort && writers.reasoning.synchronize(thread.reasoning_effort)) {
             reasoningEffortRef.current = thread.reasoning_effort;
             setReasoningEffort(thread.reasoning_effort);
         }
-        setSystemPrompt(thread?.system_prompt ?? '');
-    }, [thread]);
+        if (writers.prompt.synchronize(thread?.system_prompt ?? '')) {
+            systemPromptRef.current = thread?.system_prompt ?? '';
+            setSystemPrompt(systemPromptRef.current);
+        }
+    }, [thread, writers]);
 
     const applyPendingReasoningEffort = useCallback((nextEffort: ReasoningEffort) => {
         reasoningEffortRef.current = nextEffort;
@@ -63,6 +80,7 @@ export function useThreadSettings({ chatId, thread, showToast }: UseThreadSettin
         reasoningEffortRef.current = DEFAULT_REASONING_EFFORT;
         setReasoningEffort(DEFAULT_REASONING_EFFORT);
         setSystemPrompt('');
+        systemPromptRef.current = '';
     }, []);
 
     const handleModelChange = useCallback(async (newModel: string) => {
@@ -70,44 +88,40 @@ export function useThreadSettings({ chatId, thread, showToast }: UseThreadSettin
             return;
         }
 
-        const previousModel = modelRef.current;
         modelRef.current = newModel;
         setModel(newModel);
-        try {
-            await updateThreadModel(chatId, newModel);
-        } catch (error) {
-            modelRef.current = previousModel;
-            setModel(previousModel);
-            const message = error instanceof Error ? error.message : 'Failed to update model';
+        const result = await writers.model.write(newModel, value => updateThreadModel(chatId, value));
+        if (!result.ok && activeWritersRef.current === writers && writers.model.isLatest(result.revision)) {
+            modelRef.current = result.value;
+            setModel(result.value);
+            const message = result.error instanceof Error ? result.error.message : 'Failed to update model';
             showToast(message, 'error');
         }
-    }, [chatId, showToast]);
+    }, [chatId, showToast, writers]);
 
     const handleReasoningEffortChange = useCallback(async (effort: ReasoningEffort) => {
-        const previousEffort = reasoningEffortRef.current;
         reasoningEffortRef.current = effort;
         setReasoningEffort(effort);
-        try {
-            await updateReasoningEffort(chatId, effort);
-        } catch (error) {
-            reasoningEffortRef.current = previousEffort;
-            setReasoningEffort(previousEffort);
-            const message = error instanceof Error ? error.message : 'Failed to update reasoning effort';
+        const result = await writers.reasoning.write(effort, value => updateReasoningEffort(chatId, value));
+        if (!result.ok && activeWritersRef.current === writers && writers.reasoning.isLatest(result.revision)) {
+            reasoningEffortRef.current = result.value;
+            setReasoningEffort(result.value);
+            const message = result.error instanceof Error ? result.error.message : 'Failed to update reasoning effort';
             showToast(message, 'error');
         }
-    }, [chatId, showToast]);
+    }, [chatId, showToast, writers]);
 
     const handleSystemPromptChange = useCallback(async (nextPrompt: string) => {
-        const previousPrompt = systemPrompt;
+        systemPromptRef.current = nextPrompt;
         setSystemPrompt(nextPrompt);
-        try {
-            await updateThreadSystemPrompt(chatId, nextPrompt);
-        } catch (error) {
-            setSystemPrompt(previousPrompt);
-            const message = error instanceof Error ? error.message : 'Failed to update system prompt';
-            showToast(message, 'error');
+        const result = await writers.prompt.write(nextPrompt, value => updateThreadSystemPrompt(chatId, value));
+        if (!result.ok && activeWritersRef.current === writers && writers.prompt.isLatest(result.revision)) {
+            systemPromptRef.current = result.value;
+            setSystemPrompt(result.value);
+            // The prompt editor owns its error UI and must stay open on failure.
+            throw result.error;
         }
-    }, [chatId, showToast, systemPrompt]);
+    }, [chatId, writers]);
 
     return {
         model,

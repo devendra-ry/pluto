@@ -16,6 +16,7 @@ import {
     removeMessagesById
 } from '../lib/message-helpers';
 import { loadThreadMessages } from '../lib/load-thread-messages';
+import { executeSoftDelete, restoreMessagesForFailedDelete } from '../lib/message-mutations';
 import { useMessageSubscription } from './use-message-subscription';
 
 export type RefreshMessagesResult =
@@ -90,9 +91,9 @@ export function useMessages(threadId: string | null) {
     const query = useQuery({
         queryKey: threadId ? getMessagesQueryKey(threadId) : [MESSAGE_QUERY_KEY_PREFIX, '__idle__'],
         enabled: Boolean(threadId),
-        queryFn: async () => {
+        queryFn: async ({ signal }) => {
             if (!threadId) return [];
-            return loadThreadMessages(supabase, threadId);
+            return loadThreadMessages(supabase, threadId, signal);
         },
     });
 
@@ -208,19 +209,27 @@ export async function deleteMessagesByIds(ids: string[], options?: DeleteMessage
         updateCachedThreadMessages(threadId!, (previous) => removeMessagesById(previous, idsToRemove));
     }
 
-    const { error } = await supabase.rpc('soft_delete_messages', {
-        p_message_ids: ids,
-        p_reason: options?.reason ?? 'manual',
-        p_anchor_message_id: options?.anchorMessageId ?? null,
-    });
-    if (error) {
-        if (queryKey && previousMessages) {
-            queryClient.setQueryData(queryKey, previousMessages);
-        } else if (queryKey) {
-            queryClient.removeQueries({ queryKey, exact: true });
-        }
-        throw new Error(`Soft-delete failed (${error.message}). Apply the Supabase migrations and retry.`);
-    }
+    await executeSoftDelete(
+        async () => await supabase.rpc('soft_delete_messages', {
+            p_message_ids: ids,
+            p_reason: options?.reason ?? 'manual',
+            p_anchor_message_id: options?.anchorMessageId ?? null,
+        }),
+        () => {
+            if (queryKey && previousMessages) {
+                queryClient.setQueryData<Message[]>(queryKey, (current) =>
+                    restoreMessagesForFailedDelete(current, previousMessages, ids),
+                );
+            } else if (queryKey) {
+                queryClient.removeQueries({ queryKey, exact: true });
+            }
+            if (queryKey) {
+                void queryClient.invalidateQueries({ queryKey, exact: true }).catch((invalidateError: unknown) => {
+                    console.error('[messages] Failed to refresh after soft-delete failure:', invalidateError);
+                });
+            }
+        },
+    );
 
     if (queryKey) {
         return;

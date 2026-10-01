@@ -121,4 +121,122 @@ describe('ChatService', () => {
         assert.deepStrictEqual(chunks[0], { type: 'content', value: 'Hello' });
         assert.deepStrictEqual(chunks[1], { type: 'content', value: ' World' });
     });
+
+    test('streamChat resumes a clean but incomplete EOF without duplicating delivered content', async () => {
+        let requests = 0;
+        const text = 'data: {"c":"Hello"}\n\n';
+        fetchMock.mock.mockImplementation(async (_url, init) => {
+            requests += 1;
+            if (requests === 1) return new Response(text);
+            assert.strictEqual(new Headers(init?.headers).get('X-Chat-Resume-Offset'), String(new TextEncoder().encode(text).byteLength));
+            return new Response('data: [DONE]\n\n');
+        });
+        const chunks: ChatServiceStreamChunk[] = [];
+        for await (const chunk of chatService.streamChat({ model: 'm1', reasoningEffort: 'low' })) chunks.push(chunk);
+        assert.deepStrictEqual(chunks, [{ type: 'content', value: 'Hello' }]);
+        assert.strictEqual(requests, 2);
+    });
+
+    test('streamChat bounds retries when EOF repeatedly arrives without completion', async () => {
+        fetchMock.mock.mockImplementation(async () => new Response(''));
+        await assert.rejects(async () => {
+            for await (const _ of chatService.streamChat({ model: 'm1', reasoningEffort: 'low' })) { /* consume */ }
+        }, /Chat stream ended before completion/);
+        assert.strictEqual(fetchMock.mock.callCount(), 3);
+    });
+
+    test('streamChat cancels and releases a body that remains open after DONE', async () => {
+        let cancelled = false;
+        let responseBody: ReadableStream<Uint8Array> | null = null;
+        responseBody = new ReadableStream({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+            },
+            cancel() {
+                cancelled = true;
+            },
+        });
+        fetchMock.mock.mockImplementation(async () => new Response(responseBody, { status: 200 }));
+
+        const iterator = chatService.streamChat({ model: 'm1', reasoningEffort: 'low' });
+        assert.deepStrictEqual(await iterator.next(), { done: true, value: undefined });
+        await Promise.resolve();
+
+        assert.strictEqual(cancelled, true);
+        assert.strictEqual(responseBody.locked, false);
+    });
+
+    test('streamChat cancels the response body when the consumer stops early', async () => {
+        let cancelled = false;
+        const responseBody = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'));
+            },
+            cancel() {
+                cancelled = true;
+            },
+        });
+        fetchMock.mock.mockImplementation(async () => new Response(responseBody, { status: 200 }));
+
+        for await (const _chunk of chatService.streamChat({ model: 'm1', reasoningEffort: 'low' })) {
+            break;
+        }
+        await Promise.resolve();
+
+        assert.strictEqual(cancelled, true);
+        assert.strictEqual(responseBody.locked, false);
+    });
+
+    test('streamChat preserves aborts from fetch instead of retrying them', async () => {
+        const controller = new AbortController();
+        controller.abort();
+        fetchMock.mock.mockImplementation(async () => {
+            throw new DOMException('aborted', 'AbortError');
+        });
+
+        await assert.rejects(
+            async () => {
+                for await (const _chunk of chatService.streamChat({
+                    model: 'm1',
+                    reasoningEffort: 'low',
+                    signal: controller.signal,
+                })) {
+                    // Should not yield.
+                }
+            },
+            (error: unknown) => error instanceof Error && error.name === 'AbortError',
+        );
+
+        assert.strictEqual(fetchMock.mock.callCount(), 1);
+    });
+
+    test('streamChat preserves aborts from a pending reader read', async () => {
+        const controller = new AbortController();
+        const responseBody = new ReadableStream<Uint8Array>({
+            start(streamController) {
+                streamController.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'));
+            },
+            pull() {
+                return new Promise<void>((_resolve, reject) => {
+                    controller.signal.addEventListener('abort', () => {
+                        reject(new DOMException('aborted', 'AbortError'));
+                    }, { once: true });
+                });
+            },
+        });
+        fetchMock.mock.mockImplementation(async () => new Response(responseBody, { status: 200 }));
+
+        const iterator = chatService.streamChat({
+            model: 'm1',
+            reasoningEffort: 'low',
+            signal: controller.signal,
+        });
+        assert.deepStrictEqual(await iterator.next(), { done: false, value: { type: 'content', value: 'Hello' } });
+        controller.abort();
+
+        await assert.rejects(iterator.next(), (error: unknown) => error instanceof Error && error.name === 'AbortError');
+        await Promise.resolve();
+
+        assert.strictEqual(responseBody.locked, false);
+    });
 });

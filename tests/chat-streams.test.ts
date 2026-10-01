@@ -3,14 +3,19 @@ import assert from 'node:assert';
 
 let buildGoogleContents: any;
 let retryTransientProviderRequest: any;
+let ChatStreamEventWriter: any;
+let streamGoogleResponse: any;
 
 before(async () => {
     process.env.GEMINI_API_KEY = 'dummy';
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'dummy';
     const mod = await import('../src/server/providers/chat-streams');
+    const cacheMod = await import('../src/server/redis/chat-stream-cache');
     buildGoogleContents = mod.buildGoogleContents;
     retryTransientProviderRequest = mod.retryTransientProviderRequest;
+    streamGoogleResponse = mod.streamGoogleResponse;
+    ChatStreamEventWriter = cacheMod.ChatStreamEventWriter;
 });
 
 import type { PreparedChatMessage } from '../src/shared/contracts/chat';
@@ -57,4 +62,130 @@ test('does not retry a permanent provider error', async () => {
         /Invalid request/,
     );
     assert.strictEqual(calls, 1);
+});
+
+test('serializes concurrent chat stream flushes and queues close after them', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const batches: string[] = [];
+    const releases: Array<() => void> = [];
+    const redis = {
+        pipeline() {
+            let packed: string | undefined;
+            return {
+                xadd(_key: string, _id: string, fields: { e: string }) {
+                    packed = fields.e;
+                    return this;
+                },
+                expire() { return this; },
+                async exec() {
+                    active += 1;
+                    maxActive = Math.max(maxActive, active);
+                    if (packed !== undefined) batches.push(packed);
+                    const call = batches.length;
+                    if (packed !== undefined && call <= 2) {
+                        await new Promise<void>((resolve) => releases.push(resolve));
+                    }
+                    active -= 1;
+                },
+            };
+        },
+    };
+    const writer = new ChatStreamEventWriter('test-stream', redis as never);
+
+    try {
+        for (let i = 0; i < 100; i += 1) writer.push(`first-${i}`);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.strictEqual(batches.length, 1);
+
+        for (let i = 0; i < 100; i += 1) writer.push(`second-${i}`);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.strictEqual(batches.length, 1, 'the second Redis write should wait for the first');
+
+        const close = writer.close();
+        releases[0]?.();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.strictEqual(batches.length, 2);
+        releases[1]?.();
+        await close;
+
+        assert.strictEqual(maxActive, 1, 'Redis pipelines for one stream must not overlap');
+        assert.match(batches[0] ?? '', /^first-0\x1efirst-1/);
+        assert.match(batches[1] ?? '', /^second-0\x1esecond-1/);
+    } finally {
+        for (const release of releases) release();
+        await writer.close();
+    }
+});
+
+test('closes the Google stream when abort interrupts a pending provider read', async () => {
+    const abortController = new AbortController();
+    let resolveReadStarted!: () => void;
+    const readStarted = new Promise<void>((resolve) => { resolveReadStarted = resolve; });
+    let returnCalls = 0;
+    const response = {
+        [Symbol.asyncIterator]() {
+            return {
+                next() {
+                    resolveReadStarted();
+                    return new Promise<never>(() => {});
+                },
+                return() {
+                    returnCalls += 1;
+                    return Promise.resolve({ done: true, value: undefined });
+                },
+            };
+        },
+    };
+
+    const reader = streamGoogleResponse(response, abortController).getReader();
+    const pendingRead = reader.read();
+    await readStarted;
+    abortController.abort();
+
+    const result = await pendingRead;
+    assert.strictEqual(result.done, true);
+    assert.ok(returnCalls > 0, 'the upstream iterator should be asked to stop');
+});
+
+test('cancelling the Google stream aborts the provider and stops its iterator', async () => {
+    const abortController = new AbortController();
+    let nextCalls = 0;
+    let resolveSecondReadStarted!: () => void;
+    const secondReadStarted = new Promise<void>((resolve) => { resolveSecondReadStarted = resolve; });
+    let returnCalls = 0;
+    const response = {
+        [Symbol.asyncIterator]() {
+            return {
+                next() {
+                    nextCalls += 1;
+                    if (nextCalls === 1) {
+                        return Promise.resolve({
+                            done: false,
+                            value: { candidates: [{ content: { parts: [{ text: 'hello' }] } }] },
+                        });
+                    }
+                    resolveSecondReadStarted();
+                    return new Promise<never>(() => {});
+                },
+                return() {
+                    returnCalls += 1;
+                    return Promise.resolve({ done: true, value: undefined });
+                },
+            };
+        },
+    };
+
+    const reader = streamGoogleResponse(response, abortController).getReader();
+    const first = await reader.read();
+    assert.strictEqual(first.done, false);
+    assert.match(new TextDecoder().decode(first.value), /hello/);
+
+    const pendingRead = reader.read();
+    await secondReadStarted;
+    await reader.cancel('consumer stopped');
+
+    assert.strictEqual(abortController.signal.aborted, true);
+    assert.ok(returnCalls > 0, 'the upstream iterator should be asked to stop');
+    assert.strictEqual((await pendingRead).done, true);
 });

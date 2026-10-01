@@ -36,11 +36,11 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                 return this.props.fallback;
             }
             return (
-                <div className="m-4 rounded-xl border border-red-500/30 bg-red-950/30 p-4 text-zinc-100">
+                <div className="m-4 rounded-xl border border-destructive/30 bg-card p-4 text-foreground">
                     <p className="text-sm font-semibold">Something went wrong.</p>
                     <button
                         onClick={this.handleReset}
-                        className="mt-3 rounded-md border border-white/20 px-3 py-1.5 text-sm hover:bg-white/10"
+                        className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
                     >
                         Try again
                     </button>

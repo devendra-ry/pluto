@@ -59,6 +59,127 @@ function toNonNegativeInt(value: unknown): number | undefined {
     return Math.floor(value);
 }
 
+interface GoogleStreamChunk {
+    usageMetadata?: {
+        promptTokenCount?: unknown;
+        candidatesTokenCount?: unknown;
+        totalTokenCount?: unknown;
+    };
+    candidates?: Array<{
+        content?: { parts?: Array<{ text?: string; thought?: boolean }> };
+    }>;
+}
+
+const ABORTED_STREAM = Symbol('aborted-stream');
+
+export function streamGoogleResponse(
+    response: AsyncIterable<GoogleStreamChunk>,
+    abortController: AbortController,
+    onSettled: () => void = () => {},
+): ReadableStream<Uint8Array> {
+    const signal = abortController.signal;
+    const iterator = response[Symbol.asyncIterator]();
+    let cancelled = false;
+    let settled = false;
+    let iteratorStopped = false;
+    let usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | null = null;
+
+    let resolveAborted!: () => void;
+    const aborted = new Promise<typeof ABORTED_STREAM>((resolve) => {
+        resolveAborted = () => resolve(ABORTED_STREAM);
+        if (signal.aborted) resolveAborted();
+        else signal.addEventListener('abort', resolveAborted, { once: true });
+    });
+
+    const stopIterator = () => {
+        if (iteratorStopped || !iterator.return) return;
+        iteratorStopped = true;
+        try {
+            void Promise.resolve(iterator.return()).catch(() => {});
+        } catch {
+            // Cancellation is best-effort; the provider abort signal stops the request.
+        }
+    };
+
+    const finish = () => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', resolveAborted);
+        onSettled();
+    };
+
+    return new ReadableStream<Uint8Array>({
+        async pull(controller) {
+            if (cancelled || settled) return;
+            if (signal.aborted) {
+                stopIterator();
+                controller.close();
+                finish();
+                return;
+            }
+            try {
+                const next = await Promise.race([iterator.next(), aborted]);
+                if (cancelled) return;
+                if (next === ABORTED_STREAM || signal.aborted || next.done) {
+                    if (signal.aborted) stopIterator();
+                    else if (!cancelled) {
+                        if (usage) {
+                            const usageEvent = serializeChatStreamEvent({
+                                type: 'usage',
+                                usage: {
+                                    source: 'provider',
+                                    ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
+                                    ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
+                                    ...(usage.totalTokens === undefined ? {} : { totalTokens: usage.totalTokens }),
+                                }
+                            });
+                            controller.enqueue(sharedTextEncoder.encode(`data: ${usageEvent}\n\n`));
+                        }
+                        controller.enqueue(sharedTextEncoder.encode('data: [DONE]\n\n'));
+                    }
+                    controller.close();
+                    finish();
+                    return;
+                }
+
+                const chunk = next.value;
+                const usageMetadata = chunk.usageMetadata;
+                if (usageMetadata) {
+                    const inputTokens = toNonNegativeInt(usageMetadata.promptTokenCount);
+                    const outputTokens = toNonNegativeInt(usageMetadata.candidatesTokenCount);
+                    const totalTokens = toNonNegativeInt(usageMetadata.totalTokenCount);
+                    if (inputTokens !== undefined || outputTokens !== undefined || totalTokens !== undefined) {
+                        usage = { inputTokens, outputTokens, totalTokens };
+                    }
+                }
+
+                const candidate = chunk.candidates?.[0];
+                for (const part of candidate?.content?.parts ?? []) {
+                    if (cancelled || signal.aborted) break;
+                    if (!part.text) continue;
+                    const data = serializeChatStreamEvent(part.thought
+                        ? { type: 'delta', content: '', reasoning: part.text }
+                        : { type: 'delta', content: part.text, reasoning: '' });
+                    controller.enqueue(sharedTextEncoder.encode(`data: ${data}\n\n`));
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    if (signal.aborted) controller.close();
+                    else controller.error(error);
+                    stopIterator();
+                    finish();
+                }
+            }
+        },
+        cancel(reason) {
+            cancelled = true;
+            if (!signal.aborted) abortController.abort(reason);
+            stopIterator();
+            finish();
+        },
+    });
+}
+
 export function buildGoogleContents(messages: PreparedChatMessage[]) {
     return messages.map((message) => {
         const parts: Array<Record<string, unknown>> = [];
@@ -141,58 +262,27 @@ export async function getGoogleStream(
         config.systemInstruction = systemPrompt.trim();
     }
 
-    const response = await retryTransientProviderRequest(
-        () => ai.models.generateContentStream({ model, config, contents }),
-        signal,
-    );
-    return new ReadableStream({
-        async start(controller) {
-            try {
-                let usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | null = null;
-                for await (const chunk of response) {
-                    if (signal?.aborted) break;
+    const providerAbortController = new AbortController();
+    const onRequestAbort = () => providerAbortController.abort(signal?.reason);
+    if (signal?.aborted) onRequestAbort();
+    else signal?.addEventListener('abort', onRequestAbort, { once: true });
 
-                    const usageMetadata = chunk.usageMetadata;
-                    if (usageMetadata) {
-                        const inputTokens = toNonNegativeInt(usageMetadata.promptTokenCount);
-                        const outputTokens = toNonNegativeInt(usageMetadata.candidatesTokenCount);
-                        const totalTokens = toNonNegativeInt(usageMetadata.totalTokenCount);
-                        if (inputTokens !== undefined || outputTokens !== undefined || totalTokens !== undefined) {
-                            usage = { inputTokens, outputTokens, totalTokens };
-                        }
-                    }
+    let response: AsyncIterable<GoogleStreamChunk>;
+    try {
+        response = await retryTransientProviderRequest(
+            () => ai.models.generateContentStream({
+                model,
+                config: { ...config, abortSignal: providerAbortController.signal },
+                contents,
+            }),
+            providerAbortController.signal,
+        );
+    } catch (error) {
+        signal?.removeEventListener('abort', onRequestAbort);
+        throw error;
+    }
 
-                    const candidate = chunk.candidates?.[0];
-                    if (!candidate?.content?.parts) continue;
-                    for (const part of candidate.content.parts) {
-                        if (!part.text) continue;
-                        const data = serializeChatStreamEvent(part.thought
-                            ? { type: 'delta', content: '', reasoning: part.text }
-                            : { type: 'delta', content: part.text, reasoning: '' });
-                        controller.enqueue(sharedTextEncoder.encode(`data: ${data}\n\n`));
-                    }
-                }
-                if (!signal?.aborted) {
-                    if (usage) {
-                        const usageEvent = serializeChatStreamEvent({
-                            type: 'usage',
-                            usage: {
-                                source: 'provider',
-                                ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
-                                ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
-                                ...(usage.totalTokens === undefined ? {} : { totalTokens: usage.totalTokens }),
-                            }
-                        });
-                        controller.enqueue(sharedTextEncoder.encode(`data: ${usageEvent}\n\n`));
-                    }
-                    controller.enqueue(sharedTextEncoder.encode('data: [DONE]\n\n'));
-                    controller.close();
-                }
-            } catch (e) {
-                if (!signal?.aborted) {
-                    controller.error(e);
-                }
-            }
-        }
+    return streamGoogleResponse(response, providerAbortController, () => {
+        signal?.removeEventListener('abort', onRequestAbort);
     });
 }

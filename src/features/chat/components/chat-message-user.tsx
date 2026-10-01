@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { Copy, RefreshCcw, SquarePen, GitBranch, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
-import { useToast } from '@/components/ui/toast';
+import { useCopyToClipboard } from '@/shared/hooks/use-copy-to-clipboard';
 import { cn } from '@/shared/core/utils';
 import { type Attachment } from '@/shared/core/types';
 import { isLegacyAttachmentProxyUrl } from '@/features/attachments';
@@ -30,15 +30,9 @@ export function UserMessage({
 }: UserMessageProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [editContent, setEditContent] = useState(content);
-    const [copied, setCopied] = useState(false);
-    const { showToast } = useToast();
+    const { copied, copy } = useCopyToClipboard();
 
-    const handleCopy = async () => {
-        await navigator.clipboard.writeText(content);
-        setCopied(true);
-        showToast('Copied to clipboard!', 'success');
-        setTimeout(() => setCopied(false), 2000);
-    };
+    const handleCopy = () => copy(content);
 
     const handleEdit = () => {
         setEditContent(content);
@@ -62,9 +56,10 @@ export function UserMessage({
             {isEditing ? (
                 <div className="w-full max-w-[90%] md:max-w-[75%] flex flex-col gap-2">
                     <Textarea
+                        aria-label="Edit message"
                         value={editContent}
                         onChange={(e) => setEditContent(e.target.value)}
-                        className="min-h-[80px] rounded-2xl bg-plum-700 p-3 text-base text-zinc-100 focus:border-primary/50 focus-visible:ring-primary/70 resize-none"
+                        className="min-h-[80px] rounded-2xl bg-accent p-3 text-base text-foreground focus:border-primary/50 focus-visible:ring-ring resize-none"
                         autoFocus
                     />
 
@@ -73,14 +68,14 @@ export function UserMessage({
                             size="sm"
                             variant="ghost"
                             onClick={handleCancelEdit}
-                            className="text-zinc-400 hover:text-zinc-200"
+                            className="text-muted-foreground hover:text-foreground"
                         >
                             Cancel
                         </Button>
                         <Button
                             size="sm"
                             onClick={handleSaveEdit}
-                            className="bg-brand-600 hover:bg-brand-500 text-white"
+                            className="bg-primary hover:bg-brand-600 text-primary-foreground"
                         >
                             Save & Resend
                         </Button>
@@ -88,7 +83,7 @@ export function UserMessage({
                 </div>
             ) : (
                 <>
-                    <div className="max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-2 bg-plum-700/80 backdrop-blur-sm border border-white/5 text-zinc-100 shadow-lg">
+                    <div className="max-w-[85%] md:max-w-[75%] rounded-2xl rounded-br-md px-4 py-3 bg-secondary border border-border text-secondary-foreground shadow-sm">
                         {content && (
                             <p className="whitespace-pre-wrap break-words text-base leading-relaxed">{content}</p>
                         )}
@@ -100,14 +95,14 @@ export function UserMessage({
                                     return (
                                         <div
                                             key={attachment.id}
-                                            className="rounded-xl border border-white/10 bg-black/20 p-2"
+                                            className="rounded-xl border border-border bg-card p-2"
                                         >
                                             {isImage && (
                                                 <a
                                                     href={attachment.url}
                                                     target="_blank"
                                                     rel="noreferrer"
-                                                    className="block mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/30"
+                                                    className="block mb-2 overflow-hidden rounded-lg border border-border bg-background"
                                                 >
                                                     <Image
                                                         src={attachment.url}
@@ -123,12 +118,12 @@ export function UserMessage({
                                                 href={attachment.url}
                                                 target="_blank"
                                                 rel="noreferrer"
-                                                className="text-sm text-zinc-200 hover:text-zinc-100 underline underline-offset-2 truncate block"
+                                                className="text-sm text-foreground hover:text-foreground underline underline-offset-2 truncate block"
                                                 title={attachment.name}
                                             >
                                                 {attachment.name}
                                             </a>
-                                            <p className="text-xs text-zinc-400">{attachment.mimeType}</p>
+                                            <p className="text-xs text-muted-foreground">{attachment.mimeType}</p>
                                         </div>
                                     );
                                 })}
@@ -137,7 +132,7 @@ export function UserMessage({
                     </div>
 
                     {/* Action icons below message - same row */}
-                    <div className="flex items-center gap-1 mt-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity translate-x-1">
+                    <div className="flex items-center gap-1 mt-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition-opacity translate-x-1">
                         {onRetry && (
                             <ActionIcon
                                 icon={RefreshCcw}
@@ -161,7 +156,7 @@ export function UserMessage({
                             icon={copied ? Check : Copy}
                             title={copied ? "Copied!" : "Copy message"}
                             onClick={handleCopy}
-                            className={copied ? "text-emerald-400 hover:text-emerald-300" : ""}
+                            className={copied ? "text-success hover:text-success" : ""}
                         />
                     </div>
                 </>

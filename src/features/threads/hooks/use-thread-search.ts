@@ -44,21 +44,27 @@ export function useThreadSearch(userId: string | null, query: string) {
         if (!userId || !term) return;
 
         void (async () => {
-            const { data, error } = await fetchPage(userId, term, 0);
-            if (generation !== generationRef.current) return;
-            if (error) {
-                console.error('[threads] Search failed:', error);
+            try {
+                const { data, error } = await fetchPage(userId, term, 0);
+                if (generation !== generationRef.current) return;
+                if (error) {
+                    console.error('[threads] Search failed:', error);
+                    setState({ key, threads: [], hasMore: false, loading: false });
+                    return;
+                }
+                const rows = data ?? [];
+                offsetRef.current = rows.length;
+                setState({
+                    key,
+                    threads: rows.map(mapThreadRowToThread),
+                    hasMore: rows.length === THREADS_PAGE_SIZE,
+                    loading: false,
+                });
+            } catch (error) {
+                if (generation !== generationRef.current) return;
+                console.error('[threads] Unexpected error searching threads:', error);
                 setState({ key, threads: [], hasMore: false, loading: false });
-                return;
             }
-            const rows = data ?? [];
-            offsetRef.current = rows.length;
-            setState({
-                key,
-                threads: rows.map(mapThreadRowToThread),
-                hasMore: rows.length === THREADS_PAGE_SIZE,
-                loading: false,
-            });
         })();
         return () => { generationRef.current += 1; };
     }, [userId, term, key, fetchPage]);
@@ -84,6 +90,10 @@ export function useThreadSearch(userId: string | null, query: string) {
                     hasMore: rows.length === THREADS_PAGE_SIZE,
                     loading: false,
                 } : previous);
+            } catch (error) {
+                if (generation === generationRef.current) {
+                    console.error('[threads] Unexpected error paginating search:', error);
+                }
             } finally {
                 if (loadMorePromiseRef.current === promise) loadMorePromiseRef.current = null;
             }

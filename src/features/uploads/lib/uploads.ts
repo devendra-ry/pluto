@@ -64,16 +64,34 @@ export function startUploadFileForThread(
     const promise = new Promise<Attachment>((resolve, reject) => {
         let settled = false;
         let uploadXhr: XMLHttpRequest | null = null;
+        const notifyProgress = (progress: number) => {
+            try {
+                onProgress?.(progress);
+            } catch (error) {
+                if (process.env.NODE_ENV !== 'production') console.warn('[uploads] Progress callback failed', error);
+            }
+        };
+
+        const cleanup = () => {
+            if (!uploadXhr) return;
+            uploadXhr.onload = null;
+            uploadXhr.onerror = null;
+            uploadXhr.onabort = null;
+            uploadXhr.ontimeout = null;
+            uploadXhr.upload.onprogress = null;
+        };
 
         const resolveOnce = (attachment: Attachment) => {
             if (settled) return;
             settled = true;
+            cleanup();
             resolve(attachment);
         };
 
         const rejectOnce = (error: Error) => {
             if (settled) return;
             settled = true;
+            cleanup();
             reject(error);
         };
 
@@ -81,7 +99,7 @@ export function startUploadFileForThread(
             rejectOnce(new Error(`Upload canceled for "${file.name}"`));
         };
 
-        onProgress?.(1);
+        notifyProgress(1);
         const uploadBody = new FormData();
         uploadBody.append('threadId', threadId);
         uploadBody.append('file', file);
@@ -89,6 +107,7 @@ export function startUploadFileForThread(
         uploadXhr = new XMLHttpRequest();
         uploadXhr.open('POST', '/api/uploads');
         uploadXhr.responseType = 'json';
+        uploadXhr.timeout = 120_000;
         uploadXhr.setRequestHeader(
             'X-Idempotency-Key',
             `${createIdempotencyKey('upload')}-${threadId}-${file.size}-${file.lastModified}`
@@ -97,11 +116,15 @@ export function startUploadFileForThread(
         uploadXhr.upload.onprogress = (event) => {
             if (!event.lengthComputable || !onProgress) return;
             const progress = Math.max(1, Math.min(99, Math.round((event.loaded / event.total) * 100)));
-            onProgress(progress);
+            notifyProgress(progress);
         };
 
         uploadXhr.onerror = () => {
             rejectOnce(new Error(`Failed to upload "${file.name}"`));
+        };
+
+        uploadXhr.ontimeout = () => {
+            rejectOnce(new Error(`Upload timed out for "${file.name}". Please retry.`));
         };
 
         uploadXhr.onabort = () => {
@@ -125,7 +148,7 @@ export function startUploadFileForThread(
                 return;
             }
 
-            onProgress?.(100);
+            notifyProgress(100);
             resolveOnce(parsedPayload.data.attachment);
         };
 
@@ -136,6 +159,8 @@ export function startUploadFileForThread(
             if (uploadXhr && uploadXhr.readyState !== XMLHttpRequest.DONE) {
                 uploadXhr.abort();
             }
+            // Settle even if the browser does not emit an abort event.
+            failCanceled();
         };
     });
 

@@ -3,18 +3,43 @@
 import { createClient } from '@/shared/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { MessageSquare } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
+import { FLUID_EASE } from '@/shared/lib/motion';
+import { useRef, useState } from 'react';
+import { useToast } from '@/components/ui/toast';
 
 export default function LoginPage() {
-    const supabase = createClient();
+    const [supabase] = useState(() => createClient());
+    const signingInRef = useRef(false);
+    const [isSigningIn, setIsSigningIn] = useState(false);
+    const { showToast } = useToast();
+    const shouldReduceMotion = useReducedMotion();
+
+    const entranceTransition = (delay: number) => ({
+        type: 'tween' as const,
+        duration: shouldReduceMotion ? 0.2 : 0.55,
+        delay: shouldReduceMotion ? 0 : delay,
+        ease: FLUID_EASE,
+    });
 
     const handleLogin = async () => {
-        await supabase.auth.signInWithOAuth({
-            provider: 'google',
-            options: {
-                redirectTo: `${window.location.origin}/auth/callback`,
-            },
-        });
+        if (signingInRef.current) return;
+        signingInRef.current = true;
+        setIsSigningIn(true);
+        try {
+            const { error } = await supabase.auth.signInWithOAuth({
+                provider: 'google',
+                options: {
+                    redirectTo: `${window.location.origin}/auth/callback`,
+                },
+            });
+            if (error) throw error;
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : 'Unable to sign in. Please try again.', 'error');
+        } finally {
+            signingInRef.current = false;
+            setIsSigningIn(false);
+        }
     };
 
     return (
@@ -23,17 +48,18 @@ export default function LoginPage() {
                 {/* Logo and Header */}
                 <div className="flex flex-col items-center space-y-4">
                     <motion.div
-                        initial={{ scale: 0.9, opacity: 0 }}
+                        initial={{ scale: shouldReduceMotion ? 1 : 0.94, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
-                    className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary shadow-lg shadow-primary/20"
+                        transition={entranceTransition(0)}
+                        className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary shadow-lg shadow-primary/20"
                     >
-                        <MessageSquare className="w-10 h-10 text-white fill-current" />
+                        <MessageSquare className="w-10 h-10 text-primary-foreground fill-current" aria-hidden="true" />
                     </motion.div>
 
                     <motion.h1
-                        initial={{ y: 10, opacity: 0 }}
+                        initial={{ y: shouldReduceMotion ? 0 : 8, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.1 }}
+                        transition={entranceTransition(0.08)}
                         className="text-2xl font-bold tracking-tight text-foreground"
                     >
                         Sign in to Pluto
@@ -42,17 +68,19 @@ export default function LoginPage() {
 
                 {/* Login Card */}
                 <motion.div
-                    initial={{ y: 20, opacity: 0 }}
+                    initial={{ y: shouldReduceMotion ? 0 : 12, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
-                    transition={{ delay: 0.2 }}
-                    className="w-full rounded-3xl border border-border bg-card p-8 shadow-2xl"
+                    transition={entranceTransition(0.14)}
+                    className="w-full rounded-3xl border border-border bg-card p-6 shadow-xl shadow-black/20 sm:p-8"
                 >
                     <Button
                         onClick={handleLogin}
+                        disabled={isSigningIn}
+                        aria-busy={isSigningIn}
                         variant="outline"
-                        className="h-12 w-full justify-center gap-3 rounded-xl border-input bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground group"
+                        className="h-12 w-full justify-center gap-3 rounded-xl border-border bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring group"
                     >
-                        <svg className="w-5 h-5 transition-transform group-hover:scale-110" viewBox="0 0 24 24">
+                        <svg aria-hidden="true" className="w-5 h-5 transition-transform group-hover:scale-110" viewBox="0 0 24 24">
                             <path
                                 fill="#4285F4"
                                 d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -78,7 +106,7 @@ export default function LoginPage() {
                 <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    transition={{ delay: 0.3 }}
+                    transition={entranceTransition(0.2)}
                     className="text-center"
                 >
                     <p className="text-sm text-muted-foreground">
