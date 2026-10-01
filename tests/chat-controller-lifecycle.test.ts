@@ -85,28 +85,43 @@ test('cancelling the response body aborts an in-flight provider stream', async (
     process.env.GEMINI_API_KEY = 'dummy';
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'dummy';
+    process.env.UPSTASH_REDIS_REST_URL = 'https://redis.example.test';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'dummy';
     const { handleChatRequest } = await import('../src/server/chat/chat-controller');
 
     let providerSignal: AbortSignal | undefined;
     let providerBodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
     let resolveProviderRead!: () => void;
     const providerReadStarted = new Promise<void>((resolve) => { resolveProviderRead = resolve; });
+    let providerPullCount = 0;
+    const readyProviderFrames = 64;
     let resolveJobLookup!: () => void;
     const jobLookupStarted = new Promise<void>((resolve) => { resolveJobLookup = resolve; });
+    let resolveLockRelease!: () => void;
+    const lockReleaseCompleted = new Promise<void>((resolve) => { resolveLockRelease = resolve; });
+    const redisCommandLog: string[] = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url.startsWith('https://redis.example.test')) {
             const parsed = JSON.parse(String(init?.body)) as string[] | string[][];
             const isBatch = Array.isArray(parsed[0]);
-            const command = isBatch ? parsed[0] as string[] : parsed as string[];
-            let result: unknown;
-            if (command[0]?.toLowerCase() === 'get') result = null;
-            else if (command[0]?.toLowerCase() === 'set') result = 'OK';
-            else if (command[0]?.toLowerCase() === 'eval') result = 1;
-            else if (command[0]?.toLowerCase() === 'xrange') result = [];
-            else throw new Error(`Unexpected Redis command: ${command[0]}`);
-            return Response.json(isBatch ? [{ result }] : { result });
+            const commands = isBatch ? parsed as string[][] : [parsed as string[]];
+            const results = commands.map((command) => {
+                const name = command[0]?.toLowerCase();
+                redisCommandLog.push(name ?? '<empty>');
+                if (name === 'get') return { result: null };
+                if (name === 'set') return { result: 'OK' };
+                if (name === 'eval') {
+                    resolveLockRelease();
+                    return { result: 1 };
+                }
+                if (name === 'xrange') return { result: [] };
+                if (name === 'xadd') return { result: '1-0' };
+                if (name === 'expire') return { result: 1 };
+                throw new Error(`Unexpected Redis command: ${name}`);
+            });
+            return Response.json(isBatch ? results : results[0]);
         }
         if (url.includes('streamGenerateContent')) {
             providerSignal = init?.signal as AbortSignal | undefined;
@@ -114,14 +129,20 @@ test('cancelling the response body aborts an in-flight provider stream', async (
             const body = new ReadableStream<Uint8Array>({
                 start(controller) {
                     providerBodyController = controller;
-                    resolveProviderRead();
                     providerSignal?.addEventListener('abort', () => {
                         try { controller.error(new DOMException('Aborted', 'AbortError')); } catch { /* already closed */ }
                         resolveProviderPull?.();
                     }, { once: true });
                 },
                 pull() {
-                    resolveProviderRead();
+                    providerPullCount += 1;
+                    if (providerPullCount <= readyProviderFrames) {
+                        if (providerPullCount === 1) resolveProviderRead();
+                        providerBodyController?.enqueue(new TextEncoder().encode(
+                            `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: `token-${providerPullCount}` }] } }] })}\n\n`,
+                        ));
+                        return;
+                    }
                     return new Promise<void>((resolve) => { resolveProviderPull = resolve; });
                 },
             });
@@ -174,7 +195,7 @@ test('cancelling the response body aborts an in-flight provider stream', async (
     try {
         const request = new Request('https://example.test/api/chat', {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
+            headers: { 'content-type': 'application/json', 'x-idempotency-key': 'cancel-while-paused' },
             body: JSON.stringify({
                 threadId: 'thread-1',
                 userMessageId: 'user-message',
@@ -187,11 +208,22 @@ test('cancelling the response body aborts an in-flight provider stream', async (
             supabase: supabase as never,
         });
         await providerReadStarted;
+        await new Promise<void>((resolve) => setTimeout(resolve, 30));
+        assert.ok(
+            providerPullCount <= 4,
+            `provider reads should stay within a small buffer while the response is unread; observed ${providerPullCount} pulls`,
+        );
 
         await response.body!.cancel('client disconnected');
         await jobLookupStarted;
+        const lockReleased = await Promise.race([
+            lockReleaseCompleted.then(() => true),
+            new Promise<false>((resolve) => setTimeout(() => resolve(false), 1000)),
+        ]);
+        assert.ok(lockReleased, `expected cancelled stream lock release; Redis commands: ${redisCommandLog.join(', ')}`);
         assert.strictEqual(providerSignal?.aborted, true);
         assert.ok(providerBodyController, 'the provider response body should be active');
+        assert.ok(providerPullCount < readyProviderFrames, 'cancellation should not drain buffered provider frames');
     } finally {
         globalThis.fetch = originalFetch;
     }
@@ -226,9 +258,14 @@ test('the controller withholds its terminal SSE event until the reply is persist
         if (url.includes('streamGenerateContent')) {
             const body = new ReadableStream<Uint8Array>({
                 start(controller) {
-                    controller.enqueue(new TextEncoder().encode(
-                        `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: 'persisted answer' }] } }] })}\n\n`,
-                    ));
+                    const providerFrame = new TextEncoder().encode(
+                        `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: 'persisted answer 😀' }] } }] })}\n\n`,
+                    );
+                    // Split a multibyte character between transport chunks to
+                    // cover the provider decoder's incremental UTF-8 handling.
+                    controller.enqueue(providerFrame.slice(0, -4));
+                    controller.enqueue(providerFrame.slice(-4, -2));
+                    controller.enqueue(providerFrame.slice(-2));
                     controller.close();
                 },
             });
@@ -296,7 +333,7 @@ test('the controller withholds its terminal SSE event until the reply is persist
         reader = response.body!.getReader();
         const first = await reader.read();
         assert.strictEqual(first.done, false);
-        assert.match(new TextDecoder().decode(first.value), /persisted answer/);
+        assert.match(new TextDecoder().decode(first.value), /persisted answer 😀/);
         await insertStarted;
 
         let pendingReadSettled = false;

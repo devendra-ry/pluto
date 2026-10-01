@@ -41,6 +41,7 @@ export type Attachment = z.infer<typeof AttachmentSchema>;
 // Persisted assistant response performance stats.
 export type ChatResponseStats = {
     outputTokens: number,
+    reasoningTokens?: number,
     seconds: number,
     tokensPerSecond: number,
     ttfbSeconds?: number,

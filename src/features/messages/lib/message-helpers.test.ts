@@ -97,5 +97,14 @@ describe('message-helpers', () => {
             assert.strictEqual(toMessage({}), null);
             assert.strictEqual(toMessage({ id: '1' }), null); // missing fields
         });
+
+        test('retains provider reasoning usage when hydrating a saved reply', () => {
+            const message = toMessage({
+                ...baseMessage,
+                reply_stats: { outputTokens: 10, reasoningTokens: 20, seconds: 2, tokensPerSecond: 15, source: 'provider' },
+            });
+            assert.strictEqual(message?.reply_stats?.reasoningTokens, 20);
+            assert.strictEqual(message?.reply_stats?.outputTokens, 10);
+        });
     });
 });

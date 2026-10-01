@@ -189,3 +189,34 @@ test('cancelling the Google stream aborts the provider and stops its iterator', 
     assert.ok(returnCalls > 0, 'the upstream iterator should be asked to stop');
     assert.strictEqual((await pendingRead).done, true);
 });
+
+test('preserves interleaved reasoning, answer text, and final usage from Google chunks', async () => {
+    const abortController = new AbortController();
+    const response = {
+        async *[Symbol.asyncIterator]() {
+            yield {
+                candidates: [{ content: { parts: [
+                    { text: 'think one', thought: true },
+                    { text: 'answer one' },
+                ] } }],
+                usageMetadata: { promptTokenCount: 12, thoughtsTokenCount: 3 },
+            };
+            yield {
+                candidates: [{ content: { parts: [
+                    { text: 'answer two' },
+                    { text: 'think two', thought: true },
+                ] } }],
+                usageMetadata: { candidatesTokenCount: 8, totalTokenCount: 23 },
+            };
+        },
+    };
+
+    const body = await new Response(streamGoogleResponse(response, abortController)).text();
+
+    assert.match(body, /"r":"think one"/);
+    assert.match(body, /"c":"answer one"/);
+    assert.match(body, /"c":"answer two"/);
+    assert.match(body, /"r":"think two"/);
+    assert.match(body, /"inputTokens":12,"outputTokens":8,"reasoningTokens":3,"totalTokens":23/);
+    assert.ok(body.endsWith('data: [DONE]\n\n'));
+});

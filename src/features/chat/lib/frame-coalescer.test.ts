@@ -6,7 +6,7 @@ import { FrameCoalescer } from './frame-coalescer';
 test('FrameCoalescer batches requests and flushes latest state immediately at completion', () => {
     const scheduled: Array<() => void> = [];
     let flushes = 0;
-    const coalescer = new FrameCoalescer(() => { flushes += 1; }, (callback) => scheduled.push(callback));
+    const coalescer = new FrameCoalescer(() => { flushes += 1; }, (callback) => { scheduled.push(callback); });
 
     coalescer.request();
     coalescer.request();
@@ -28,4 +28,15 @@ test('FrameCoalescer batches requests and flushes latest state immediately at co
     coalescer.close();
     scheduled[2]?.();
     assert.equal(flushes, 2, 'closing must suppress callbacks still queued at stream teardown');
+});
+
+test('FrameCoalescer cancels pending work on completion and disposal', () => {
+    let cancellations = 0;
+    const coalescer = new FrameCoalescer(() => {}, () => () => { cancellations += 1; });
+    coalescer.request();
+    coalescer.flushNow();
+    assert.equal(cancellations, 1);
+    coalescer.request();
+    coalescer.close();
+    assert.equal(cancellations, 2);
 });

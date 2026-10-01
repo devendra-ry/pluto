@@ -1,46 +1,8 @@
 import { type ChatMessage, type ReasoningEffort } from '@/shared/core/types';
 import { createIdempotencyKey } from '@/shared/lib/idempotency';
 import { sharedTextEncoder } from '@/shared/lib/text-encoder';
-import { readSseDataLine, SseLineDecoder } from '@/shared/streaming/sse-line-decoder';
-import { parseChatStreamEvent, parseChatStreamPayload } from '@/shared/contracts/chat-stream';
-
-/**
- * Extract a string-typed field value from a JSON string using indexOf,
- * avoiding a full JSON.parse. Handles standard JSON escape sequences.
- * Returns '' if the field is absent, null, or not a string.
- */
-function extractJsonStringField(json: string, field: string): string {
-    // Look for "field":" pattern — the field must be a string value.
-    const needle = `"${field}":"`;
-    const start = json.indexOf(needle);
-    if (start === -1) return '';
-
-    const valueStart = start + needle.length;
-    // Walk forward to find the unescaped closing quote.
-    let i = valueStart;
-    while (i < json.length) {
-        if (json.charCodeAt(i) === 92 /* backslash */) {
-            i += 2; // skip escaped character
-            continue;
-        }
-        if (json.charCodeAt(i) === 34 /* quote */) {
-            break;
-        }
-        i++;
-    }
-
-    if (i >= json.length) return '';
-
-    const raw = json.substring(valueStart, i);
-    // Fast path: no escapes → return as-is (most SSE chunks are plain text).
-    if (raw.indexOf('\\') === -1) return raw;
-    // Slow path: unescape JSON string escapes.
-    try {
-        return JSON.parse(`"${raw}"`) as string;
-    } catch {
-        return raw;
-    }
-}
+import { SseEventDecoder } from '@/shared/streaming/sse-line-decoder';
+import { parseChatStreamEvent, parseChatStreamPayload, type ChatStreamEvent } from '@/shared/contracts/chat-stream';
 
 interface ChatStreamParams {
     threadId?: string;
@@ -55,7 +17,7 @@ interface ChatStreamParams {
 export type ChatServiceStreamChunk =
     | { type: 'content'; value: string }
     | { type: 'reasoning'; value: string }
-    | { type: 'usage'; value: { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' } }
+    | { type: 'usage'; value: { outputTokens: number; inputTokens?: number; reasoningTokens?: number; totalTokens?: number; source: 'provider' } }
     | { type: 'error'; value: string }
     | { type: 'done' };
 
@@ -75,50 +37,35 @@ function readNonNegativeInt(value: unknown): number | undefined {
     return Math.floor(value);
 }
 
-function parseUsageEvent(data: string): { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' } | null {
-    if (
-        !data.includes('"usage"')
-        && !data.includes('"usageMetadata"')
-        && !data.includes('"outputTokens"')
-        && !data.includes('"completion_tokens"')
-        && !data.includes('"tokens_completion"')
-        && !data.includes('"tokens_prompt"')
-    ) {
-        return null;
+function parseUsageEvent(event: Extract<ChatStreamEvent, { type: 'usage' }>): { outputTokens: number; inputTokens?: number; reasoningTokens?: number; totalTokens?: number; source: 'provider' } | null {
+    const usage = event.usage;
+    const inputTokens =
+        readNonNegativeInt(usage.inputTokens) ??
+        readNonNegativeInt(usage.prompt_tokens) ??
+        readNonNegativeInt(usage.promptTokenCount) ??
+        readNonNegativeInt(usage.tokens_prompt) ??
+        readNonNegativeInt(usage.native_tokens_prompt);
+    let outputTokens =
+        readNonNegativeInt(usage.outputTokens) ??
+        readNonNegativeInt(usage.completion_tokens) ??
+        readNonNegativeInt(usage.candidatesTokenCount) ??
+        readNonNegativeInt(usage.tokens_completion) ??
+        readNonNegativeInt(usage.native_tokens_completion);
+    const totalTokens =
+        readNonNegativeInt(usage.totalTokens) ??
+        readNonNegativeInt(usage.total_tokens) ??
+        readNonNegativeInt(usage.totalTokenCount);
+    const reasoningTokens =
+        readNonNegativeInt(usage.reasoningTokens) ??
+        readNonNegativeInt(usage.thoughtsTokenCount);
+
+    if (outputTokens === undefined && inputTokens !== undefined && totalTokens !== undefined) {
+        const inferred = totalTokens - inputTokens - (reasoningTokens ?? 0);
+        if (inferred >= 0) outputTokens = inferred;
     }
+    if (outputTokens === undefined) return null;
 
-    try {
-        const parsed = parseChatStreamEvent(data);
-        if (!parsed || parsed.type !== 'usage') return null;
-        const usage = parsed.usage;
-
-        const inputTokens =
-            readNonNegativeInt(usage.inputTokens) ??
-            readNonNegativeInt(usage.prompt_tokens) ??
-            readNonNegativeInt(usage.promptTokenCount) ??
-            readNonNegativeInt(usage.tokens_prompt) ??
-            readNonNegativeInt(usage.native_tokens_prompt);
-        let outputTokens =
-            readNonNegativeInt(usage.outputTokens) ??
-            readNonNegativeInt(usage.completion_tokens) ??
-            readNonNegativeInt(usage.candidatesTokenCount) ??
-            readNonNegativeInt(usage.tokens_completion) ??
-            readNonNegativeInt(usage.native_tokens_completion)
-        const totalTokens =
-            readNonNegativeInt(usage.totalTokens) ??
-            readNonNegativeInt(usage.total_tokens) ??
-            readNonNegativeInt(usage.totalTokenCount);
-
-        if (outputTokens === undefined && inputTokens !== undefined && totalTokens !== undefined) {
-            const inferred = totalTokens - inputTokens;
-            if (inferred >= 0) outputTokens = inferred;
-        }
-        if (outputTokens === undefined) return null;
-
-        return { outputTokens, inputTokens, totalTokens, source: 'provider' };
-    } catch {
-        return null;
-    }
+    return { outputTokens, inputTokens, reasoningTokens, totalTokens, source: 'provider' };
 }
 
 class ChatService {
@@ -177,7 +124,7 @@ class ChatService {
             const reader = response.body?.getReader();
             if (!reader) return;
 
-            const lineDecoder = new SseLineDecoder({
+            const eventDecoder = new SseEventDecoder({
                 label: 'chat-service',
                 ...(IS_DEV ? { onWarning: (message: string) => console.warn(message) } : {}),
             });
@@ -195,15 +142,8 @@ class ChatService {
                     }
 
                     const { done, value } = readResult;
-                    if (done) {
-                        // EOF alone cannot confirm that the server saved the reply.
-                        // Resume a truncated connection until its terminal event arrives.
-                        throw new Error('RESUMEABLE_STREAM_READ:Chat stream ended before completion');
-                    }
-
-                    for (const line of lineDecoder.push(value)) {
-                        const data = readSseDataLine(line);
-                        if (data === null) continue;
+                    const events = done ? eventDecoder.finish() : eventDecoder.push(value);
+                    for (const { data } of events) {
                         // Track acknowledged bytes by complete SSE data events so resume
                         // offsets stay aligned with replay semantics and avoid decode
                         // boundary drift from partial UTF-8 chunks.
@@ -211,53 +151,26 @@ class ChatService {
 
                         if (data === '[DONE]') return;
 
-                        try {
-                            // Fast path: check for error responses first (rare).
-                            if (data.includes('"error"')) {
-                                const parsed = parseChatStreamEvent(data);
-                                const streamError = parsed?.type === 'error'
-                                    ? parsed.message.trim()
-                                    : '';
-                                if (streamError) {
-                                    const streamDetails = parsed?.type === 'error' ? parsed.details?.trim() ?? '' : '';
-                                    const normalizedStreamError = streamDetails ? `${streamError}: ${streamDetails}` : streamError;
-                                    throw new Error(`STREAM_ERROR:${normalizedStreamError}`);
-                                }
+                        const parsed = parseChatStreamEvent(data);
+                        if (parsed?.type === 'error') {
+                            const message = parsed.message.trim();
+                            if (message) {
+                                const details = parsed.details?.trim() ?? '';
+                                throw new Error(details ? `${message}: ${details}` : message);
                             }
-
-                            const usage = parseUsageEvent(data);
-                            if (usage) {
-                                yield { type: 'usage', value: usage };
-                            }
-
-                            // Hot path: extract delta fields directly via indexOf
-                            // instead of JSON.parse to avoid allocating a full object.
-                            const reasoningContent =
-                                extractJsonStringField(data, 'r') ||
-                                extractJsonStringField(data, 'reasoning_content') ||
-                                extractJsonStringField(data, 'thinking');
-
-                            // Empty-string chunks are intentionally treated as no-op.
-                            if (reasoningContent) {
-                                yield { type: 'reasoning', value: reasoningContent };
-                            }
-
-                            const content =
-                                extractJsonStringField(data, 'c') ||
-                                extractJsonStringField(data, 'content');
-                            // Empty-string chunks are intentionally treated as no-op.
-                            if (content) {
-                                yield { type: 'content', value: content };
-                            }
-                        } catch (streamChunkError) {
-                            if (
-                                streamChunkError instanceof Error
-                                && streamChunkError.message.startsWith('STREAM_ERROR:')
-                            ) {
-                                throw new Error(streamChunkError.message.slice('STREAM_ERROR:'.length));
-                            }
-                            // Skip malformed JSON
+                        } else if (parsed?.type === 'usage') {
+                            const usage = parseUsageEvent(parsed);
+                            if (usage) yield { type: 'usage', value: usage };
+                        } else if (parsed?.type === 'delta') {
+                            if (parsed.reasoning) yield { type: 'reasoning', value: parsed.reasoning };
+                            if (parsed.content) yield { type: 'content', value: parsed.content };
                         }
+                    }
+
+                    if (done) {
+                        // EOF alone cannot confirm that the server saved the reply.
+                        // Resume a truncated connection unless finish() found [DONE].
+                        throw new Error('RESUMEABLE_STREAM_READ:Chat stream ended before completion');
                     }
                 }
             } catch (error) {

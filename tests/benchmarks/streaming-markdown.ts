@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 
 import { getMarkdownPlugins } from '../../src/features/chat/lib/markdown-plugins';
+import { isPlainMarkdownParagraph, takeFinalizedParagraphs } from '../../src/features/chat/lib/streaming-markdown-segments';
 
 const BASELINE_REMARK_PLUGINS = [remarkGfm, remarkMath];
 const BASELINE_REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex];
@@ -38,9 +39,41 @@ function render(markdown: string, optimized: boolean) {
     renderToStaticMarkup(createElement(ReactMarkdown, plugins, markdown));
 }
 
+function renderPlainParagraph(text: string) {
+    renderToStaticMarkup(createElement('p', null, text));
+}
+
 function measure(values: string[], optimized: boolean) {
     const startedAt = performance.now();
     for (const value of values) render(value, optimized);
+    return performance.now() - startedAt;
+}
+
+function measureSegmented(values: string[]) {
+    const startedAt = performance.now();
+    let processedLength = 0;
+
+    for (const latest of values) {
+        const finalized = takeFinalizedParagraphs(latest.slice(processedLength));
+        if (finalized.consumed > 0) {
+            processedLength += finalized.consumed;
+            if (finalized.blocks.length > 0) {
+                const segment = finalized.blocks.join('\n\n');
+                render(segment, false);
+            }
+        }
+
+        const tail = latest.slice(processedLength);
+        if (tail) {
+            if (isPlainMarkdownParagraph(tail)) renderPlainParagraph(tail);
+            else render(tail, true);
+        }
+    }
+
+    // The component intentionally renders the exact complete source once when
+    // streaming ends so Markdown constructs can resolve across segments.
+    const complete = values.at(-1);
+    if (complete) render(complete, false);
     return performance.now() - startedAt;
 }
 
@@ -57,6 +90,7 @@ for (const [name, values] of [
     measure(values.slice(0, 2), true);
 
     const baseline = median(Array.from({ length: ROUNDS }, () => measure(values, false)));
-    const optimized = median(Array.from({ length: ROUNDS }, () => measure(values, true)));
-    console.log(`${name}: always-on ${baseline.toFixed(1)}ms, gated ${optimized.toFixed(1)}ms, ${(baseline / optimized).toFixed(2)}x faster`);
+    const gated = median(Array.from({ length: ROUNDS }, () => measure(values, true)));
+    const segmented = median(Array.from({ length: ROUNDS }, () => measureSegmented(values)));
+    console.log(`${name}: always-on ${baseline.toFixed(1)}ms, gated ${gated.toFixed(1)}ms, segmented + final ${segmented.toFixed(1)}ms, ${(baseline / segmented).toFixed(2)}x faster`);
 }

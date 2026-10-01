@@ -63,6 +63,7 @@ interface GoogleStreamChunk {
     usageMetadata?: {
         promptTokenCount?: unknown;
         candidatesTokenCount?: unknown;
+        thoughtsTokenCount?: unknown;
         totalTokenCount?: unknown;
     };
     candidates?: Array<{
@@ -82,7 +83,12 @@ export function streamGoogleResponse(
     let cancelled = false;
     let settled = false;
     let iteratorStopped = false;
-    let usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | null = null;
+    let usage: {
+        inputTokens?: number;
+        outputTokens?: number;
+        reasoningTokens?: number;
+        totalTokens?: number;
+    } | null = null;
 
     let resolveAborted!: () => void;
     const aborted = new Promise<typeof ABORTED_STREAM>((resolve) => {
@@ -130,6 +136,7 @@ export function streamGoogleResponse(
                                     source: 'provider',
                                     ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
                                     ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
+                                    ...(usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
                                     ...(usage.totalTokens === undefined ? {} : { totalTokens: usage.totalTokens }),
                                 }
                             });
@@ -147,9 +154,15 @@ export function streamGoogleResponse(
                 if (usageMetadata) {
                     const inputTokens = toNonNegativeInt(usageMetadata.promptTokenCount);
                     const outputTokens = toNonNegativeInt(usageMetadata.candidatesTokenCount);
+                    const reasoningTokens = toNonNegativeInt(usageMetadata.thoughtsTokenCount);
                     const totalTokens = toNonNegativeInt(usageMetadata.totalTokenCount);
-                    if (inputTokens !== undefined || outputTokens !== undefined || totalTokens !== undefined) {
-                        usage = { inputTokens, outputTokens, totalTokens };
+                    if (inputTokens !== undefined || outputTokens !== undefined || reasoningTokens !== undefined || totalTokens !== undefined) {
+                        usage = {
+                            inputTokens: inputTokens ?? usage?.inputTokens,
+                            outputTokens: outputTokens ?? usage?.outputTokens,
+                            reasoningTokens: reasoningTokens ?? usage?.reasoningTokens,
+                            totalTokens: totalTokens ?? usage?.totalTokens,
+                        };
                     }
                 }
 

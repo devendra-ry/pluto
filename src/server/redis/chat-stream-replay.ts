@@ -24,14 +24,15 @@ export function buildSseReplayResponse(events: string[], byteOffset: number = 0)
         }
     }
 
-    const replayEvents = events.slice(startIndex);
-
     const stream = new ReadableStream({
-        start(controller) {
-            for (const event of replayEvents) {
-                controller.enqueue(sharedTextEncoder.encode(`data: ${event}\n\n`));
+        pull(controller) {
+            const event = events[startIndex];
+            if (event === undefined) {
+                controller.close();
+                return;
             }
-            controller.close();
+            startIndex += 1;
+            controller.enqueue(sharedTextEncoder.encode(`data: ${event}\n\n`));
         }
     });
 

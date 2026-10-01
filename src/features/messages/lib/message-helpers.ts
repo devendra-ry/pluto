@@ -115,6 +115,7 @@ function chatResponseStatsFromUnknown(value: unknown): ChatResponseStats | undef
     if (!value || typeof value !== 'object') return undefined;
     const record = value as Record<string, unknown>;
     const outputTokens = record.outputTokens;
+    const reasoningTokens = record.reasoningTokens;
     const seconds = record.seconds;
     const tokensPerSecond = record.tokensPerSecond;
     const ttfbSeconds = record.ttfbSeconds;
@@ -154,6 +155,15 @@ function chatResponseStatsFromUnknown(value: unknown): ChatResponseStats | undef
         return undefined;
     }
 
+    if (reasoningTokens !== undefined && (
+        typeof reasoningTokens !== 'number'
+        || !Number.isFinite(reasoningTokens)
+        || reasoningTokens < 0
+        || !Number.isInteger(reasoningTokens)
+    )) {
+        return undefined;
+    }
+
     if (totalTokens !== undefined && (
         typeof totalTokens !== 'number'
         || !Number.isFinite(totalTokens)
@@ -169,6 +179,7 @@ function chatResponseStatsFromUnknown(value: unknown): ChatResponseStats | undef
 
     return {
         outputTokens,
+        reasoningTokens: typeof reasoningTokens === 'number' ? reasoningTokens : undefined,
         seconds,
         tokensPerSecond,
         ttfbSeconds: typeof ttfbSeconds === 'number' ? ttfbSeconds : undefined,

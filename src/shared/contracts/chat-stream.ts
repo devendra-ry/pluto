@@ -6,6 +6,8 @@ const UsageEventSchema = z.object({
         source: z.enum(['estimated', 'provider']).optional(),
         inputTokens: z.number().nonnegative().optional(),
         outputTokens: z.number().nonnegative().optional(),
+        reasoningTokens: z.number().nonnegative().optional(),
+        thoughtsTokenCount: z.number().nonnegative().optional(),
         totalTokens: z.number().nonnegative().optional(),
         total_tokens: z.number().nonnegative().optional(),
         prompt_tokens: z.number().nonnegative().optional(),
@@ -50,12 +52,50 @@ const ErrorEventSchema = z.object({
 
 type ChatStreamUsage = z.infer<typeof UsageEventSchema>['usage'];
 
+function parseCanonicalDelta(payload: unknown): ChatStreamEvent | null {
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return null;
+
+    const event = payload as Record<string, unknown>;
+    // Keep the specialized schemas' precedence when a payload may be usage,
+    // error, legacy-choice, or an alias-based delta event.
+    if (
+        Object.hasOwn(event, 'meta')
+        || Object.hasOwn(event, 'error')
+        || Object.hasOwn(event, 'choices')
+        || Object.hasOwn(event, 'content')
+        || Object.hasOwn(event, 'reasoning_content')
+        || Object.hasOwn(event, 'thinking')
+    ) return null;
+
+    const hasContent = Object.hasOwn(event, 'c');
+    const hasReasoning = Object.hasOwn(event, 'r');
+    if (!hasContent && !hasReasoning) return null;
+
+    const content = event.c;
+    const reasoning = event.r;
+    if ((content !== undefined && typeof content !== 'string') || (reasoning !== undefined && typeof reasoning !== 'string')) {
+        return null;
+    }
+    // The delta schema requires at least one defined text field. Explicit
+    // undefined values still need to go through the schema validation path.
+    if (content === undefined && reasoning === undefined) return null;
+
+    return {
+        type: 'delta',
+        content: content ?? '',
+        reasoning: reasoning ?? '',
+    };
+}
+
 export type ChatStreamEvent =
     | { type: 'delta'; content: string; reasoning: string }
     | { type: 'usage'; usage: ChatStreamUsage }
     | { type: 'error'; message: string; details?: string };
 
 export function parseChatStreamPayload(payload: unknown): ChatStreamEvent | null {
+    const canonicalDelta = parseCanonicalDelta(payload);
+    if (canonicalDelta) return canonicalDelta;
+
     const usageResult = UsageEventSchema.safeParse(payload);
     if (usageResult.success) {
         return { type: 'usage', usage: usageResult.data.usage };

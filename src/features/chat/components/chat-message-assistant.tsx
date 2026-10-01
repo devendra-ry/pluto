@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { Copy, RefreshCcw, GitBranch, ChevronDown, Check, Brain, Loader2 } from 'lucide-react';
-import { useState, type ComponentProps } from 'react';
+import { useCallback, useId, useState, type ComponentProps } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { FLUID_TRANSITION } from '@/shared/lib/motion';
 import ReactMarkdown from 'react-markdown';
@@ -13,7 +13,11 @@ import { isLegacyAttachmentProxyUrl } from '@/features/attachments';
 import type { ChatResponseStats } from '@/shared/core/types';
 import { ActionIcon } from './chat-action-icon';
 import { StreamingMarkdown } from './streaming-markdown';
-import { useStreamedMessage } from './chat-stream-message-store';
+import { useClearCommittedStream, useStreamedMessageSelector, type StreamedMessageSnapshot } from './chat-stream-message-store';
+
+const selectContent = (snapshot: StreamedMessageSnapshot) => snapshot.content;
+const selectReasoningPresence = (snapshot: StreamedMessageSnapshot) => Boolean(snapshot.reasoning);
+const selectStats = (snapshot: StreamedMessageSnapshot) => snapshot.stats;
 
 const MARKDOWN_COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = {
     pre: ({ children }) => (
@@ -72,21 +76,29 @@ export function AssistantMessage({
     const [reasoningExpanded, setReasoningExpanded] = useState(false);
     const { copied, copy } = useCopyToClipboard();
     const reduceMotion = useReducedMotion();
-    const streamedMessage = useStreamedMessage(id);
-    const renderedContent = streamedMessage.content || content;
-    const renderedReasoning = streamedMessage.reasoning || reasoning;
-    const renderedStats = streamedMessage.stats ?? stats;
+    const reasoningPanelId = useId();
+    const selectVisibleReasoning = useCallback((snapshot: StreamedMessageSnapshot) => reasoningExpanded ? snapshot.reasoning : '', [reasoningExpanded]);
+    const streamedContent = useStreamedMessageSelector(id, selectContent);
+    const streamedReasoning = useStreamedMessageSelector(id, selectVisibleReasoning);
+    const hasStreamedReasoning = useStreamedMessageSelector(id, selectReasoningPresence);
+    const streamedStats = useStreamedMessageSelector(id, selectStats);
+    const renderedContent = streamedContent || content;
+    const renderedReasoning = streamedReasoning || reasoning;
+    const hasReasoning = hasStreamedReasoning || Boolean(reasoning);
+    const renderedStats = streamedStats ?? stats;
+    useClearCommittedStream(id, isStreaming, content, reasoning);
 
     const handleCopy = () => copy(renderedContent);
 
     // Don't return null if streaming (loading) - show loading indicator
-    if (!renderedContent && !renderedReasoning && attachments.length === 0 && !isThinking && !isStreaming) return null;
+    if (!renderedContent && !hasReasoning && attachments.length === 0 && !isThinking && !isStreaming) return null;
 
     // Show loading indicator for non-thinking models when streaming but no content yet
-    const showLoadingDots = isStreaming && !renderedContent && !renderedReasoning && attachments.length === 0 && !isThinking;
+    const showLoadingDots = isStreaming && !renderedContent && !hasReasoning && attachments.length === 0 && !isThinking;
     const formattedStats = renderedStats
         ? {
-            outputTokens: Math.max(0, Math.round(renderedStats.outputTokens)),
+            outputTokens: Math.max(0, Math.round(renderedStats.outputTokens + (renderedStats.reasoningTokens ?? 0))),
+            reasoningTokens: typeof renderedStats.reasoningTokens === 'number' ? Math.max(0, Math.round(renderedStats.reasoningTokens)) : null,
             seconds: Number(renderedStats.seconds.toFixed(1)),
             tokensPerSecond: Number(renderedStats.tokensPerSecond.toFixed(1)),
             ttfbSeconds: typeof renderedStats.ttfbSeconds === 'number' ? Number(renderedStats.ttfbSeconds.toFixed(1)) : null,
@@ -95,7 +107,7 @@ export function AssistantMessage({
         : null;
 
     return (
-        <div className="py-1 px-4 group">
+        <div className="py-1 px-4 group" aria-busy={Boolean(isStreaming)}>
             <div className="max-w-3xl">
                 {/* Loading indicator for non-thinking models */}
                 {showLoadingDots && (
@@ -107,7 +119,7 @@ export function AssistantMessage({
                 )}
 
                 {/* Reasoning section (collapsible) */}
-                {(renderedReasoning || isThinking) && (
+                {(hasReasoning || isThinking) && (
                     <div className="mb-4">
                         <div
                             className={cn(
@@ -120,6 +132,7 @@ export function AssistantMessage({
                             <button
                                 type="button"
                                 aria-expanded={reasoningExpanded}
+                                aria-controls={reasoningPanelId}
                                 onClick={() => setReasoningExpanded(!reasoningExpanded)}
                                 className={cn(
                                     "flex items-center gap-1.5 transition-colors px-0 py-2",
@@ -141,6 +154,7 @@ export function AssistantMessage({
                             <AnimatePresence initial={false}>
                                 {reasoningExpanded && <motion.div
                                     key="reasoning"
+                                    id={reasoningPanelId}
                                     initial={{ height: 0, opacity: 0 }}
                                     animate={{ height: 'auto', opacity: 1 }}
                                     exit={{ height: 0, opacity: 0 }}
@@ -152,7 +166,7 @@ export function AssistantMessage({
                                             {renderedReasoning ? (
                                                 <StreamingMarkdown
                                                     content={renderedReasoning}
-                                                    isStreaming={isStreaming}
+                                                    isStreaming={Boolean(isThinking)}
                                                     className="prose prose-invert prose-base max-w-none
                                                         prose-p:text-muted-foreground prose-p:leading-relaxed prose-p:text-[15px] prose-p:my-3
                                                         prose-li:text-[15px] prose-li:text-muted-foreground
@@ -246,6 +260,7 @@ export function AssistantMessage({
                     <div className="mt-2 text-xs text-muted-foreground">
                         {formattedStats.source === 'estimated' ? '~' : ''}
                         {formattedStats.outputTokens} tok
+                        {formattedStats.reasoningTokens !== null ? ` (${formattedStats.reasoningTokens} reasoning)` : ''}
                         {' • '}
                         {formattedStats.seconds}s
                         {' • '}

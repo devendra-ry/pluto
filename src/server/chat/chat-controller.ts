@@ -149,11 +149,19 @@ export async function handleChatRequest(
 
     const abortController = new AbortController();
     const signal = abortController.signal;
-    const onRequestAbort = () => abortController.abort(requestSignal.reason);
+    const outputPullWaiters = new Set<() => void>();
+    const notifyOutputPull = () => {
+        for (const resolve of outputPullWaiters) resolve();
+        outputPullWaiters.clear();
+    };
+    const onRequestAbort = () => {
+        abortController.abort(requestSignal.reason);
+        notifyOutputPull();
+    };
     if (requestSignal.aborted) onRequestAbort();
     else requestSignal.addEventListener('abort', onRequestAbort, { once: true });
 
-    const safeEnqueue = (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
+    const safeEnqueue = async (controller: ReadableStreamDefaultController, chunk: string | Uint8Array) => {
         try {
             if (signal.aborted || streamClosed) return;
             const encoded = typeof chunk === 'string' ? sharedTextEncoder.encode(chunk) : chunk;
@@ -163,12 +171,20 @@ export async function handleChatRequest(
                 logger.warn('[chat][controller] Failed to enqueue stream chunk', { error: error });
             }
             // Ignore closed controller errors
+            return;
+        }
+        // run() consumes the provider independently of the response body's
+        // reader. Wait for the client to request another chunk before reading
+        // more provider output so a slow client cannot grow the queue unbounded.
+        if (!signal.aborted && !streamClosed && controller.desiredSize !== null && controller.desiredSize <= 0) {
+            await new Promise<void>((resolve) => outputPullWaiters.add(resolve));
         }
     };
 
     const safeClose = (controller: ReadableStreamDefaultController) => {
         if (streamClosed) return;
         streamClosed = true;
+        notifyOutputPull();
         try {
             controller.close();
         } catch (error) {
@@ -186,10 +202,14 @@ export async function handleChatRequest(
                 if (!responseCancelled) safeClose(controller);
             });
         },
+        pull() {
+            notifyOutputPull();
+        },
         cancel(reason) {
             responseCancelled = true;
             streamClosed = true;
             if (!signal.aborted) abortController.abort(reason);
+            notifyOutputPull();
         },
     });
 
@@ -232,13 +252,13 @@ export async function handleChatRequest(
                     body = await parseJsonRequest(req);
                 } catch (error) {
                     const message = error instanceof ApiRequestError ? error.message : 'Invalid request';
-                    safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: message })}\n\n`);
+                    await safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: message })}\n\n`);
                     safeClose(controller);
                     return;
                 }
                 const parseResult = ChatRequestSchema.safeParse(body);
                 if (!parseResult.success) {
-                    safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: 'Invalid request' })}\n\n`);
+                    await safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: 'Invalid request' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
@@ -249,7 +269,7 @@ export async function handleChatRequest(
                 requestUserMessageId = userMessageId;
                 const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
                 if (!modelConfig) {
-                    safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: 'Invalid model selection' })}\n\n`);
+                    await safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: 'Invalid model selection' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
@@ -314,7 +334,7 @@ export async function handleChatRequest(
                 const systemPromptTokenEstimate = estimateSystemPromptTokens(normalizedSystemPrompt);
                 const systemPromptPlan = resolveOutputTokenPlan(limits, limits.maxOutputTokens, systemPromptTokenEstimate);
                 if (systemPromptPlan.remainingForOutput <= 0) {
-                    safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: 'System prompt is too long for the selected model context window.' })}\n\n`);
+                    await safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: 'System prompt is too long for the selected model context window.' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
@@ -406,7 +426,9 @@ export async function handleChatRequest(
 
                 // Start heartbeat now that provider connection is established.
                 heartbeatInterval = setInterval(() => {
-                    safeEnqueue(controller, ': keep-alive\n\n');
+                    if (controller.desiredSize !== null && controller.desiredSize > 0) {
+                        void safeEnqueue(controller, ': keep-alive\n\n');
+                    }
                 }, 15000);
                 // Batched event writer — buffers events and flushes via pipeline.
                 writer = streamId ? createChatStreamWriter(user.id, streamId) : null;
@@ -419,9 +441,16 @@ export async function handleChatRequest(
                 const pipeDecoder = new TextDecoder();
                 const reader = sourceStream.getReader();
                 let pipeBuffer = '';
-                let responseContent = '';
-                let responseReasoning = '';
-                const responseUsage: { current: { outputTokens?: number; inputTokens?: number; totalTokens?: number } | null } = { current: null };
+                const responseContent: string[] = [];
+                const responseReasoning: string[] = [];
+                let responseContentLength = 0;
+                let responseReasoningLength = 0;
+                const responseUsage: { current: {
+                    outputTokens?: number;
+                    reasoningTokens?: number;
+                    inputTokens?: number;
+                    totalTokens?: number;
+                } | null } = { current: null };
                 const responseStartedAt = performance.now();
                 let firstTokenAt: number | null = null;
                 let lastTokenAt: number | null = null;
@@ -462,14 +491,18 @@ export async function handleChatRequest(
                                 ...timing,
                             });
                         }
-                        responseContent += parsed.content;
-                        responseReasoning += parsed.reasoning;
+                        responseContent.push(parsed.content);
+                        responseReasoning.push(parsed.reasoning);
+                        responseContentLength += parsed.content.length;
+                        responseReasoningLength += parsed.reasoning.length;
                     }
                     if (parsed.type === 'usage') {
+                        const previousUsage = responseUsage.current;
                         responseUsage.current = {
-                            ...(parsed.usage.inputTokens === undefined ? {} : { inputTokens: parsed.usage.inputTokens }),
-                            ...(parsed.usage.outputTokens === undefined ? {} : { outputTokens: parsed.usage.outputTokens }),
-                            ...(parsed.usage.totalTokens === undefined ? {} : { totalTokens: parsed.usage.totalTokens }),
+                            inputTokens: parsed.usage.inputTokens ?? previousUsage?.inputTokens,
+                            outputTokens: parsed.usage.outputTokens ?? previousUsage?.outputTokens,
+                            reasoningTokens: parsed.usage.reasoningTokens ?? previousUsage?.reasoningTokens,
+                            totalTokens: parsed.usage.totalTokens ?? previousUsage?.totalTokens,
                         };
                     }
                     return true;
@@ -494,14 +527,14 @@ export async function handleChatRequest(
                         }
                         pipeBuffer = searchFrom > 0 ? pipeBuffer.substring(searchFrom) : pipeBuffer;
 
-                        if (forwardBuffer) safeEnqueue(controller, forwardBuffer);
+                        if (forwardBuffer) await safeEnqueue(controller, forwardBuffer);
                     }
                     // Streams may end with a final SSE line that has no newline.
                     // Flush the decoder and parse that tail before persisting the
                     // response so the last provider token is not silently lost.
                     pipeBuffer += pipeDecoder.decode();
                     if (pipeBuffer.length > 0 && processProviderLine(pipeBuffer)) {
-                        safeEnqueue(controller, pipeBuffer);
+                        await safeEnqueue(controller, pipeBuffer);
                     }
                 } finally {
                     if (!providerStreamCompleted) {
@@ -514,17 +547,22 @@ export async function handleChatRequest(
                     reader.releaseLock();
                 }
 
-                if ((providerStreamCompleted || signal.aborted) && (responseContent || responseReasoning)) {
+                if ((providerStreamCompleted || signal.aborted) && (responseContentLength > 0 || responseReasoningLength > 0)) {
+                    const persistedContent = responseContent.join('');
+                    const persistedReasoning = responseReasoning.join('');
                     const endTime = lastTokenAt ?? performance.now();
                     const seconds = Math.max((endTime - (firstTokenAt ?? responseStartedAt)) / 1000, 0.001);
                     const outputTokens = responseUsage.current?.outputTokens;
-                    const replyStats = outputTokens === undefined ? undefined : {
-                        outputTokens,
+                    const reasoningTokens = responseUsage.current?.reasoningTokens;
+                    const throughputTokens = (outputTokens ?? 0) + (reasoningTokens ?? 0);
+                    const replyStats = responseUsage.current === null ? undefined : {
+                        ...(outputTokens === undefined ? {} : { outputTokens }),
+                        ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
                         seconds,
-                        tokensPerSecond: outputTokens / seconds,
+                        tokensPerSecond: throughputTokens / seconds,
                         ttfbSeconds: firstTokenAt === null ? undefined : Math.max((firstTokenAt - responseStartedAt) / 1000, 0),
-                        inputTokens: responseUsage.current?.inputTokens,
-                        totalTokens: responseUsage.current?.totalTokens,
+                        ...(responseUsage.current.inputTokens === undefined ? {} : { inputTokens: responseUsage.current.inputTokens }),
+                        ...(responseUsage.current.totalTokens === undefined ? {} : { totalTokens: responseUsage.current.totalTokens }),
                         source: 'provider',
                     } satisfies Record<string, unknown>;
                     await persistThenEmitTerminal(async () => {
@@ -534,8 +572,8 @@ export async function handleChatRequest(
                             threadId,
                             userMessageId,
                             model,
-                            responseContent,
-                            responseReasoning,
+                            persistedContent,
+                            persistedReasoning,
                             replyStats as Json | undefined,
                         );
                         await finishGenerationJob('completed');
@@ -554,7 +592,7 @@ export async function handleChatRequest(
                         if (providerStreamCompleted && !signal.aborted) {
                             captureEvent?.('[DONE]');
                             if (writer) await writer.close();
-                            safeEnqueue(controller, 'data: [DONE]\n\n');
+                            await safeEnqueue(controller, 'data: [DONE]\n\n');
                         }
                     });
                 } else if (signal.aborted || providerStreamCompleted) {
@@ -567,7 +605,7 @@ export async function handleChatRequest(
                 logger.info('[chat][perf] stream completed', {
                     model: modelForMetrics,
                     totalMs: performance.now() - requestStartedAt,
-                    responseCharacters: responseContent.length + responseReasoning.length,
+                    responseCharacters: responseContentLength + responseReasoningLength,
                     ...timing,
                 });
             } catch (error) {
@@ -583,7 +621,7 @@ export async function handleChatRequest(
                     const message = providerUnavailable
                         ? 'The selected model is busy right now. Please retry or choose another model.'
                         : GENERIC_CHAT_ERROR_MESSAGE;
-                    safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: message })}\n\n`);
+                    await safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: message })}\n\n`);
                     safeClose(controller);
                     if (!providerUnavailable) {
                         await recordAbuseSignal(user.id, 'chat', 'stream-failure');

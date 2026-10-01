@@ -14,7 +14,7 @@ import {
 
 import type { RefreshMessagesResult } from '@/features/messages';
 import { updateThreadTitleIfNewChat } from '@/features/threads';
-import { scheduleFrame } from '@/shared/lib/animation-frame';
+import { scheduleStreamFrame } from '../lib/schedule-stream-frame';
 import { chatService } from '../lib/chat-service';
 import { FrameCoalescer } from '../lib/frame-coalescer';
 import { AVAILABLE_MODELS } from '@/shared/core/constants';
@@ -132,7 +132,7 @@ export function useChatStream({
         currentMessages: ChatViewMessage[],
         forcedModelId?: string,
         forcedSystemPrompt?: string,
-
+        recoveryAttempt = 0,
     ): Promise<boolean> => {
         const lastMsg = currentMessages[currentMessages.length - 1];
         if (!lastMsg || lastMsg.role !== 'user') return false;
@@ -204,13 +204,19 @@ export function useChatStream({
         let reasoningLength = 0;
         let fullContent = '';
         let fullReasoning = '';
-        let providerUsage: { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' } | null = null;
+        let providerUsage: { outputTokens: number; reasoningTokens?: number; inputTokens?: number; totalTokens?: number; source: 'provider' } | null = null;
         let lastFlushedContent = '';
         let lastFlushedReasoning = '';
         let lastFlushedStats: ChatResponseStats | undefined;
         let hasPendingAssistantUpdate = false;
         let requestFailed = false;
         let requestSucceeded = false;
+        let thinking = willThink;
+        const updateThinking = (next: boolean) => {
+            if (thinking === next) return;
+            thinking = next;
+            dispatch({ type: 'SET_THINKING', thinking: next });
+        };
         // Set when the server reports the cached stream is unresumable (409):
         // instead of surfacing an error we silently regenerate once.
         let shouldRegenerate = false;
@@ -221,10 +227,11 @@ export function useChatStream({
             const seconds = Math.max((endTime - firstTokenAt) / 1000, 0.001);
             const totalCharacters = contentLength + reasoningLength;
             const outputTokens = providerUsage?.outputTokens ?? (totalCharacters > 0 ? Math.ceil(totalCharacters / 3.5) : 0);
-            const tokensPerSecond = outputTokens / seconds;
+            const tokensPerSecond = (outputTokens + (providerUsage?.reasoningTokens ?? 0)) / seconds;
             const ttfbSeconds = Math.max((firstTokenAt - requestStartedAt) / 1000, 0);
             return {
                 outputTokens,
+                reasoningTokens: providerUsage?.reasoningTokens,
                 seconds,
                 tokensPerSecond,
                 ttfbSeconds,
@@ -234,11 +241,25 @@ export function useChatStream({
             };
         };
 
-        const flushAssistantUpdate = () => {
+        let lastStatsPublication = -Infinity;
+        let publishedStats: ChatResponseStats | undefined;
+        const flushAssistantUpdate = (forceStats = false) => {
             if (!hasPendingAssistantUpdate) return;
-            fullContent = contentChunks.join('');
-            fullReasoning = reasoningChunks.join('');
-            const nextStats = buildReplyStats();
+            // Join only new deltas; don't rebuild the entire transcript every frame.
+            if (contentChunks.length) {
+                fullContent += contentChunks.join('');
+                contentChunks.length = 0;
+            }
+            if (reasoningChunks.length) {
+                fullReasoning += reasoningChunks.join('');
+                reasoningChunks.length = 0;
+            }
+            const now = performance.now();
+            if (forceStats || now - lastStatsPublication >= 200) {
+                publishedStats = buildReplyStats();
+                lastStatsPublication = now;
+            }
+            const nextStats = publishedStats;
             // Guard: skip if content hasn't actually changed since last flush.
             if (
                 fullContent === lastFlushedContent
@@ -259,16 +280,7 @@ export function useChatStream({
             });
         };
 
-        const scheduleAssistantFlush = (callback: () => void) => {
-            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-                // requestAnimationFrame may stop in a background tab. Keep a
-                // modest publication cadence without slowing stream reads.
-                globalThis.setTimeout(callback, 16);
-            } else {
-                scheduleFrame(callback);
-            }
-        };
-        const assistantFlushCoalescer = new FrameCoalescer(flushAssistantUpdate, scheduleAssistantFlush);
+        const assistantFlushCoalescer = new FrameCoalescer(flushAssistantUpdate, scheduleStreamFrame);
 
         const commitAssistantMessage = () => {
             if (!isCurrentRun(generation, chatId)) return;
@@ -336,8 +348,9 @@ export function useChatStream({
                             reasoningLength += chunk.value.length;
                         }
                         hasPendingAssistantUpdate = true;
-                        dispatch({ type: 'SET_THINKING', thinking: true });
-                        assistantFlushCoalescer.request();
+                        updateThinking(true);
+                        if (!lastFlushedContent && !lastFlushedReasoning) assistantFlushCoalescer.flushNow();
+                        else assistantFlushCoalescer.request();
                     }
                 } else if (chunk.type === 'content') {
                     const now = performance.now();
@@ -345,13 +358,14 @@ export function useChatStream({
                         firstTokenAt = now;
                     }
                     lastTokenAt = now;
-                    dispatch({ type: 'SET_THINKING', thinking: false });
+                    updateThinking(false);
                     if (chunk.value) {
                         contentChunks.push(chunk.value);
                         contentLength += chunk.value.length;
                     }
                     hasPendingAssistantUpdate = true;
-                    assistantFlushCoalescer.request();
+                    if (!lastFlushedContent && !lastFlushedReasoning) assistantFlushCoalescer.flushNow();
+                    else assistantFlushCoalescer.request();
                 } else if (chunk.type === 'usage') {
                     providerUsage = chunk.value;
                     hasPendingAssistantUpdate = true;
@@ -360,6 +374,7 @@ export function useChatStream({
             }
 
             if (lastTokenAt === null) lastTokenAt = performance.now();
+            flushAssistantUpdate(true);
             assistantFlushCoalescer.flushNow();
             if (!fullContent && !fullReasoning) {
                 hasPendingAssistantUpdate = false;
@@ -383,6 +398,7 @@ export function useChatStream({
             if (!isCurrentRun(generation, chatId)) return false;
 
             if (error instanceof Error && error.name === 'AbortError') {
+                flushAssistantUpdate(true);
                 assistantFlushCoalescer.flushNow();
                 if (!fullContent && !fullReasoning) {
                     requestFailed = true;
@@ -405,17 +421,24 @@ export function useChatStream({
                 const errorMessage = error instanceof Error
                     ? error.message
                     : 'Failed to generate response. Please try again.';
-                if (errorMessage === UNRESUMABLE_STREAM_ERROR) {
+                if (errorMessage === UNRESUMABLE_STREAM_ERROR && recoveryAttempt === 0) {
                     shouldRegenerate = true;
                     showToast('Connection lost — regenerating response…', 'info');
                 } else {
                     showToast(errorMessage, 'error');
                     requestFailed = true;
                 }
-                hasPendingAssistantUpdate = false;
-                setMessages(prev => isCurrentLifecycle(lifecycle, chatId)
-                    ? prev.filter(message => message.id !== assistantMsgId)
-                    : prev);
+                flushAssistantUpdate(true);
+                assistantFlushCoalescer.flushNow();
+                if (!shouldRegenerate && (fullContent || fullReasoning)) {
+                    // Preserve useful partial text when recovery fails; the failure
+                    // banner still offers a retry instead of erasing what was read.
+                    commitAssistantMessage();
+                } else {
+                    setMessages(prev => isCurrentLifecycle(lifecycle, chatId)
+                        ? prev.filter(message => message.id !== assistantMsgId)
+                        : prev);
+                }
                 if (!shouldRegenerate) return false;
             }
         } finally {
@@ -425,7 +448,8 @@ export function useChatStream({
                 activeRunRef.current = null;
                 if (abortControllerRef.current === controller) abortControllerRef.current = null;
             }
-            streamedMessageStore.clear(assistantMsgId);
+            if (wasCurrentRun && !shouldRegenerate && (fullContent || fullReasoning)) streamedMessageStore.complete(assistantMsgId);
+            else streamedMessageStore.clear(assistantMsgId);
             if (wasCurrentRun) {
                 // Clear the synchronous guard before a recovery run is invoked. Keep
                 // the ref aligned with the reducer while its completion is queued.
@@ -438,13 +462,11 @@ export function useChatStream({
                 };
                 dispatch({ type: 'COMPLETE', failed: requestFailed });
             }
-            if (shouldRegenerate && chatIdRef.current === chatId) {
-                void generateResponseRef.current(
-                    currentMessages,
-                    forcedModelId,
-                    forcedSystemPrompt
-                );
-            }
+        }
+        if (shouldRegenerate && isCurrentLifecycle(lifecycle, chatId)) {
+            // Await the single recovery so callers finalize the generation job
+            // using its actual result, rather than racing a detached retry.
+            return generateResponseRef.current(currentMessages, forcedModelId, forcedSystemPrompt, recoveryAttempt + 1);
         }
         return requestSucceeded;
     }, [chatId, model, reasoningEffortRef, systemPrompt, showToast, setMessages, refreshPersistedReply, streamedMessageStore, isCurrentRun, isCurrentLifecycle]);

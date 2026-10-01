@@ -47,6 +47,55 @@ describe('ChatService', () => {
         assert.deepStrictEqual(chunks[1], { type: 'reasoning', value: 'Thinking' });
     });
 
+    test('streamChat parses multiline SSE data and JSON with arbitrary whitespace', async () => {
+        const encoder = new TextEncoder();
+        const bytes = encoder.encode(': ping\r\ndata: {\r\ndata:   "c" : "Actual",\r\ndata:   "metadata" : { "content" : "decoy" }\r\ndata: }\r\n\r\ndata: [DONE]');
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(bytes.slice(0, 7));
+                controller.enqueue(bytes.slice(7, 29));
+                controller.enqueue(bytes.slice(29));
+                controller.close();
+            },
+        });
+        fetchMock.mock.mockImplementation(async () => new Response(stream));
+
+        const chunks: ChatServiceStreamChunk[] = [];
+        for await (const chunk of chatService.streamChat({ model: 'm1', reasoningEffort: 'low' })) chunks.push(chunk);
+        assert.deepStrictEqual(chunks, [{ type: 'content', value: 'Actual' }]);
+        assert.strictEqual(fetchMock.mock.callCount(), 1, 'unterminated final DONE should complete the stream');
+    });
+
+    test('streamChat maps provider thoughts tokens without changing answer token counts', async () => {
+        const response = new Response(
+            'data: {"meta":"usage","usage":{"outputTokens":8,"thoughtsTokenCount":5}}\n\n'
+            + 'data: [DONE]\n\n',
+        );
+        fetchMock.mock.mockImplementation(async () => response);
+
+        const chunks: ChatServiceStreamChunk[] = [];
+        for await (const chunk of chatService.streamChat({ model: 'm1', reasoningEffort: 'low' })) chunks.push(chunk);
+        assert.deepStrictEqual(chunks, [{
+            type: 'usage',
+            value: {
+                outputTokens: 8,
+                inputTokens: undefined,
+                reasoningTokens: 5,
+                totalTokens: undefined,
+                source: 'provider',
+            },
+        }]);
+    });
+
+    test('streamChat does not double-count reasoning when inferring missing answer usage', async () => {
+        fetchMock.mock.mockImplementation(async () => new Response(
+            'data: {"meta":"usage","usage":{"inputTokens":10,"totalTokens":25,"reasoningTokens":8}}\n\ndata: [DONE]\n\n',
+        ));
+        const chunks: ChatServiceStreamChunk[] = [];
+        for await (const chunk of chatService.streamChat({ model: 'm1', reasoningEffort: 'high' })) chunks.push(chunk);
+        assert.deepStrictEqual(chunks, [{ type: 'usage', value: { outputTokens: 7, inputTokens: 10, reasoningTokens: 8, totalTokens: 25, source: 'provider' } }]);
+    });
+
     test('streamChat handles errors', async () => {
         const mockResponse = Response.json({ error: 'Internal Server Error' }, { status: 500 });
 

@@ -30,6 +30,7 @@ export function areStatsEqual(left: ChatResponseStats | undefined, right: ChatRe
     if (!left || !right) return false;
     return (
         left.outputTokens === right.outputTokens
+        && left.reasoningTokens === right.reasoningTokens
         && left.seconds === right.seconds
         && left.tokensPerSecond === right.tokensPerSecond
         && left.ttfbSeconds === right.ttfbSeconds
