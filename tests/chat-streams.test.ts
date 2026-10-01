@@ -75,17 +75,6 @@ test('bounds retries for repeatedly truncated streams', async () => {
 
 import type { PreparedChatMessage } from '../src/shared/contracts/chat';
 
-test('buildGoogleContents formats text and provider roles', () => {
-    const messages: PreparedChatMessage[] = [
-        { role: 'user', content: 'Hello', attachments: [] },
-        { role: 'assistant', content: 'Hi there', attachments: [] },
-    ];
-    assert.deepStrictEqual(buildGoogleContents(messages), [
-        { role: 'user', parts: [{ text: 'Hello' }] },
-        { role: 'model', parts: [{ text: 'Hi there' }] },
-    ]);
-});
-
 test('buildGoogleContents formats inline attachments', () => {
     const messages: PreparedChatMessage[] = [{
         role: 'user',

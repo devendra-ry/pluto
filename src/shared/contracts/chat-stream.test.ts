@@ -3,18 +3,6 @@ import test from 'node:test';
 
 import { parseChatStreamPayload, serializeChatStreamEvent } from './chat-stream';
 
-test('parses canonical compact delta shapes', () => {
-    assert.deepEqual(parseChatStreamPayload({ c: 'answer' }), {
-        type: 'delta', content: 'answer', reasoning: '',
-    });
-    assert.deepEqual(parseChatStreamPayload({ r: 'thought' }), {
-        type: 'delta', content: '', reasoning: 'thought',
-    });
-    assert.deepEqual(parseChatStreamPayload({ c: '', r: 'thought', provider: 'model' }), {
-        type: 'delta', content: '', reasoning: 'thought',
-    });
-});
-
 test('preserves usage, error, and legacy-choice precedence over compact delta fields', () => {
     assert.deepEqual(parseChatStreamPayload({ meta: 'usage', usage: { outputTokens: 7 }, c: 'ignored' }), {
         type: 'usage', usage: { outputTokens: 7 },

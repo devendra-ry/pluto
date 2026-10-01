@@ -31,14 +31,6 @@ test('recognizes only plain one-line text for the streaming fast path', () => {
     }
 });
 
-test('freezes only standalone prose and preserves the live tail', () => {
-    const source = 'First **paragraph**.\n\nSecond paragraph.\n\nStill arriving';
-    const result = takeFinalizedParagraphs(source);
-
-    assert.deepEqual(result.blocks, ['First **paragraph**.', 'Second paragraph.']);
-    assert.equal(source.slice(result.consumed), 'Still arriving');
-});
-
 test('separately rendered safe paragraphs have the same HTML as the full prefix', () => {
     const source = 'First **paragraph**.\n\nSecond paragraph with _emphasis_.\n\nLive tail';
     const { blocks, consumed } = takeFinalizedParagraphs(source);

@@ -4,6 +4,7 @@ test('unauthenticated chat route redirects to login', async ({ page }) => {
     await page.goto('/c/some-thread-id');
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole('heading', { name: 'Sign in to Pluto' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible();
 });
 
 test('unauthenticated chat API responds 401 JSON', async ({ request }) => {

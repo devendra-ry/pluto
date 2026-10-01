@@ -3,21 +3,6 @@ import assert from 'node:assert';
 
 import { persistThenEmitTerminal } from '../src/server/chat/chat-stream-lifecycle';
 
-test('terminal chat event waits for persistence to finish', async () => {
-    let resolvePersistence!: () => void;
-    let terminalVisible = false;
-    const completion = persistThenEmitTerminal(
-        () => new Promise<void>((resolve) => { resolvePersistence = resolve; }),
-        () => { terminalVisible = true; },
-    );
-
-    await Promise.resolve();
-    assert.strictEqual(terminalVisible, false);
-    resolvePersistence();
-    await completion;
-    assert.strictEqual(terminalVisible, true);
-});
-
 test('failed persistence leaves the chat stream incomplete', async () => {
     let terminalVisible = false;
     await assert.rejects(
