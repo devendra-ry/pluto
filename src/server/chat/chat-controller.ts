@@ -16,7 +16,7 @@ import {
 import { AVAILABLE_MODELS } from '@/shared/core/constants';
 import { resolveModelLimits } from '@/server/providers/model-limits';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
-import { isTransientProviderError } from '@/server/providers/chat-streams';
+import { isInterruptedProviderStream, isTransientProviderError } from '@/server/providers/chat-streams';
 import { ChatRequestSchema, type ChatMessage } from '@/shared/core/types';
 import { MESSAGE_SELECT_COLUMNS, mapMessageRowToMessage } from '@/features/messages/server';
 import {
@@ -618,7 +618,9 @@ export async function handleChatRequest(
                     await finishGenerationJob('failed', error instanceof Error ? error.message : 'Generation failed');
                     logger.error('Chat API error:', error);
                     const providerUnavailable = isTransientProviderError(error);
-                    const message = providerUnavailable
+                    const message = isInterruptedProviderStream(error)
+                        ? 'The model connection ended before the response finished. Please retry to generate a complete response.'
+                        : providerUnavailable
                         ? 'The selected model is busy right now. Please retry or choose another model.'
                         : GENERIC_CHAT_ERROR_MESSAGE;
                     await safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: message })}\n\n`);

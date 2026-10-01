@@ -12,10 +12,15 @@ import { logger } from '@/server/logging/logger';
 
 const TRANSIENT_RETRY_DELAYS_MS = [500, 1500];
 
+export function isInterruptedProviderStream(error: unknown): boolean {
+    return error instanceof Error && error.message === 'Incomplete JSON segment at the end';
+}
+
 export function isTransientProviderError(error: unknown): boolean {
     if (!error || typeof error !== 'object') return false;
     const { code, status } = error as { code?: unknown; status?: unknown };
-    return code === 429 || code === 503 || status === 429 || status === 503;
+    return code === 429 || code === 503 || status === 429 || status === 503
+        || isInterruptedProviderStream(error);
 }
 
 function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
@@ -77,9 +82,13 @@ export function streamGoogleResponse(
     response: AsyncIterable<GoogleStreamChunk>,
     abortController: AbortController,
     onSettled: () => void = () => {},
+    restart?: () => Promise<AsyncIterable<GoogleStreamChunk>>,
+    retryDelaysMs: readonly number[] = TRANSIENT_RETRY_DELAYS_MS,
 ): ReadableStream<Uint8Array> {
     const signal = abortController.signal;
-    const iterator = response[Symbol.asyncIterator]();
+    let iterator = response[Symbol.asyncIterator]();
+    let emittedText = false;
+    let retryAttempt = 0;
     let cancelled = false;
     let settled = false;
     let iteratorStopped = false;
@@ -123,64 +132,90 @@ export function streamGoogleResponse(
                 finish();
                 return;
             }
-            try {
-                const next = await Promise.race([iterator.next(), aborted]);
-                if (cancelled) return;
-                if (next === ABORTED_STREAM || signal.aborted || next.done) {
-                    if (signal.aborted) stopIterator();
-                    else if (!cancelled) {
-                        if (usage) {
-                            const usageEvent = serializeChatStreamEvent({
-                                type: 'usage',
-                                usage: {
-                                    source: 'provider',
-                                    ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
-                                    ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
-                                    ...(usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
-                                    ...(usage.totalTokens === undefined ? {} : { totalTokens: usage.totalTokens }),
-                                }
-                            });
-                            controller.enqueue(sharedTextEncoder.encode(`data: ${usageEvent}\n\n`));
+            for (;;) {
+                try {
+                    const next = await Promise.race([iterator.next(), aborted]);
+                    if (cancelled) return;
+                    if (next === ABORTED_STREAM || signal.aborted || next.done) {
+                        if (signal.aborted) stopIterator();
+                        else if (!cancelled) {
+                            if (usage) {
+                                const usageEvent = serializeChatStreamEvent({
+                                    type: 'usage',
+                                    usage: {
+                                        source: 'provider',
+                                        ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
+                                        ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
+                                        ...(usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
+                                        ...(usage.totalTokens === undefined ? {} : { totalTokens: usage.totalTokens }),
+                                    }
+                                });
+                                controller.enqueue(sharedTextEncoder.encode(`data: ${usageEvent}\n\n`));
+                            }
+                            controller.enqueue(sharedTextEncoder.encode('data: [DONE]\n\n'));
                         }
-                        controller.enqueue(sharedTextEncoder.encode('data: [DONE]\n\n'));
+                        controller.close();
+                        finish();
+                        return;
                     }
-                    controller.close();
-                    finish();
+
+                    const chunk = next.value;
+                    const usageMetadata = chunk.usageMetadata;
+                    if (usageMetadata) {
+                        const inputTokens = toNonNegativeInt(usageMetadata.promptTokenCount);
+                        const outputTokens = toNonNegativeInt(usageMetadata.candidatesTokenCount);
+                        const reasoningTokens = toNonNegativeInt(usageMetadata.thoughtsTokenCount);
+                        const totalTokens = toNonNegativeInt(usageMetadata.totalTokenCount);
+                        if (inputTokens !== undefined || outputTokens !== undefined || reasoningTokens !== undefined || totalTokens !== undefined) {
+                            usage = {
+                                inputTokens: inputTokens ?? usage?.inputTokens,
+                                outputTokens: outputTokens ?? usage?.outputTokens,
+                                reasoningTokens: reasoningTokens ?? usage?.reasoningTokens,
+                                totalTokens: totalTokens ?? usage?.totalTokens,
+                            };
+                        }
+                    }
+
+                    const candidate = chunk.candidates?.[0];
+                    let emittedChunk = false;
+                    for (const part of candidate?.content?.parts ?? []) {
+                        if (cancelled || signal.aborted) break;
+                        if (!part.text) continue;
+                        emittedText = true;
+                        emittedChunk = true;
+                        const data = serializeChatStreamEvent(part.thought
+                            ? { type: 'delta', content: '', reasoning: part.text }
+                            : { type: 'delta', content: part.text, reasoning: '' });
+                        controller.enqueue(sharedTextEncoder.encode(`data: ${data}\n\n`));
+                    }
+                    if (emittedChunk) return;
+                } catch (error) {
+                    const delay = retryDelaysMs[retryAttempt];
+                    if (!cancelled && !signal.aborted && !emittedText && restart
+                        && isTransientProviderError(error) && delay !== undefined) {
+                        stopIterator();
+                        retryAttempt += 1;
+                        logger.warn('[chat] provider stream interrupted before text; retrying', { attempt: retryAttempt });
+                        try {
+                            await waitForRetry(delay, signal);
+                            if (cancelled || signal.aborted) throw new DOMException('Aborted', 'AbortError');
+                            const restarted = await restart();
+                            iterator = restarted[Symbol.asyncIterator]();
+                            iteratorStopped = false;
+                            usage = null;
+                            if (cancelled || signal.aborted) stopIterator();
+                            continue;
+                        } catch (restartError) {
+                            error = restartError;
+                        }
+                    }
+                    if (!cancelled) {
+                        if (signal.aborted) controller.close();
+                        else controller.error(error);
+                        stopIterator();
+                        finish();
+                    }
                     return;
-                }
-
-                const chunk = next.value;
-                const usageMetadata = chunk.usageMetadata;
-                if (usageMetadata) {
-                    const inputTokens = toNonNegativeInt(usageMetadata.promptTokenCount);
-                    const outputTokens = toNonNegativeInt(usageMetadata.candidatesTokenCount);
-                    const reasoningTokens = toNonNegativeInt(usageMetadata.thoughtsTokenCount);
-                    const totalTokens = toNonNegativeInt(usageMetadata.totalTokenCount);
-                    if (inputTokens !== undefined || outputTokens !== undefined || reasoningTokens !== undefined || totalTokens !== undefined) {
-                        usage = {
-                            inputTokens: inputTokens ?? usage?.inputTokens,
-                            outputTokens: outputTokens ?? usage?.outputTokens,
-                            reasoningTokens: reasoningTokens ?? usage?.reasoningTokens,
-                            totalTokens: totalTokens ?? usage?.totalTokens,
-                        };
-                    }
-                }
-
-                const candidate = chunk.candidates?.[0];
-                for (const part of candidate?.content?.parts ?? []) {
-                    if (cancelled || signal.aborted) break;
-                    if (!part.text) continue;
-                    const data = serializeChatStreamEvent(part.thought
-                        ? { type: 'delta', content: '', reasoning: part.text }
-                        : { type: 'delta', content: part.text, reasoning: '' });
-                    controller.enqueue(sharedTextEncoder.encode(`data: ${data}\n\n`));
-                }
-            } catch (error) {
-                if (!cancelled) {
-                    if (signal.aborted) controller.close();
-                    else controller.error(error);
-                    stopIterator();
-                    finish();
                 }
             }
         },
@@ -297,5 +332,9 @@ export async function getGoogleStream(
 
     return streamGoogleResponse(response, providerAbortController, () => {
         signal?.removeEventListener('abort', onRequestAbort);
-    });
+    }, () => ai.models.generateContentStream({
+        model,
+        config: { ...config, abortSignal: providerAbortController.signal },
+        contents,
+    }));
 }

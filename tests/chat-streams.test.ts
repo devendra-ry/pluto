@@ -5,6 +5,7 @@ let buildGoogleContents: any;
 let retryTransientProviderRequest: any;
 let ChatStreamEventWriter: any;
 let streamGoogleResponse: any;
+let isTransientProviderError: any;
 
 before(async () => {
     process.env.GEMINI_API_KEY = 'dummy';
@@ -15,7 +16,61 @@ before(async () => {
     buildGoogleContents = mod.buildGoogleContents;
     retryTransientProviderRequest = mod.retryTransientProviderRequest;
     streamGoogleResponse = mod.streamGoogleResponse;
+    isTransientProviderError = mod.isTransientProviderError;
     ChatStreamEventWriter = cacheMod.ChatStreamEventWriter;
+});
+
+test('classifies truncated provider framing without treating arbitrary JSON errors as transient', () => {
+    assert.strictEqual(isTransientProviderError(new Error('Incomplete JSON segment at the end')), true);
+    assert.strictEqual(isTransientProviderError(new SyntaxError('Unexpected token')), false);
+});
+
+test('retries truncated provider streams before text and discards stale usage', async () => {
+    const response = {
+        async *[Symbol.asyncIterator]() {
+            yield { usageMetadata: { promptTokenCount: 999 } };
+            throw new Error('Incomplete JSON segment at the end');
+        },
+    };
+    let restarts = 0;
+    let settlements = 0;
+    const body = await new Response(streamGoogleResponse(response, new AbortController(),
+        () => { settlements += 1; }, async () => {
+            restarts += 1;
+            return { async *[Symbol.asyncIterator]() {
+                yield { candidates: [{ content: { parts: [{ text: 'recovered' }] } }] };
+            } };
+        }, [0])).text();
+    assert.strictEqual(restarts, 1);
+    assert.strictEqual(settlements, 1);
+    assert.match(body, /recovered/);
+    assert.doesNotMatch(body, /999/);
+    assert.ok(body.endsWith('data: [DONE]\n\n'));
+});
+
+for (const thought of [false, true]) {
+    test(`does not restart a truncated provider stream after ${thought ? 'reasoning' : 'answer'} text`, async () => {
+        const response = { async *[Symbol.asyncIterator]() {
+            yield { candidates: [{ content: { parts: [{ text: 'partial', thought }] } }] };
+            throw new Error('Incomplete JSON segment at the end');
+        } };
+        let restarts = 0;
+        const reader = streamGoogleResponse(response, new AbortController(), undefined,
+            async () => { restarts += 1; return response; }, [0]).getReader();
+        assert.match(new TextDecoder().decode((await reader.read()).value), /partial/);
+        await assert.rejects(reader.read(), /Incomplete JSON/);
+        assert.strictEqual(restarts, 0);
+    });
+}
+
+test('bounds retries for repeatedly truncated streams', async () => {
+    const response = { async *[Symbol.asyncIterator]() {
+        throw new Error('Incomplete JSON segment at the end');
+    } };
+    let restarts = 0;
+    await assert.rejects(new Response(streamGoogleResponse(response, new AbortController(), undefined,
+        async () => { restarts += 1; return response; }, [0, 0])).text(), /Incomplete JSON/);
+    assert.strictEqual(restarts, 2);
 });
 
 import type { PreparedChatMessage } from '../src/shared/contracts/chat';
