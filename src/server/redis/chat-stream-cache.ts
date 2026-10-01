@@ -5,6 +5,7 @@ import { logger } from '@/server/logging/logger';
 import { getRedisClient, redisKey } from '@/server/redis/client';
 import { releaseDistributedLock } from '@/server/redis/atomic';
 import { readPositiveInt } from '@/shared/lib/read-positive-int';
+import type { Redis } from '@upstash/redis';
 
 const CHAT_STREAM_CACHE_TTL_SECONDS = readPositiveInt(
     process.env.CHAT_STREAM_CACHE_TTL_MS,
@@ -169,20 +170,18 @@ interface CachedStreamResult {
  */
 export async function getCachedChatStreamEvents(
     userId: string,
-    streamId: string
+    streamId: string,
+    redisClient: Redis | null = getRedisClient(),
 ): Promise<CachedStreamResult | null> {
-    const redis = getRedisClient();
-    if (!redis) return null;
+    if (!redisClient) return null;
 
     const key = streamKey(userId, streamId);
     try {
-        // XLEN first — fast O(1) existence check before XRANGE.
-        const length = await redis.xlen(key);
-        if (!length || length === 0) return null;
-
-        // Read all entries. XRANGE with '-' to '+' fetches the full stream.
+        // XRANGE returns an empty result for a missing stream, so a separate
+        // XLEN request would add a Redis round trip without avoiding the read.
+        // Read all entries; XADD caps each stream at CHAT_STREAM_MAX_ENTRIES.
         // Upstash returns Record<streamId, Record<field, value>>.
-        const entries = await redis.xrange(key, '-', '+');
+        const entries = await redisClient.xrange(key, '-', '+');
         if (!entries || typeof entries !== 'object') return null;
 
         const events: string[] = [];

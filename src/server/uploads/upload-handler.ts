@@ -2,12 +2,12 @@ import 'server-only';
 
 import { logger } from '@/server/logging/logger';
 
-import { createClient } from '@/shared/lib/supabase/server';
+import { createClient } from '@/server/supabase/server';
 import {
     MAX_ATTACHMENT_SIZE_BYTES,
     isSupportedAttachmentMimeType,
 } from '@/features/attachments';
-import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/features/attachments/server';
+import { buildAttachmentUrl, getAttachmentsBucketName, jsonResponse } from '@/server/attachments/attachment-route-utils';
 import { UploadCleanupRequestSchema } from '@/shared/validation/request-validation';
 import { assertThreadOwnership } from '@/server/threads/thread-ownership';
 import { type Attachment } from '@/shared/core/types';

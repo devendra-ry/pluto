@@ -16,9 +16,8 @@ import { createClient } from '@/shared/lib/supabase/client';
 
 export type { Thread } from '@/shared/contracts/thread';
 
-export function useThreads() {
+export function useThreads(currentUserId: string | null) {
     const [threads, setThreads] = useState<Thread[]>([]);
-    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [hasMoreThreads, setHasMoreThreads] = useState(false);
     const channelRef = useRef<ReturnType<ReturnType<typeof createClient>['channel']> | null>(null);
     const backfillRunRef = useRef(0);
@@ -140,8 +139,7 @@ export function useThreads() {
 
     useEffect(() => {
         let isActive = true;
-        let localUserId: string | null = null;
-        let initialUserResolved = false;
+        const localUserId = currentUserId;
 
         const unsubscribeRealtime = () => {
             if (!channelRef.current) return;
@@ -204,70 +202,15 @@ export function useThreads() {
             await loadThreadsPaged(localUserId, () => isActive);
         };
 
-        const setup = async () => {
-            try {
-                const { data: { user }, error } = await supabase.auth.getUser();
-                if (!isActive) return;
-                if (error) {
-                    console.error('[useThreads] Error resolving current user:', error);
-                    return;
-                }
-                localUserId = user?.id ?? null;
-                initialUserResolved = true;
-                setCurrentUserId(localUserId);
-            } catch (error) {
-                if (!isActive) return;
-                console.error('[useThreads] Unexpected error resolving current user:', error);
-                return;
-            }
-
-            if (!localUserId) {
-                setThreads([]);
-                unsubscribeRealtime();
-                return;
-            }
-            unsubscribeRealtime();
-            subscribeRealtime();
-            void fetchThreads();
-        };
-
-        void setup();
-
-        const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange(
-            (event, session) => {
-                if (!isActive) return;
-                // setup() performs the initial getUser() lookup. Supabase also
-                // emits INITIAL_SESSION, so ignoring it avoids a duplicate first
-                // page request and backfill run.
-                if (event === 'INITIAL_SESSION') return;
-                const nextUserId = session?.user?.id ?? null;
-                if (!initialUserResolved) {
-                    localUserId = nextUserId;
-                    setCurrentUserId(nextUserId);
-                    return;
-                }
-                // Token refreshes and other same-user auth events do not require
-                // another full sidebar reload.
-                if (nextUserId === localUserId) return;
-                localUserId = nextUserId;
-                setCurrentUserId(localUserId);
-                if (localUserId) {
-                    unsubscribeRealtime();
-                    subscribeRealtime();
-                    void fetchThreads();
-                }
-                else {
-                    backfillRunRef.current += 1;
-                    nextOffsetRef.current = 0;
-                    loadMorePromiseRef.current = null;
-                    setThreads([]);
-                    setHasMoreThreads(false);
-                    unsubscribeRealtime();
-                    realtimeOverridesRef.current.clear();
-                    realtimeUserIdRef.current = null;
-                }
-            }
-        );
+        // The shell supplies the server-resolved user and owns auth changes.
+        // Start the first page immediately instead of repeating an Auth request.
+        if (realtimeUserIdRef.current !== localUserId) {
+            realtimeOverridesRef.current.clear();
+            realtimeUserIdRef.current = localUserId;
+            setThreads([]);
+        }
+        subscribeRealtime();
+        void fetchThreads();
 
         const handleRefresh = () => void fetchThreads();
         const handleVisibilityChange = () => {
@@ -281,12 +224,11 @@ export function useThreads() {
         return () => {
             isActive = false;
             backfillRunRef.current += 1;
-            authSubscription.unsubscribe();
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             unsubscribeRealtime();
             window.removeEventListener(REFRESH_THREADS_EVENT, handleRefresh);
         };
-    }, [supabase, loadThreadsPaged]);
+    }, [supabase, loadThreadsPaged, currentUserId]);
 
     return { threads, refreshThreads, loadMoreThreads, hasMoreThreads };
 }

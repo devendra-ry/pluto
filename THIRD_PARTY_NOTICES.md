@@ -2,7 +2,7 @@
 
 ## Lobe Icons
 
-The provider-logo SVG path data in `src/components/provider-icon.tsx` was vendored from `@lobehub/icons` version 4.4.3, from the [Lobe Icons project](https://github.com/lobehub/lobe-icons).
+The provider-logo SVG path data in `src/features/chat/components/provider-icon.tsx` was vendored from `@lobehub/icons` version 4.4.3, from the [Lobe Icons project](https://github.com/lobehub/lobe-icons).
 
 MIT License
 

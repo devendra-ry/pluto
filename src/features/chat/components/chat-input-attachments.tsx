@@ -12,8 +12,6 @@ export type LocalAttachmentItem =
     | (LocalAttachmentBase & { status: 'uploading'; progress: number })
     | (LocalAttachmentBase & { status: 'uploaded'; progress: 100; attachment: Attachment })
     | (LocalAttachmentBase & { status: 'failed'; progress: 0; error: string });
-export type LocalAttachmentStatus = LocalAttachmentItem['status'];
-
 interface AttachmentListProps {
     items: LocalAttachmentItem[];
     onRemove: (localId: string) => void;

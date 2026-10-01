@@ -36,6 +36,8 @@ const eslintConfig = defineConfig([
     ignores: [
       "src/server/**/*",
       "src/app/api/**/*",
+      "src/app/layout.tsx",
+      "src/app/c/**/page.tsx",
     ],
     rules: {
       "no-restricted-imports": ["error", { patterns: SERVER_IMPORT_RESTRICTIONS }],
@@ -67,6 +69,8 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    "test-results/**",
+    "playwright-report/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

@@ -1,11 +1,11 @@
 import { cookies } from 'next/headers';
 import { dehydrate, HydrationBoundary, QueryClient } from '@tanstack/react-query';
 
-import { ChatPageClient } from './chat-page-client';
+import { ChatPageClient } from '@/features/chat';
 import { loadThreadMessages } from '@/features/messages/server';
 import { mapThreadRowToThread, THREAD_SELECT_COLUMNS } from '@/features/threads';
 import type { Thread } from '@/shared/contracts/thread';
-import { createClient } from '@/shared/lib/supabase/server';
+import { createClient } from '@/server/supabase/server';
 import { getMessagesQueryKey } from '@/shared/lib/query-keys';
 
 interface PageProps {

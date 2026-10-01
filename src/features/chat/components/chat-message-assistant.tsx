@@ -147,7 +147,7 @@ export function AssistantMessage({
                             >
                                 <div className="overflow-hidden">
                                     <div className="p-4 pt-1">
-                                        {renderedReasoning ? (
+                                        {reasoningExpanded && (renderedReasoning ? (
                                             <StreamingMarkdown
                                                 content={renderedReasoning}
                                                 isStreaming={isStreaming}
@@ -166,7 +166,7 @@ export function AssistantMessage({
                                                 <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce [animation-delay:-0.15s]" />
                                                 <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce" />
                                             </div>
-                                        )}
+                                        ))}
                                     </div>
                                 </div>
                             </div>

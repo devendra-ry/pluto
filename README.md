@@ -6,6 +6,8 @@ Pluto gives you one chat surface for Google Gemini models. It is optimized for r
 
 Architecture details: see `ARCHITECTURE.md`.
 
+Performance measurements and profiling: see `docs/performance.md`.
+
 ## What Makes It Good
 
 - One model selector for Google Gemini models.

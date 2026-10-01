@@ -15,6 +15,7 @@ import type { RefreshMessagesResult } from '@/features/messages';
 import { updateThreadTitleIfNewChat } from '@/features/threads';
 import { scheduleFrame } from '@/shared/lib/animation-frame';
 import { chatService } from '../lib/chat-service';
+import { FrameCoalescer } from '../lib/frame-coalescer';
 import { AVAILABLE_MODELS } from '@/shared/core/constants';
 import type { ChatResponseStats } from '@/shared/core/types';
 import type { ChatViewMessage } from '@/shared/contracts/chat';
@@ -28,7 +29,6 @@ const UNRESUMABLE_STREAM_ERROR = 'Unable to resume chat stream. Please retry the
 import {
     INITIAL_STREAM_STATE,
     areStatsEqual,
-    estimateOutputTokens,
     streamReducer,
 } from '../lib/chat-stream-state';
 
@@ -150,6 +150,10 @@ export function useChatStream({
         const requestStartedAt = performance.now();
         let firstTokenAt: number | null = null;
         let lastTokenAt: number | null = null;
+        const contentChunks: string[] = [];
+        const reasoningChunks: string[] = [];
+        let contentLength = 0;
+        let reasoningLength = 0;
         let fullContent = '';
         let fullReasoning = '';
         let providerUsage: { outputTokens: number; inputTokens?: number; totalTokens?: number; source: 'provider' } | null = null;
@@ -167,7 +171,8 @@ export function useChatStream({
             if (firstTokenAt === null) return undefined;
             const endTime = lastTokenAt ?? performance.now();
             const seconds = Math.max((endTime - firstTokenAt) / 1000, 0.001);
-            const outputTokens = providerUsage?.outputTokens ?? estimateOutputTokens(fullContent, fullReasoning);
+            const totalCharacters = contentLength + reasoningLength;
+            const outputTokens = providerUsage?.outputTokens ?? (totalCharacters > 0 ? Math.ceil(totalCharacters / 3.5) : 0);
             const tokensPerSecond = outputTokens / seconds;
             const ttfbSeconds = Math.max((firstTokenAt - requestStartedAt) / 1000, 0);
             return {
@@ -183,6 +188,8 @@ export function useChatStream({
 
         const flushAssistantUpdate = () => {
             if (!hasPendingAssistantUpdate) return;
+            fullContent = contentChunks.join('');
+            fullReasoning = reasoningChunks.join('');
             const nextStats = buildReplyStats();
             // Guard: skip if content hasn't actually changed since last flush.
             if (
@@ -203,6 +210,17 @@ export function useChatStream({
                 ...(nextStats === undefined ? {} : { stats: nextStats }),
             });
         };
+
+        const scheduleAssistantFlush = (callback: () => void) => {
+            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+                // requestAnimationFrame may stop in a background tab. Keep a
+                // modest publication cadence without slowing stream reads.
+                globalThis.setTimeout(callback, 16);
+            } else {
+                scheduleFrame(callback);
+            }
+        };
+        const assistantFlushCoalescer = new FrameCoalescer(flushAssistantUpdate, scheduleAssistantFlush);
 
         const commitAssistantMessage = () => {
             const stats = buildReplyStats();
@@ -241,36 +259,6 @@ export function useChatStream({
             });
         };
 
-        /**
-         * Backpressure gate: returns a promise that resolves on the next
-         * animation frame *after* flushing the pending UI update.
-         * When the consumer `await`s this inside `for await…of`, the
-         * AsyncGenerator suspends → reader.read() pauses → TCP/HTTP
-         * backpressure propagates naturally to the server.
-         * If there's nothing to flush, resolves immediately so we don't
-         * add unnecessary latency for no-op chunks.
-         */
-        const waitForFrameFlush = (): Promise<void> => {
-            if (!hasPendingAssistantUpdate) return Promise.resolve();
-            return new Promise<void>((resolve) => {
-                if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-                    // When the tab is in the background, browsers pause requestAnimationFrame.
-                    // If we block on scheduleFrame, the stream will halt, TCP backpressure will
-                    // build up, and the connection may timeout, failing to persist the message.
-                    // Bypass the frame wait so the stream completes and saves to the database.
-                    setTimeout(() => {
-                        flushAssistantUpdate();
-                        resolve();
-                    }, 10);
-                } else {
-                    scheduleFrame(() => {
-                        flushAssistantUpdate();
-                        resolve();
-                    });
-                }
-            });
-        };
-
         try {
             dispatch({ type: 'STREAMING' });
             const effectiveSystemPrompt = (forcedSystemPrompt ?? systemPrompt).trim();
@@ -292,10 +280,13 @@ export function useChatStream({
                             firstTokenAt = now;
                         }
                         lastTokenAt = now;
-                        fullReasoning += chunk.value;
+                        if (chunk.value) {
+                            reasoningChunks.push(chunk.value);
+                            reasoningLength += chunk.value.length;
+                        }
                         hasPendingAssistantUpdate = true;
-                        await waitForFrameFlush();
                         dispatch({ type: 'SET_THINKING', thinking: true });
+                        assistantFlushCoalescer.request();
                     }
                 } else if (chunk.type === 'content') {
                     const now = performance.now();
@@ -304,19 +295,21 @@ export function useChatStream({
                     }
                     lastTokenAt = now;
                     dispatch({ type: 'SET_THINKING', thinking: false });
-                    fullContent += chunk.value;
+                    if (chunk.value) {
+                        contentChunks.push(chunk.value);
+                        contentLength += chunk.value.length;
+                    }
                     hasPendingAssistantUpdate = true;
-                    await waitForFrameFlush();
+                    assistantFlushCoalescer.request();
                 } else if (chunk.type === 'usage') {
                     providerUsage = chunk.value;
                     hasPendingAssistantUpdate = true;
-                    await waitForFrameFlush();
+                    assistantFlushCoalescer.request();
                 }
             }
 
             if (lastTokenAt === null) lastTokenAt = performance.now();
-            flushAssistantUpdate();
-            flushAssistantUpdate();
+            assistantFlushCoalescer.flushNow();
             if (!fullContent && !fullReasoning) {
                 hasPendingAssistantUpdate = false;
                 setMessages(currentMessages);
@@ -333,7 +326,7 @@ export function useChatStream({
         } catch (error) {
 
             if (error instanceof Error && error.name === 'AbortError') {
-                flushAssistantUpdate();
+                assistantFlushCoalescer.flushNow();
                 if (!fullContent && !fullReasoning) {
                     requestFailed = true;
                     hasPendingAssistantUpdate = false;
@@ -363,6 +356,7 @@ export function useChatStream({
                 if (!shouldRegenerate) return false;
             }
         } finally {
+            assistantFlushCoalescer.close();
             abortControllerRef.current = null;
             streamedMessageStore.clear(assistantMsgId);
             dispatch({ type: 'COMPLETE', failed: requestFailed });

@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit --pretty false",
     "test": "node tests/run-tests.mjs",
     "test:e2e": "playwright test",
+    "benchmark:messages": "tsx scripts/benchmark-messages.ts",
+    "benchmark:markdown": "tsx tests/benchmarks/streaming-markdown.ts",
     "db:types": "npx supabase gen types typescript --linked --schema public > src/shared/lib/supabase/database.types.ts"
   },
   "dependencies": {

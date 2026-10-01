@@ -1,0 +1,276 @@
+'use client';
+
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt, cleanupEmptyThreads, triggerThreadRefresh } from '@/features/threads';
+import { startChatWithMessage, type StartChatWithMessageInput } from '@/features/chat';
+import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, type CategoryIconName } from '@/shared/core/constants';
+import { ChatInput, type ChatInputHandle } from '@/features/chat';
+import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
+import { Wand2, BookOpen, Code, GraduationCap, Loader2, type LucideIcon } from 'lucide-react';
+import { z } from 'zod';
+
+function toErrorRecord(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) return { message: error.message };
+  const result = z.record(z.string(), z.unknown()).safeParse(error);
+  return result.success ? result.data : {};
+}
+
+// Map icon names to components
+const ICON_MAP = {
+  Wand2,
+  BookOpen,
+  Code,
+  GraduationCap,
+} satisfies Record<CategoryIconName, LucideIcon>;
+
+export default function HomePage() {
+  const router = useRouter();
+  const chatInputRef = useRef<ChatInputHandle>(null);
+  const [model, setModel] = useState(DEFAULT_MODEL);
+  const modelRef = useRef(DEFAULT_MODEL);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
+  const reasoningEffortRef = useRef<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [pendingSubmission, setPendingSubmission] = useState<Pick<StartChatWithMessageInput, 'content' | 'attachments'> | null>(null);
+  const submissionInFlightRef = useRef(false);
+  const [draftThreadId, setDraftThreadId] = useState<string | null>(null);
+  const draftThreadIdRef = useRef<string | null>(null);
+  const ensureThreadPromiseRef = useRef<Promise<string> | null>(null);
+  const { showToast } = useToast();
+
+  useEffect(() => {
+    draftThreadIdRef.current = draftThreadId;
+  }, [draftThreadId]);
+
+  useEffect(() => {
+    modelRef.current = model;
+  }, [model]);
+  useEffect(() => {
+    reasoningEffortRef.current = reasoningEffort;
+  }, [reasoningEffort]);
+
+  const ensureThread = useCallback(async () => {
+    if (draftThreadIdRef.current) {
+      return draftThreadIdRef.current;
+    }
+
+    if (ensureThreadPromiseRef.current) {
+      return ensureThreadPromiseRef.current;
+    }
+
+    const createPromise = (async () => {
+      const thread = await createThread(modelRef.current, reasoningEffortRef.current, systemPrompt);
+      draftThreadIdRef.current = thread.id;
+      setDraftThreadId(thread.id);
+      return thread.id;
+    })();
+
+    ensureThreadPromiseRef.current = createPromise;
+    try {
+      return await createPromise;
+    } finally {
+      if (ensureThreadPromiseRef.current === createPromise) {
+        ensureThreadPromiseRef.current = null;
+      }
+    }
+  }, [systemPrompt]);
+
+  const handleSystemPromptChange = async (nextPrompt: string) => {
+    const previousPrompt = systemPrompt;
+    setSystemPrompt(nextPrompt);
+    if (draftThreadId) {
+      try {
+        await updateThreadSystemPrompt(draftThreadId, nextPrompt);
+      } catch (error) {
+        setSystemPrompt(previousPrompt);
+        const message = error instanceof Error ? error.message : 'Failed to update system prompt';
+        showToast(message, 'error');
+      }
+    }
+  };
+
+  const handleModelChange = (nextModel: string) => {
+    const previousModel = modelRef.current;
+    modelRef.current = nextModel;
+    setModel(nextModel);
+    if (!draftThreadId) return;
+
+    void (async () => {
+      try {
+        await updateThreadModel(draftThreadId, nextModel);
+      } catch (error) {
+        setModel((current) => {
+          const resolved = current === nextModel ? previousModel : current;
+          modelRef.current = resolved;
+          return resolved;
+        });
+        const message = error instanceof Error ? error.message : 'Failed to update model';
+        showToast(message, 'error');
+      }
+    })();
+  };
+
+  const handleReasoningEffortChange = (nextEffort: ReasoningEffort) => {
+    const previousEffort = reasoningEffort;
+    reasoningEffortRef.current = nextEffort;
+    setReasoningEffort(nextEffort);
+    if (!draftThreadId) return;
+
+    void (async () => {
+      try {
+        await updateReasoningEffort(draftThreadId, nextEffort);
+      } catch (error) {
+        reasoningEffortRef.current = previousEffort;
+        setReasoningEffort((current) => current === nextEffort ? previousEffort : current);
+        const message = error instanceof Error ? error.message : 'Failed to update reasoning effort';
+        showToast(message, 'error');
+      }
+    })();
+  };
+
+  const handleSend = async (
+    value: string,
+    attachments: Attachment[],
+  ) => {
+    if ((!value.trim() && attachments.length === 0) || submissionInFlightRef.current) return false;
+    const effectiveModel = modelRef.current;
+
+    submissionInFlightRef.current = true;
+    setIsLoading(true);
+    setPendingSubmission({ content: value.trim(), attachments });
+    try {
+      const { threadId } = await startChatWithMessage({
+        threadId: draftThreadIdRef.current,
+        content: value.trim(),
+        attachments,
+        modelId: effectiveModel,
+        reasoningEffort: reasoningEffortRef.current,
+        systemPrompt: systemPrompt.trim().length > 0
+          ? systemPrompt.trim()
+          : null,
+      });
+
+      draftThreadIdRef.current = threadId;
+      setDraftThreadId(threadId);
+      triggerThreadRefresh();
+      void cleanupEmptyThreads(threadId).catch((cleanupError) => {
+        console.warn('[threads] Failed to cleanup empty threads after chat start:', cleanupError);
+      });
+
+      // The new route hydrates the committed message and claims its already queued job.
+      router.push(`/c/${threadId}`);
+      return true;
+    } catch (error: unknown) {
+      const errorRecord = toErrorRecord(error);
+
+      const errorMessage = typeof errorRecord.message === 'string'
+        ? errorRecord.message
+        : typeof errorRecord.error_description === 'string'
+          ? errorRecord.error_description
+          : String(error);
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('Failed to create chat:', error);
+      }
+      showToast(errorMessage || 'Failed to create chat', 'error');
+      submissionInFlightRef.current = false;
+      setPendingSubmission(null);
+      setIsLoading(false);
+      return false;
+    }
+  };
+
+  const handleSuggestionClick = (prompt: string) => {
+    if (chatInputRef.current) {
+      chatInputRef.current.setValue(prompt);
+      chatInputRef.current.focus();
+    }
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-plum-900">
+      <div className={`flex min-h-0 flex-1 flex-col items-center overflow-y-auto p-4 ${pendingSubmission ? 'justify-start' : 'justify-center'}`}>
+        {pendingSubmission ? (
+          <div className="w-full max-w-3xl px-4 pt-8">
+            <div className="mb-6 flex justify-end">
+              <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-plum-700/80 px-4 py-3 text-zinc-100">
+                {pendingSubmission.content || (
+                  <span className="text-zinc-300">
+                    {pendingSubmission.attachments.map((attachment) => attachment.name).join(', ')}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 py-2 text-sm text-zinc-400" role="status" aria-live="polite">
+              <Loader2 className="h-4 w-4 animate-spin text-brand-300" aria-hidden="true" />
+              <span>Starting your response…</span>
+            </div>
+          </div>
+        ) : (
+        <div className="w-full max-w-3xl flex flex-col items-start px-4">
+          {/* Main heading */}
+          <h1 className="text-3xl md:text-4xl font-semibold text-zinc-100 mb-8 tracking-tight text-center md:text-left">
+            How can I help you?
+          </h1>
+
+          {/* Category buttons */}
+          <div className="mb-10 grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-start">
+
+            {CATEGORIES.map((cat) => {
+              const IconComponent = ICON_MAP[cat.icon];
+              return (
+                <Button
+                  key={cat.label}
+                  variant="ghost"
+                  onClick={() => handleSuggestionClick(cat.prompt)}
+                  className="h-10 justify-center gap-2 rounded-full border border-plum-600 bg-transparent px-3 text-[15px] font-medium text-zinc-400 transition-all hover:bg-plum-700 hover:text-zinc-100 sm:px-4"
+                >
+                  <IconComponent className="h-4 w-4" />
+                  {cat.label}
+                </Button>
+              );
+            })}
+          </div>
+
+          {/* Suggested prompts */}
+          <div className="space-y-1 w-full text-left">
+            {SUGGESTED_PROMPTS.map((prompt, i) => (
+              <button
+                key={i}
+                onClick={() => handleSuggestionClick(prompt)}
+                className="w-full text-left px-0 py-2.5 text-base text-zinc-400/90 hover:text-zinc-200 transition-colors"
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
+        </div>
+        )}
+
+      </div>
+
+      <ChatInput
+        ref={chatInputRef}
+        onSubmit={handleSend}
+        onEnsureThread={ensureThread}
+        threadId={draftThreadId}
+        isLoading={isLoading}
+        currentModel={model}
+        onModelChange={handleModelChange}
+        reasoningEffort={reasoningEffort}
+        onReasoningEffortChange={handleReasoningEffortChange}
+        systemPrompt={systemPrompt}
+        onSystemPromptChange={handleSystemPromptChange}
+      />
+      {!pendingSubmission && (
+        <p className="px-4 pb-3 text-center text-xs text-zinc-500">
+          Make sure you agree to our <span className="underline">Terms</span> and our{' '}
+          <span className="underline">Privacy Policy</span>
+        </p>
+      )}
+    </div>
+  );
+}

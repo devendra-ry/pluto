@@ -35,12 +35,6 @@ function invalidateAllThreadMessages() {
     void queryClient.invalidateQueries({ queryKey: [MESSAGE_QUERY_KEY_PREFIX] });
 }
 
-// Fetch canonical message history for a thread
-export async function getThreadMessages(threadId: string): Promise<Message[]> {
-    const supabase = createClient();
-    return loadThreadMessages(supabase, threadId);
-}
-
 export async function refreshThreadMessage(
     threadId: string,
     messageId: string

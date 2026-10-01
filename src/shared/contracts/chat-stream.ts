@@ -48,7 +48,7 @@ const ErrorEventSchema = z.object({
     details: z.string().optional(),
 }).passthrough();
 
-export type ChatStreamUsage = z.infer<typeof UsageEventSchema>['usage'];
+type ChatStreamUsage = z.infer<typeof UsageEventSchema>['usage'];
 
 export type ChatStreamEvent =
     | { type: 'delta'; content: string; reasoning: string }

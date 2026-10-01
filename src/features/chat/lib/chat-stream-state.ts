@@ -25,11 +25,6 @@ export const INITIAL_STREAM_STATE: StreamState = {
     lastRequestFailed: false,
 };
 
-export function estimateOutputTokens(content: string, reasoning: string): number {
-    const totalChars = content.length + reasoning.length;
-    return totalChars > 0 ? Math.ceil(totalChars / 3.5) : 0;
-}
-
 export function areStatsEqual(left: ChatResponseStats | undefined, right: ChatResponseStats | undefined): boolean {
     if (!left && !right) return true;
     if (!left || !right) return false;

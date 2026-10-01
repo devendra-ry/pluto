@@ -8,7 +8,17 @@ test('unauthenticated chat route redirects to login', async ({ page }) => {
 
 test('unauthenticated chat API responds 401 JSON', async ({ request }) => {
     const response = await request.post('/api/chat', {
+        headers: { origin: 'http://localhost:3000' },
         data: { messages: [{ role: 'user', content: 'hello' }], model: 'test' },
+    });
+    expect(response.status()).toBe(401);
+    const body = await response.json();
+    expect(body.error).toBeTruthy();
+});
+
+test('unauthenticated uploads API responds 401 JSON', async ({ request }) => {
+    const response = await request.post('/api/uploads', {
+        headers: { origin: 'http://localhost:3000' },
     });
     expect(response.status()).toBe(401);
     const body = await response.json();

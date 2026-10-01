@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, memo } from 'react';
-import { ProviderIcon, type ProviderIconName } from '@/components/provider-icon';
+import { ProviderIcon, type ProviderIconName } from './provider-icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';

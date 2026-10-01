@@ -6,7 +6,8 @@ import type { ModelConfig } from '@/shared/core/constants';
 import type { ChatMessage } from '@/shared/core/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/shared/lib/supabase/database.types';
-import { getAttachmentsBucketName, AttachmentCache } from '@/features/attachments/server';
+import { getAttachmentsBucketName } from '@/server/attachments/attachment-route-utils';
+import { AttachmentCache } from '@/server/attachments/attachment-cache';
 import type { PreparedAttachment, PreparedChatMessage } from '@/shared/contracts/chat';
 
 import {

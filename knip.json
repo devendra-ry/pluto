@@ -9,8 +9,5 @@
   "ignore": [
     "tests/mocks/server-only.js",
     "src/shared/lib/supabase/database.types.ts"
-  ],
-  "ignoreDependencies": [
-    "tsx"
   ]
 }

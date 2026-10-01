@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/shared/lib/supabase/middleware";
+import { createClient } from "@/server/supabase/proxy-client";
 
 function buildCsp(nonce: string) {
     const isDev = process.env.NODE_ENV !== 'production';
@@ -36,22 +36,23 @@ function buildCsp(nonce: string) {
 export async function proxy(request: NextRequest) {
     const nonce = btoa(crypto.randomUUID());
     const csp = buildCsp(nonce);
+    const { pathname } = request.nextUrl;
     const { supabase, supabaseResponse } = createClient(request, {
         nonce,
         contentSecurityPolicy: csp,
     });
 
-    // Authenticate user by contacting the Supabase Auth server.
+    // API handlers authenticate their own requests. Avoid an extra Supabase
+    // Auth network call in Proxy before the handler performs the same check.
+    if (pathname.startsWith('/api/')) {
+        supabaseResponse.headers.set('Content-Security-Policy', csp);
+        return supabaseResponse;
+    }
+
+    // Authenticate protected chat pages by contacting the Supabase Auth server.
     const { data: { user } } = await supabase.auth.getUser();
 
-    const { pathname } = request.nextUrl;
-
     if (!user) {
-        // Protect API routes with a 401 response shape suitable for fetch callers.
-        if (pathname.startsWith('/api/')) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
-
         // Protect chat routes with login redirect UX.
         if (pathname.startsWith('/c/')) {
             const url = request.nextUrl.clone();

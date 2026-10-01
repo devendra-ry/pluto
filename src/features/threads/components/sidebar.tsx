@@ -22,6 +22,7 @@ import { type User as SupabaseUser } from '@supabase/supabase-js';
 import { List, type RowComponentProps } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import { useThreads } from '../hooks/use-threads';
+import { useThreadSearch } from '../hooks/use-thread-search';
 import { deleteThread, toggleThreadPin } from '../lib/thread-mutations';
 import { type Thread } from '@/shared/contracts/thread';
 import { groupThreadsByDate } from '../lib/date-utils';
@@ -80,7 +81,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
     const [hiddenDeletedThreadIds, setHiddenDeletedThreadIds] = useState<Set<string>>(() => new Set());
     const [user, setUser] = useState<SupabaseUser | null>(initialUser);
     const debouncedSearch = useDebouncedValue(searchQuery, 300);
-    const { threads, loadMoreThreads, hasMoreThreads } = useThreads();
+    const { threads, loadMoreThreads, hasMoreThreads } = useThreads(user?.id ?? null);
     const { showToast } = useToast();
 
     const [supabase] = useState(() => createClient());
@@ -93,9 +94,16 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         return () => subscription.unsubscribe();
     }, [supabase]);
 
+    const searching = debouncedSearch.trim().length > 0;
+    const {
+        threads: searchThreads,
+        hasMore: hasMoreSearchThreads,
+        loading: isSearching,
+        loadMore: loadMoreSearchThreads,
+    } = useThreadSearch(user?.id ?? null, debouncedSearch);
     const visibleThreads = useMemo(
-        () => threads.filter((thread) => !hiddenDeletedThreadIds.has(thread.id)),
-        [threads, hiddenDeletedThreadIds]
+        () => (searching ? searchThreads : threads).filter((thread) => !hiddenDeletedThreadIds.has(thread.id)),
+        [searching, searchThreads, threads, hiddenDeletedThreadIds]
     );
     const pinnedThreads = useMemo(() => visibleThreads.filter(t => t.is_pinned), [visibleThreads]);
     const unpinnedThreads = useMemo(() => visibleThreads.filter(t => !t.is_pinned), [visibleThreads]);
@@ -110,50 +118,29 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         }
     }, [desktopCollapsed]);
 
-    const filteredPinned = useMemo(() => pinnedThreads.filter(t =>
-        t.title.toLowerCase().includes(debouncedSearch.toLowerCase())
-    ), [pinnedThreads, debouncedSearch]);
-
-    const filteredGroups = useMemo(() => groupedThreads.map(group => ({
-        ...group,
-        threads: group.threads.filter(t =>
-            t.title.toLowerCase().includes(debouncedSearch.toLowerCase())
-        )
-    })).filter(g => g.threads.length > 0), [groupedThreads, debouncedSearch]);
-
-    useEffect(() => {
-        if (!debouncedSearch.trim() || !hasMoreThreads) return;
-        let active = true;
-        void (async () => {
-            while (active && await loadMoreThreads()) {
-                // Searching spans older pages; normal browsing loads them on scroll.
-            }
-        })();
-        return () => { active = false; };
-    }, [debouncedSearch, hasMoreThreads, loadMoreThreads]);
-
     // Flatten filtered threads and headers into items for virtualization
     const virtualItems = useMemo(() => {
         const items: VirtualItem[] = [];
 
-        if (filteredPinned.length > 0) {
+        if (pinnedThreads.length > 0) {
             items.push({ type: 'header', label: 'Pinned' });
-            filteredPinned.forEach(t => items.push({ type: 'thread', data: t }));
+            pinnedThreads.forEach(t => items.push({ type: 'thread', data: t }));
         }
 
-        filteredGroups.forEach(group => {
+        groupedThreads.forEach(group => {
             items.push({ type: 'header', label: group.label });
             group.threads.forEach(t => items.push({ type: 'thread', data: t }));
         });
 
         return items;
-    }, [filteredPinned, filteredGroups]);
+    }, [pinnedThreads, groupedThreads]);
 
     const handleRowsRendered = useCallback(({ stopIndex }: { startIndex: number; stopIndex: number }) => {
-        if (hasMoreThreads && stopIndex >= Math.max(0, virtualItems.length - 12)) {
-            void loadMoreThreads();
+        if (stopIndex >= Math.max(0, virtualItems.length - 12)) {
+            if (searching && hasMoreSearchThreads) void loadMoreSearchThreads();
+            else if (!searching && hasMoreThreads) void loadMoreThreads();
         }
-    }, [hasMoreThreads, loadMoreThreads, virtualItems.length]);
+    }, [searching, hasMoreSearchThreads, loadMoreSearchThreads, hasMoreThreads, loadMoreThreads, virtualItems.length]);
 
     const collapseSidebar = useCallback(() => {
         if (isMobileSize) {
@@ -385,7 +372,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                             {virtualItems.length === 0 ? (
                                 <div className="text-center py-12">
                                     <p className="text-sm text-zinc-600">
-                                        {searchQuery ? 'No results found' : 'No conversations yet'}
+                                        {searching && isSearching ? 'Searching...' : searching ? 'No results found' : 'No conversations yet'}
                                     </p>
                                 </div>
                             ) : (

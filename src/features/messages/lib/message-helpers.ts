@@ -30,6 +30,48 @@ function sortMessagesByCreatedAt(messages: Message[]) {
 
 export function mergeMessagesSorted(existing: Message[], incoming: Message[]) {
     if (incoming.length === 0) return existing;
+    if (incoming.length === 1) {
+        const message = incoming[0]!;
+        let previousIndex = -1;
+        let isSorted = true;
+        // Realtime normally updates one row. Check ordering while locating it,
+        // without allocating a Map and sorting the entire history each time.
+        for (let index = 0; index < existing.length; index += 1) {
+            const current = existing[index]!;
+            if (current.id === message.id) previousIndex = index;
+            if (index > 0) {
+                const previous = existing[index - 1]!;
+                if (previous.created_at > current.created_at
+                    || (previous.created_at === current.created_at && previous.id.localeCompare(current.id) > 0)) {
+                    isSorted = false;
+                }
+            }
+        }
+        if (isSorted) {
+            const previous = existing[previousIndex];
+            if (previous === message) return existing;
+            if (previous && previous.created_at === message.created_at) {
+                const updated = existing.slice();
+                updated[previousIndex] = message;
+                return updated;
+            }
+            const updated = previousIndex < 0
+                ? existing.slice()
+                : existing.filter((_, index) => index !== previousIndex);
+            let low = 0;
+            let high = updated.length;
+            while (low < high) {
+                const middle = (low + high) >>> 1;
+                const candidate = updated[middle]!;
+                const comparison = candidate.created_at.localeCompare(message.created_at)
+                    || candidate.id.localeCompare(message.id);
+                if (comparison < 0) low = middle + 1;
+                else high = middle;
+            }
+            updated.splice(low, 0, message);
+            return updated;
+        }
+    }
     const byId = new Map(existing.map((message) => [message.id, message]));
     for (const message of incoming) {
         byId.set(message.id, message);

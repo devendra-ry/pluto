@@ -2,7 +2,7 @@ import 'server-only';
 
 import { logger } from '@/server/logging/logger';
 
-import { createClient } from '@/shared/lib/supabase/server';
+import { createClient } from '@/server/supabase/server';
 import { getRedisClient, redisKey } from '@/server/redis/client';
 import { readPositiveInt } from '@/shared/lib/read-positive-int';
 

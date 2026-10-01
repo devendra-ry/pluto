@@ -32,6 +32,44 @@ describe('message-helpers', () => {
              assert.strictEqual(merged.length, 1);
              assert.strictEqual(merged.at(0)?.content, 'new');
         });
+
+        test('inserts out-of-order realtime messages and breaks timestamp ties by id', () => {
+            const existing = [
+                { ...baseMessage, id: '1' },
+                { ...baseMessage, id: '3' },
+            ];
+            const merged = mergeMessagesSorted(existing, [{ ...baseMessage, id: '2' }]);
+            assert.deepStrictEqual(merged.map((message) => message.id), ['1', '2', '3']);
+            assert.strictEqual(merged[0], existing[0]);
+            assert.deepStrictEqual(existing.map((message) => message.id), ['1', '3']);
+        });
+
+        test('repositions an updated row when its timestamp changes', () => {
+            const existing = [
+                { ...baseMessage, id: '1' },
+                { ...baseMessage, id: '2', created_at: '2023-01-01T11:00:00Z' },
+            ];
+            const merged = mergeMessagesSorted(existing, [{ ...existing[0]!, created_at: '2023-01-01T12:00:00Z' }]);
+            assert.deepStrictEqual(merged.map((message) => message.id), ['2', '1']);
+        });
+
+        test('normalizes unsorted history and keeps the last incoming row per id', () => {
+            const existing = [{ ...baseMessage, id: '3' }, { ...baseMessage, id: '1' }];
+            assert.deepStrictEqual(
+                mergeMessagesSorted(existing, [{ ...baseMessage, id: '2' }]).map((message) => message.id),
+                ['1', '2', '3'],
+            );
+            const merged = mergeMessagesSorted(existing, [
+                { ...baseMessage, id: '2', content: 'first' },
+                { ...baseMessage, id: '2', content: 'last' },
+            ]);
+            assert.strictEqual(merged[1]?.content, 'last');
+        });
+
+        test('retains the cache reference for an identical row', () => {
+            const existing = [baseMessage];
+            assert.strictEqual(mergeMessagesSorted(existing, [baseMessage]), existing);
+        });
     });
 
     describe('toMessage', () => {

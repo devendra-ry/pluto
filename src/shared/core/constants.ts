@@ -4,7 +4,7 @@ import { z } from 'zod';
 const CapabilitySchema = z.enum(['fast', 'vision', 'reasoning', 'effortControl', 'toolCalling', 'pdf']);
 export type Capability = z.infer<typeof CapabilitySchema>;
 
-export const ModelConfigSchema = z.object({
+const ModelConfigSchema = z.object({
     id: z.string().min(1),
     name: z.string().min(1),
     description: z.string(),

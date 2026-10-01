@@ -5,25 +5,25 @@ import { type VirtuosoHandle } from 'react-virtuoso';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 
-import { ChatDestructiveConfirmDialog } from '@/features/chat';
-import { ChatEmptyState } from '@/features/chat';
+import { ChatDestructiveConfirmDialog } from './chat-destructive-confirm-dialog';
+import { ChatEmptyState } from './chat-empty-state';
 import { ErrorBoundary } from '@/shared/components/error-boundary';
-import { ChatHeader } from '@/features/chat';
-import { ChatInput, type ChatInputHandle } from '@/features/chat';
+import { ChatHeader } from './chat-header';
+import { ChatInput, type ChatInputHandle } from './chat-input';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { useChatMessageState } from '@/features/chat';
-import { useChatScroll } from '@/features/chat';
-import { useChatStream } from '@/features/chat';
-import { useDestructiveDeleteConfirm } from '@/features/chat';
+import { useChatMessageState } from '../hooks/use-chat-message-state';
+import { useChatScroll } from '../hooks/use-chat-scroll';
+import { useChatStream } from '../hooks/use-chat-stream';
+import { useDestructiveDeleteConfirm } from '../hooks/use-destructive-delete-confirm';
 import { addMessage, editUserMessageAtomically, refreshThreadMessage, refreshThreadReply, useMessages } from '@/features/messages';
-import { usePendingGeneration } from '@/features/chat';
-import { useRetryLogic } from '@/features/chat';
-import { ChatStreamMessageStoreProvider } from '@/features/chat';
+import { usePendingGeneration } from '../hooks/use-pending-generation';
+import { useRetryLogic } from '../hooks/use-retry-logic';
+import { ChatStreamMessageStoreProvider } from './chat-stream-message-store';
 import { useThread, branchThread, type Thread } from '@/features/threads';
-import { useThreadSettings } from '@/features/chat';
-import { type ChatViewMessage } from '@/features/chat';
+import { useThreadSettings } from '../hooks/use-thread-settings';
+import { type ChatViewMessage } from '@/shared/contracts/chat';
 import { type Attachment } from '@/shared/core/types';
 
 interface ChatPageClientProps {
@@ -32,7 +32,7 @@ interface ChatPageClientProps {
 }
 
 const ChatMessageList = dynamic(
-    () => import('@/features/chat').then((mod) => mod.ChatMessageList),
+    () => import('./chat-message-list').then((mod) => mod.ChatMessageList),
     { ssr: false }
 );
 

@@ -2,10 +2,7 @@
 
 import { memo, useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
-import rehypeHighlight from 'rehype-highlight';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
+import { getMarkdownPlugins } from '../lib/markdown-plugins';
 
 function preprocessLaTeX(text: string) {
     if (!text) return text;
@@ -13,9 +10,6 @@ function preprocessLaTeX(text: string) {
         .replace(/\\+\[([\s\S]*?)\\+\]/g, (_, equation) => `\n$$\n${equation}\n$$\n`)
         .replace(/\\+\(([\s\S]*?)\\+\)/g, (_, equation) => `$${equation}$`);
 }
-
-const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex];
-const REMARK_PLUGINS = [remarkGfm, remarkMath];
 
 // Regex to fix markdown headings without space after #.
 const HEADING_FIX_REGEX = /^(#{1,6})([^#\s])/gm;
@@ -185,12 +179,14 @@ function StreamingMarkdownInner({
                     key={index}
                     content={block}
                     components={components ?? undefined}
+                    isStreaming={false}
                 />
             ))}
             {renderedTail && (
                 <MemoizedMarkdownRenderer
                     content={renderedTail}
                     components={components ?? undefined}
+                    isStreaming={Boolean(isStreaming)}
                 />
             )}
         </div>
@@ -204,17 +200,22 @@ function StreamingMarkdownInner({
 const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
     content,
     components,
+    isStreaming,
 }: {
     content: string;
     components?: Components;
+    isStreaming: boolean;
 }) {
+    const markdown = preprocessLaTeX(content).replace(HEADING_FIX_REGEX, '$1 $2');
+    const { remarkPlugins, rehypePlugins } = getMarkdownPlugins(markdown, isStreaming);
+
     return (
         <ReactMarkdown
-            rehypePlugins={REHYPE_PLUGINS}
-            remarkPlugins={REMARK_PLUGINS}
+            rehypePlugins={rehypePlugins}
+            remarkPlugins={remarkPlugins}
             components={components}
         >
-            {preprocessLaTeX(content).replace(HEADING_FIX_REGEX, '$1 $2')}
+            {markdown}
         </ReactMarkdown>
     );
 });

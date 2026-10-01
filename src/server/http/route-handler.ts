@@ -19,6 +19,39 @@ export interface AuthenticatedContext {
     supabase: SupabaseClient;
 }
 
+type ApiProtectionChecks = {
+    assertNotBlocked: typeof assertNotTemporarilyBlocked;
+    assertRateLimit: typeof assertRateLimit;
+};
+
+/**
+ * Run independent per-user protections together after authentication. Prefer
+ * the block result when both checks fail to retain the old error precedence.
+ */
+export async function assertApiRequestProtection(
+    userId: string,
+    rateLimiter?: SimpleRateLimiter,
+    checks: ApiProtectionChecks = {
+        assertNotBlocked: assertNotTemporarilyBlocked,
+        assertRateLimit,
+    },
+) {
+    const rateLimitResult = rateLimiter
+        ? checks.assertRateLimit(userId, rateLimiter).then(
+            () => ({ status: 'fulfilled' as const }),
+            (reason: unknown) => ({ status: 'rejected' as const, reason }),
+        )
+        : null;
+
+    // Await the block check first to preserve its error priority and fast
+    // rejection behavior, while the independent rate check runs at the same time.
+    await checks.assertNotBlocked(userId, 'api');
+    if (rateLimitResult) {
+        const result = await rateLimitResult;
+        if (result.status === 'rejected') throw result.reason;
+    }
+}
+
 export async function withSecureContext(
     req: Request,
     handler: (context: AuthenticatedContext) => Promise<Response>,
@@ -32,11 +65,7 @@ export async function withSecureContext(
 
         const { user, supabase } = await requireUser();
         userId = user.id;
-        await assertNotTemporarilyBlocked(user.id, 'api');
-
-        if (rateLimiter) {
-            await assertRateLimit(user.id, rateLimiter);
-        }
+        await assertApiRequestProtection(user.id, rateLimiter);
 
         return await handler({ user, supabase });
     } catch (error) {
