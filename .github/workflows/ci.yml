@@ -48,5 +48,31 @@ jobs:
       - name: Install browser
         run: npx playwright install --with-deps chromium
 
+      - name: Optimized Markdown worker smoke test
+        run: npm run check:markdown-worker-build
+
       - name: Browser smoke test
         run: npm run test:e2e
+
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.119.0
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Apply all migrations to a fresh local Supabase database
+        run: supabase start
+      - name: Reset and verify reproducible migration history
+        run: supabase db reset --local
+      - name: Database ownership, fencing, lifecycle and concurrency regressions
+        run: node scripts/test-database.mjs
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup

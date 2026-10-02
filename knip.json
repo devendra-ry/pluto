@@ -3,9 +3,15 @@
   "entry": [
     "tests/register-loader.mjs",
     "tests/loader.mjs",
+    "src/features/chat/lib/decode-markdown-entity.ts",
+    "src/features/chat/lib/parse-markdown-html.ts",
     "src/**/*.test.ts",
-    "tests/**/*.test.ts"
+    "tests/**/*.test.ts",
+    "tests/e2e/fixtures/*-supabase-mock.ts",
+    "tests/e2e/fixtures/message-search-history-mock.ts",
+    "tests/e2e/fixtures/thread-prefetch-mock.ts"
   ],
+  "ignoreBinaries": ["psql"],
   "ignore": [
     "tests/mocks/server-only.js",
     "src/shared/lib/supabase/database.types.ts"

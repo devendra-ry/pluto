@@ -2,6 +2,7 @@ export * from './components/chat-destructive-confirm-dialog';
 export * from './components/chat-empty-state';
 export * from './components/chat-header';
 export * from './components/chat-input';
+export * from './hooks/use-text-draft-recovery';
 export * from './components/chat-message-list';
 export * from './components/chat-page-client';
 export * from './components/chat-stream-message-store';

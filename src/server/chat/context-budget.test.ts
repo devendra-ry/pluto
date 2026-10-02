@@ -9,9 +9,10 @@ import type { ResolvedModelLimits } from '@/server/providers/provider-types';
 import type { ChatMessage } from '@/shared/core/types';
 
 let trimMessagesToInputBudget: typeof import('./context-budget').trimMessagesToInputBudget;
+let estimatePreparedConversationTokens: typeof import('./context-budget').estimatePreparedConversationTokens;
 
 before(async () => {
-    ({ trimMessagesToInputBudget } = await import('./context-budget'));
+    ({ trimMessagesToInputBudget, estimatePreparedConversationTokens } = await import('./context-budget'));
 });
 
 const limits: ResolvedModelLimits = {
@@ -53,5 +54,32 @@ describe('trimMessagesToInputBudget', () => {
         const result = trimMessagesToInputBudget(messages, limits);
 
         assert.strictEqual(result.messages.length, 1);
+    });
+
+    test('budgets text attachments by size instead of a fixed per-file allowance', () => {
+        const textAttachment: NonNullable<ChatMessage['attachments']>[number] = {
+            id: 'attachment-1',
+            name: 'large.txt',
+            mimeType: 'text/plain',
+            size: 20_000,
+            path: 'user/thread/object',
+            url: '/api/attachments',
+        };
+        const result = trimMessagesToInputBudget([
+            { role: 'user', content: 'Summarize this file', attachments: [textAttachment] },
+        ], limits);
+
+        assert.ok(result.estimatedTokens > 5000);
+    });
+
+    test('re-estimates the downloaded text payload before selecting provider output tokens', () => {
+        const base64Data = Buffer.from('x'.repeat(20_000)).toString('base64');
+        const estimatedTokens = estimatePreparedConversationTokens([{
+            role: 'user',
+            content: 'Summarize this file',
+            attachments: [{ name: 'large.txt', mimeType: 'text/plain', base64Data }],
+        }]);
+
+        assert.ok(estimatedTokens > 5000);
     });
 });

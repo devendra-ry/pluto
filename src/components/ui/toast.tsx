@@ -12,10 +12,12 @@ interface Toast {
     id: string;
     message: string;
     type: ToastType;
+    durationMs: number;
+    action?: { label: string; onClick: () => void };
 }
 
 interface ToastContextType {
-    showToast: (message: string, type?: ToastType) => void;
+    showToast: (message: string, type?: ToastType, options?: { durationMs?: number; action?: Toast['action'] }) => void;
 }
 
 const ToastContext = createContext<ToastContextType | null>(null);
@@ -31,9 +33,15 @@ export function useToast() {
 export function ToastProvider({ children }: { children: React.ReactNode }) {
     const [toasts, setToasts] = useState<Toast[]>([]);
 
-    const showToast = useCallback((message: string, type: ToastType = 'info') => {
+    const showToast = useCallback((message: string, type: ToastType = 'info', options?: { durationMs?: number; action?: Toast['action'] }) => {
         const id = crypto.randomUUID();
-        setToasts(prev => [...prev, { id, message, type }]);
+        setToasts(prev => [...prev, {
+            id,
+            message,
+            type,
+            durationMs: options?.durationMs ?? 4000,
+            ...(options?.action ? { action: options.action } : {}),
+        }]);
     }, []);
 
     const removeToast = useCallback((id: string) => {
@@ -65,9 +73,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 function ToastItem({ toast, onClose }: { toast: Toast; onClose: (id: string) => void }) {
     const reduceMotion = useReducedMotion();
     useEffect(() => {
-        const timer = setTimeout(() => onClose(toast.id), 4000);
+        const timer = setTimeout(() => onClose(toast.id), toast.durationMs);
         return () => clearTimeout(timer);
-    }, [onClose, toast.id]);
+    }, [onClose, toast.durationMs, toast.id]);
 
     const icons = {
         success: <CheckCircle className="h-4 w-4 shrink-0 text-success" aria-hidden="true" />,
@@ -96,6 +104,18 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: (id: string) => 
         >
             {icons[toast.type]}
             <span className="min-w-0 flex-1 break-words text-sm">{toast.message}</span>
+            {toast.action && (
+                <button
+                    type="button"
+                    onClick={() => {
+                        onClose(toast.id);
+                        toast.action?.onClick();
+                    }}
+                    className="shrink-0 rounded-md px-2 py-1 text-sm font-semibold text-primary underline underline-offset-2 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                    {toast.action.label}
+                </button>
+            )}
             <button
                 onClick={() => onClose(toast.id)}
                 type="button"

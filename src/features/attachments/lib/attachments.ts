@@ -7,7 +7,7 @@ export const MAX_ATTACHMENTS_PER_MESSAGE = MAX_REQUEST_ATTACHMENTS_PER_MESSAGE;
 export { MAX_ATTACHMENT_SIZE_BYTES } from '@/shared/validation/request-limits';
 export { MAX_TOTAL_ATTACHMENT_BYTES } from '@/shared/validation/request-limits';
 
-export const SUPPORTED_ATTACHMENT_MIME_TYPES = [
+const SUPPORTED_ATTACHMENT_MIME_TYPES = [
     'image/png',
     'image/jpeg',
     'image/webp',

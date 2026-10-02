@@ -27,7 +27,7 @@ export function useChatScroll({ chatId, messagesReady, messageCount, virtuosoRef
     const scrollToBottom = useCallback(() => {
         if (virtuosoRef.current && messageCount > 0) {
             const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-            virtuosoRef.current.scrollToIndex({ index: messageCount - 1, align: 'end', behavior: reduceMotion ? 'auto' : 'smooth' });
+            virtuosoRef.current.scrollToIndex({ index: 'LAST', align: 'end', behavior: reduceMotion ? 'auto' : 'smooth' });
             setIsAtBottom(true);
         }
     }, [messageCount, virtuosoRef]);
@@ -44,7 +44,7 @@ export function useChatScroll({ chatId, messagesReady, messageCount, virtuosoRef
         initialBottomScrollChatIdRef.current = chatId;
         scheduleFrame(() => {
             scheduleFrame(() => {
-                virtuosoRef.current?.scrollToIndex({ index: messageCount - 1, align: 'end' });
+                virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end' });
             });
         });
     }, [chatId, messagesReady, messageCount, virtuosoRef]);

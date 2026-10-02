@@ -47,6 +47,22 @@ describe('ChatService', () => {
         assert.deepStrictEqual(chunks[1], { type: 'reasoning', value: 'Thinking' });
     });
 
+    test('streamChat forwards a generation claim token for fenced completion', async () => {
+        fetchMock.mock.mockImplementation(async (_url, init) => {
+            const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+            assert.equal(body.generationJobClaimToken, 'claim-token');
+            return new Response('data: [DONE]\n\n');
+        });
+
+        const chunks: ChatServiceStreamChunk[] = [];
+        for await (const chunk of chatService.streamChat({
+            model: 'm1',
+            reasoningEffort: 'low',
+            generationJobClaimToken: 'claim-token',
+        })) chunks.push(chunk);
+        assert.deepStrictEqual(chunks, []);
+    });
+
     test('streamChat parses multiline SSE data and JSON with arbitrary whitespace', async () => {
         const encoder = new TextEncoder();
         const bytes = encoder.encode(': ping\r\ndata: {\r\ndata:   "c" : "Actual",\r\ndata:   "metadata" : { "content" : "decoy" }\r\ndata: }\r\n\r\ndata: [DONE]');

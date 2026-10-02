@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, memo } from 'react';
+import { useState, useMemo, useEffect, memo } from 'react';
 import { ProviderIcon, type ProviderIconName } from './provider-icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -75,20 +75,22 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
     const [activeFilters, setActiveFilters] = useState<Capability[]>([]);
     const [showLegacy, setShowLegacy] = useState(false);
     const [showFilterMenu, setShowFilterMenu] = useState(false);
-    const [starredModelIds, setStarredModelIds] = useState<string[]>(() => {
-        if (typeof window === 'undefined') return [];
-        const saved = window.localStorage.getItem('starred-models');
-        if (!saved) return [];
-
+    const [starredModelIds, setStarredModelIds] = useState<string[]>([]);
+    // Storage may be unavailable in private or embedded browsers. Load after
+    // hydration so server markup and the first client render also agree.
+    useEffect(() => {
         try {
+            const saved = window.localStorage.getItem('starred-models');
+            if (!saved) return;
             const parsed: unknown = JSON.parse(saved);
-            if (!Array.isArray(parsed)) return [];
-            return parsed.filter((item): item is string => typeof item === 'string');
-        } catch (error) {
-            console.error('Failed to parse starred models', error);
-            return [];
+            if (Array.isArray(parsed)) {
+                setStarredModelIds(parsed.filter((item): item is string =>
+                    typeof item === 'string' && AVAILABLE_MODELS.some(model => model.id === item && !model.hidden)));
+            }
+        } catch {
+            // Favorites still work for this session without persistent storage.
         }
-    });
+    }, []);
 
     // Save favorites to local storage
     const toggleStarred = (e: React.MouseEvent, modelId: string) => {
@@ -97,7 +99,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
             ? starredModelIds.filter(id => id !== modelId)
             : [...starredModelIds, modelId];
         setStarredModelIds(next);
-        localStorage.setItem('starred-models', JSON.stringify(next));
+        try { localStorage.setItem('starred-models', JSON.stringify(next)); } catch { /* Session-only favorites. */ }
     };
 
     const selectableModels = useMemo(
@@ -111,8 +113,8 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
             if (model.hidden) return false;
 
             // 1. Search Query (Always apply)
-            if (searchQuery) {
-                const query = searchQuery.toLowerCase();
+            if (searchQuery.trim()) {
+                const query = searchQuery.trim().toLowerCase();
                 if (!model.name.toLowerCase().includes(query) && !model.description.toLowerCase().includes(query)) return false;
             }
 
@@ -158,7 +160,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
         <TooltipProvider>
             <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="h-8 md:h-9 px-2 md:px-3 gap-2 text-foreground hover:text-white hover:bg-accent transition-[color,background-color,border-color,box-shadow,opacity,transform] text-sm font-semibold tracking-tight max-w-[120px] md:max-w-[200px] rounded-xl">
+                    <Button variant="ghost" aria-label={`Choose model: ${selectedModel.name}`} className="h-10 px-2 md:px-3 gap-2 text-foreground hover:text-white hover:bg-accent transition-colors text-sm font-semibold tracking-tight max-w-[96px] min-[380px]:max-w-[145px] md:max-w-[220px] rounded-xl">
                         <span className="truncate">{selectedModel.name}</span>
                         <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
                     </Button>
@@ -249,6 +251,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                 <Search className="h-5 w-5 text-muted-foreground shrink-0" />
                                 <Input
                                     type="text"
+                                    aria-label="Search models"
                                     placeholder="Search models..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -273,7 +276,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                             );
                                         })}
                                         <div className="border-t border-border mt-1 pt-1">
-                                            <DropdownMenuItem onClick={() => setActiveFilters([])} className="text-sm text-muted-foreground hover:text-foreground">Show combined results</DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => setActiveFilters([])} className="text-sm text-muted-foreground hover:text-foreground">Clear filters</DropdownMenuItem>
                                         </div>
                                     </DropdownMenuContent>
                                 </DropdownMenu>
@@ -282,7 +285,11 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                             <ScrollArea className="flex-1 min-h-0">
                                 <div className="py-1">
                                     {filteredModels.length === 0 ? (
-                                        <div className="px-4 py-8 text-center text-sm text-muted-foreground">No models found</div>
+                                        <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                                            <p className="font-medium text-foreground">{selectedProvider === null && !searchQuery && !activeFilters.length ? 'No favorite models yet' : 'No matching models'}</p>
+                                            <p className="mt-2">{selectedProvider === null ? 'Use the star beside a model to keep it here.' : 'Try a different search or clear your filters.'}</p>
+                                            <Button variant="outline" className="mt-4" onClick={() => { setSearchQuery(''); setActiveFilters([]); setSelectedProvider('all'); }}>Show all models</Button>
+                                        </div>
                                     ) : (
                                         filteredModels.map((model) => {
                                             const isSelected = model.id === currentModel;
@@ -291,9 +298,11 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                                 <div
                                                     key={model.id}
                                                     role="button"
+                                                    aria-label={`Select ${model.name}${isSelected ? ', current model' : ''}`}
                                                     tabIndex={0}
                                                     onClick={() => handleModelSelect(model.id)}
                                                     onKeyDown={(e) => {
+                                                        if (e.target !== e.currentTarget) return;
                                                         if (e.key === 'Enter' || e.key === ' ') {
                                                             e.preventDefault();
                                                             handleModelSelect(model.id);
@@ -310,10 +319,12 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex items-center gap-2 min-w-0">
                                                             <span className="font-semibold text-foreground text-base truncate">{model.name}</span>
+                                                            {isSelected && <Check className="h-4 w-4 shrink-0 text-brand-400" aria-hidden="true" />}
 
                                                             <button
                                                                 type="button"
                                                                 aria-label={`${starredModelIds.includes(model.id) ? 'Remove' : 'Add'} ${model.name} ${starredModelIds.includes(model.id) ? 'from' : 'to'} favorites`}
+                                                                aria-pressed={starredModelIds.includes(model.id)}
                                                                 onClick={(e) => toggleStarred(e, model.id)}
                                                                 className="p-1 -m-1 hover:text-warning transition-colors"
                                                             >
@@ -349,7 +360,7 @@ export const ModelSelector = memo(function ModelSelector({ currentModel, onModel
                                                                     <Info className="h-3 w-3 text-muted-foreground" />
                                                                 </button>
                                                             </TooltipTrigger>
-                                                            <TooltipContent side="left">Model Information</TooltipContent>
+                                                            <TooltipContent side="left" className="max-w-64">{model.description}</TooltipContent>
                                                         </Tooltip>
                                                     </div>
                                                 </div>

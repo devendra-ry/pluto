@@ -50,7 +50,7 @@ export function AttachmentList({ items, onRemove, onRetry }: AttachmentListProps
                                 <button
                                     type="button"
                                     onClick={() => onRetry(item.localId)}
-                                    className="text-muted-foreground hover:text-foreground transition-colors"
+                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-card hover:text-foreground transition-colors"
                                     aria-label={`Retry ${item.file.name}`}
                                 >
                                     <RotateCcw className="h-3.5 w-3.5" />
@@ -60,7 +60,7 @@ export function AttachmentList({ items, onRemove, onRetry }: AttachmentListProps
                             <button
                                 type="button"
                                 onClick={() => onRemove(item.localId)}
-                                className="text-muted-foreground hover:text-foreground transition-colors"
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-card hover:text-foreground transition-colors"
                                 aria-label={`Remove ${item.file.name}`}
                             >
                                 <X className="h-3.5 w-3.5" />
@@ -69,7 +69,7 @@ export function AttachmentList({ items, onRemove, onRetry }: AttachmentListProps
 
                         {item.status === 'uploading' && (
                             <div className="mt-1.5">
-                                <div className="h-1.5 rounded-full bg-input overflow-hidden">
+                                <div role="progressbar" aria-label={`Uploading ${item.file.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={item.progress} className="h-1.5 rounded-full bg-input overflow-hidden">
                                     <div
                                         className="h-full bg-brand-400/80 transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-200"
                                         style={{ width: `${item.progress}%` }}

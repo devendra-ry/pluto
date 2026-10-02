@@ -71,6 +71,8 @@ export const ChatRequestSchema = z.object({
     model: z.string().min(1, 'Model is required').max(MAX_MODEL_ID_CHARS),
     reasoningEffort: ReasoningEffortSchema.optional(),
     systemPrompt: z.string().max(50000, 'System prompt must be 50000 characters or less').optional(),
+    // Fences job completion so a stale stream cannot finalize a newer claim.
+    generationJobClaimToken: z.string().uuid().optional(),
 }).superRefine((value, context) => {
     const messages = value.messages ?? [];
     const totalTextChars = messages.reduce((total, message) => total + message.content.length, 0);

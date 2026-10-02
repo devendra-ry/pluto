@@ -29,8 +29,9 @@ export interface OutputTokenPlan {
 
 function estimateMessageTokens(message: ChatMessage) {
     // Simple, fast approximation for mixed text/markdown/code content.
-    const attachmentCount = message.attachments?.length ?? 0;
-    const attachmentBudget = attachmentCount * 1200;
+    const attachmentBudget = (message.attachments ?? []).reduce((sum, attachment) => (
+        sum + estimateAttachmentTokens(attachment.mimeType, attachment.size)
+    ), 0);
     return Math.ceil(message.content.length / 3.5) + 8 + attachmentBudget;
 }
 
@@ -39,9 +40,23 @@ function estimateConversationTokens(messages: ChatMessage[]) {
 }
 
 function estimatePreparedMessageTokens(message: PreparedChatMessage) {
-    const attachmentCount = message.attachments?.length ?? 0;
-    const attachmentBudget = attachmentCount * 1200;
+    const attachmentBudget = message.attachments.reduce((sum, attachment) => {
+        const padding = attachment.base64Data.endsWith('==') ? 2
+            : attachment.base64Data.endsWith('=') ? 1 : 0;
+        const byteLength = Math.max(0, Math.floor(attachment.base64Data.length * 3 / 4) - padding);
+        return sum + estimateAttachmentTokens(attachment.mimeType, byteLength);
+    }, 0);
     return Math.ceil(message.content.length / 3.5) + 8 + attachmentBudget;
+}
+
+function estimateAttachmentTokens(mimeType: string, byteLength: number) {
+    // Plain text contributes tokens in proportion to its bytes. A fixed per-file
+    // allowance badly undercounts large text attachments and can overrun the
+    // provider context window before the retry logic has anything to trim.
+    if (mimeType.toLowerCase() === 'text/plain') {
+        return Math.ceil(byteLength / 3.5) + 8;
+    }
+    return 1200;
 }
 
 export function estimatePreparedConversationTokens(messages: PreparedChatMessage[]) {

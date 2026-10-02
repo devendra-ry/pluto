@@ -17,8 +17,9 @@ export class ApiRequestError extends Error {
 
 function isJsonContentType(contentType: string | null) {
     if (!contentType) return false;
-    const lower = contentType.toLowerCase();
-    return lower.includes('application/json') || lower.includes('+json');
+    const mediaType = contentType.split(';', 1)[0]?.trim().toLowerCase();
+    return mediaType === 'application/json'
+        || /^application\/[a-z0-9!#$&^_.+-]+\+json$/.test(mediaType ?? '');
 }
 
 function toOrigin(rawUrl: string | null | undefined) {
@@ -60,9 +61,10 @@ function getAllowedOrigins(req: Request) {
 
 export function assertValidPostOrigin(req: Request) {
     const allowedOrigins = getAllowedOrigins(req);
-    const origin = toOrigin(req.headers.get('origin'));
-    if (origin) {
-        if (!allowedOrigins.has(origin)) {
+    const rawOrigin = req.headers.get('origin');
+    if (rawOrigin !== null) {
+        const origin = toOrigin(rawOrigin);
+        if (!origin || !allowedOrigins.has(origin)) {
             throw new ApiRequestError(403, 'Forbidden: invalid request origin');
         }
         return;

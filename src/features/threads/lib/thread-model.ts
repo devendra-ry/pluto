@@ -20,7 +20,18 @@ export function sanitizeThreadTitle(raw: string, maxBaseLength: number = 50): st
     return cleaned;
 }
 
-type ThreadRow = Database['public']['Tables']['threads']['Row'];
+export function normalizeEditableThreadTitle(raw: string): string | null {
+    const cleaned = raw
+        .replace(/[\u0000-\u001F\u007F]/g, ' ')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/[<>]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return cleaned ? sanitizeThreadTitle(cleaned) : null;
+}
+
+// Older server-selected projections may omit this newly added persistence field.
+type ThreadRow = Omit<Database['public']['Tables']['threads']['Row'], 'deleted_at'> & { deleted_at?: string | null };
 
 function compareThreadsByUpdatedAtDesc(a: Thread, b: Thread) {
     const byUpdatedAt = b.updated_at.localeCompare(a.updated_at);

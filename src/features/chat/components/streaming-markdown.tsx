@@ -1,19 +1,9 @@
 'use client';
 
 import { memo, useEffect, useRef, useState } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import { getMarkdownPlugins } from '../lib/markdown-plugins';
+import type { Components } from 'react-markdown';
+import { WorkerMarkdown as MemoizedMarkdownRenderer } from './worker-markdown';
 import { isPlainMarkdownParagraph, takeFinalizedParagraphs } from '../lib/streaming-markdown-segments';
-
-function preprocessLaTeX(text: string) {
-    if (!text) return text;
-    return text
-        .replace(/\\+\[([\s\S]*?)\\+\]/g, (_, equation) => `\n$$\n${equation}\n$$\n`)
-        .replace(/\\+\(([\s\S]*?)\\+\)/g, (_, equation) => `$${equation}$`);
-}
-
-// Regex to fix markdown headings without space after #.
-const HEADING_FIX_REGEX = /^(#{1,6})([^#\s])/gm;
 
 // Code/math markers used to lazy-load their stylesheets on demand instead of
 // shipping katex + highlight.js CSS globally on every route.
@@ -26,14 +16,13 @@ const CODE_BLOCK_MARKER = /`{3,}|~{3,}|^(?: {4}|\t)/m;
  */
 function useLazyMarkdownStylesheets(content: string) {
     useEffect(() => {
-        const preprocessed = preprocessLaTeX(content);
         const reportLoadError = (error: unknown) => {
             if (process.env.NODE_ENV !== 'production') console.warn('[markdown] Unable to load formatting styles', error);
         };
-        if (CODE_BLOCK_MARKER.test(preprocessed)) {
+        if (CODE_BLOCK_MARKER.test(content)) {
             void import('highlight.js/styles/github-dark.css').catch(reportLoadError);
         }
-        if (preprocessed.includes('$')) {
+        if (content.includes('$') || content.includes('\\[') || content.includes('\\(')) {
             void import('katex/dist/katex.min.css').catch(reportLoadError);
         }
     }, [content]);
@@ -229,32 +218,5 @@ function StreamingMarkdownInner({
         </div>
     );
 }
-
-/**
- * The actual ReactMarkdown call, wrapped in React.memo so it only re-renders
- * when `content` (the debounced value) changes.
- */
-const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
-    content,
-    components,
-    isStreaming,
-}: {
-    content: string;
-    components?: Components;
-    isStreaming: boolean;
-}) {
-    const markdown = preprocessLaTeX(content).replace(HEADING_FIX_REGEX, '$1 $2');
-    const { remarkPlugins, rehypePlugins } = getMarkdownPlugins(markdown, isStreaming);
-
-    return (
-        <ReactMarkdown
-            rehypePlugins={rehypePlugins}
-            remarkPlugins={remarkPlugins}
-            components={components}
-        >
-            {markdown}
-        </ReactMarkdown>
-    );
-});
 
 export const StreamingMarkdown = memo(StreamingMarkdownInner);

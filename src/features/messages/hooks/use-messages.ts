@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import { useInfiniteQuery } from '@tanstack/react-query';
 
 import { getMessagesQueryKey, getQueryClient, MESSAGE_QUERY_KEY_PREFIX } from '@/shared/lib/query-client';
 import { type Attachment, type ChatResponseStats } from '@/shared/core/types';
@@ -15,7 +15,8 @@ import {
     mergeMessagesSorted,
     removeMessagesById
 } from '../lib/message-helpers';
-import { loadThreadMessages } from '../lib/load-thread-messages';
+import { canonicalMessageAttachments, loadMessagePage, type MessageCursor, type MessagePage } from '../lib/load-thread-messages';
+import { flattenMessagePages, updateMessagePages, type MessagePages } from '../lib/message-pages';
 import { executeSoftDelete, restoreMessagesForFailedDelete } from '../lib/message-mutations';
 import { useMessageSubscription } from './use-message-subscription';
 
@@ -28,7 +29,7 @@ function updateCachedThreadMessages(
     updater: (previous: Message[]) => Message[]
 ) {
     const queryClient = getQueryClient();
-    queryClient.setQueryData<Message[]>(getMessagesQueryKey(threadId), (previous) => updater(previous ?? []));
+    queryClient.setQueryData<MessagePages>(getMessagesQueryKey(threadId), previous => updateMessagePages(previous, updater));
 }
 
 function invalidateAllThreadMessages() {
@@ -53,7 +54,7 @@ export async function refreshThreadMessage(
         return { ok: false, error: error.message || 'Failed to refresh message' };
     }
     if (data) {
-        const message = mapMessageRowToMessage(data);
+        const message = canonicalMessageAttachments(mapMessageRowToMessage(data));
         updateCachedThreadMessages(threadId, (previous) => mergeMessagesSorted(previous, [message]));
     }
     return { ok: true };
@@ -78,22 +79,31 @@ export async function refreshThreadReply(
         return { ok: false, error: error.message || 'Failed to refresh response' };
     }
     if (data) {
-        const message = mapMessageRowToMessage(data);
+        const message = canonicalMessageAttachments(mapMessageRowToMessage(data));
         updateCachedThreadMessages(threadId, (previous) => mergeMessagesSorted(previous, [message]));
     }
     return { ok: true };
 }
 
-// Get all messages for a thread
+// Load the recent window, then fetch older history on demand.
 export function useMessages(threadId: string | null) {
     const supabase = useMemo(() => createClient(), []);
+    const activeThreadIdRef = useRef(threadId);
+    useLayoutEffect(() => {
+        activeThreadIdRef.current = threadId;
+        return () => {
+            if (activeThreadIdRef.current === threadId) activeThreadIdRef.current = null;
+        };
+    }, [threadId]);
 
-    const query = useQuery({
+    const query = useInfiniteQuery<MessagePage, Error, MessagePages, readonly unknown[], MessageCursor | null>({
         queryKey: threadId ? getMessagesQueryKey(threadId) : [MESSAGE_QUERY_KEY_PREFIX, '__idle__'],
         enabled: Boolean(threadId),
-        queryFn: async ({ signal }) => {
-            if (!threadId) return [];
-            return loadThreadMessages(supabase, threadId, signal);
+        initialPageParam: null as MessageCursor | null,
+        getNextPageParam: page => page.olderCursor,
+        queryFn: async ({ signal, pageParam }) => {
+            if (!threadId) return { messages: [], olderCursor: null };
+            return loadMessagePage(supabase, threadId, pageParam, signal);
         },
     });
 
@@ -107,18 +117,46 @@ export function useMessages(threadId: string | null) {
     }, [query, threadId]);
 
     // Use the new subscription hook
-    useMessageSubscription(threadId);
+    const syncStatus = useMessageSubscription(threadId);
 
     const messages = useMemo(() => {
         if (!threadId) return [] as Message[] | null;
-        if (query.data) return query.data;
+        if (query.data) return flattenMessagePages(query.data);
         if (query.isPending) return null;
         return [];
     }, [query.data, query.isPending, threadId]);
 
+    const loadMessagesThroughMessage = useCallback(async (
+        messageId: string,
+        shouldContinue: () => boolean = () => true,
+    ) => {
+        if (!threadId) return false;
+        const requestedThreadId = threadId;
+        const requestedKey = getMessagesQueryKey(requestedThreadId);
+        while (shouldContinue() && activeThreadIdRef.current === requestedThreadId) {
+            const currentData = getQueryClient().getQueryData<MessagePages>(requestedKey);
+            if (flattenMessagePages(currentData).some(message => message.id === messageId)) return true;
+            const cursor = currentData?.pages.at(-1)?.olderCursor;
+            if (!cursor) return false;
+
+            const result = await query.fetchNextPage({ cancelRefetch: false });
+            if (!shouldContinue() || activeThreadIdRef.current !== requestedThreadId) return false;
+            if (result.error) throw result.error;
+        }
+        return false;
+    }, [query, threadId]);
+
     return {
         messages,
+        error: query.isFetchNextPageError ? null : query.error,
+        isLoading: query.isPending,
         refreshMessages,
+        hasOlderMessages: query.hasNextPage,
+        isLoadingOlder: query.isFetchingNextPage,
+        olderMessagesError: query.isFetchNextPageError ? 'Could not load older messages. Try again.' : null,
+        loadOlderMessages: () => query.isFetching ? Promise.resolve() : query.fetchNextPage({ cancelRefetch: false }),
+        loadMessagesThroughMessage,
+        syncStatus,
     };
 }
 
@@ -148,7 +186,7 @@ export async function addMessage(
         .single();
 
     if (error) throw error;
-    const nextMessage = mapMessageRowToMessage(data);
+    const nextMessage = canonicalMessageAttachments(mapMessageRowToMessage(data));
     updateCachedThreadMessages(threadId, (previous) => mergeMessagesSorted(previous, [nextMessage]));
     return nextMessage;
 }
@@ -203,7 +241,8 @@ export async function deleteMessagesByIds(ids: string[], options?: DeleteMessage
     const queryClient = getQueryClient();
     const threadId = options?.threadId;
     const queryKey = threadId ? getMessagesQueryKey(threadId) : null;
-    const previousMessages = queryKey ? queryClient.getQueryData<Message[]>(queryKey) : undefined;
+    const previousPages = queryKey ? queryClient.getQueryData<MessagePages>(queryKey) : undefined;
+    const previousMessages = previousPages ? flattenMessagePages(previousPages) : undefined;
     if (queryKey) {
         const idsToRemove = new Set(ids);
         updateCachedThreadMessages(threadId!, (previous) => removeMessagesById(previous, idsToRemove));
@@ -217,8 +256,8 @@ export async function deleteMessagesByIds(ids: string[], options?: DeleteMessage
         }),
         () => {
             if (queryKey && previousMessages) {
-                queryClient.setQueryData<Message[]>(queryKey, (current) =>
-                    restoreMessagesForFailedDelete(current, previousMessages, ids),
+                queryClient.setQueryData<MessagePages>(queryKey, current =>
+                    updateMessagePages(current ?? previousPages, messages => restoreMessagesForFailedDelete(messages, previousMessages, ids)),
                 );
             } else if (queryKey) {
                 queryClient.removeQueries({ queryKey, exact: true });

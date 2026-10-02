@@ -31,6 +31,12 @@ function getSupabaseStorageRemotePatterns(): NonNullable<NextConfig['images']>['
 }
 
 const nextConfig: NextConfig = {
+  turbopack: {
+    resolveAlias: {
+      'decode-named-character-reference': './src/features/chat/lib/decode-markdown-entity.ts',
+      'hast-util-from-html-isomorphic': './src/features/chat/lib/parse-markdown-html.ts',
+    },
+  },
   images: {
     remotePatterns: getSupabaseStorageRemotePatterns(),
   },

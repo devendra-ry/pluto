@@ -1,15 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import Image from 'next/image';
 import { Copy, RefreshCcw, SquarePen, GitBranch, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
 import { useCopyToClipboard } from '@/shared/hooks/use-copy-to-clipboard';
 import { cn } from '@/shared/core/utils';
 import { type Attachment } from '@/shared/core/types';
-import { isLegacyAttachmentProxyUrl } from '@/features/attachments';
 import { ActionIcon } from './chat-action-icon';
+import { AttachmentPreview } from './attachment-preview';
 
 interface UserMessageProps {
     id: string;
@@ -40,9 +39,8 @@ export function UserMessage({
     };
 
     const handleSaveEdit = () => {
-        if (onEdit && editContent.trim()) {
-            onEdit(id, editContent.trim());
-        }
+        if (!onEdit || !editContent.trim() || editContent.trim() === content.trim()) return;
+        onEdit(id, editContent.trim());
         setIsEditing(false);
     };
 
@@ -59,6 +57,11 @@ export function UserMessage({
                         aria-label="Edit message"
                         value={editContent}
                         onChange={(e) => setEditContent(e.target.value)}
+                        onKeyDown={e => {
+                            if (e.nativeEvent.isComposing) return;
+                            if (e.key === 'Escape') { e.preventDefault(); handleCancelEdit(); }
+                            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSaveEdit(); }
+                        }}
                         className="min-h-[80px] rounded-2xl bg-accent p-3 text-base text-foreground focus:border-primary/50 focus-visible:ring-ring resize-none"
                         autoFocus
                     />
@@ -75,6 +78,7 @@ export function UserMessage({
                         <Button
                             size="sm"
                             onClick={handleSaveEdit}
+                            disabled={!editContent.trim() || editContent.trim() === content.trim()}
                             className="bg-primary hover:bg-brand-600 text-primary-foreground"
                         >
                             Save & Resend
@@ -91,40 +95,8 @@ export function UserMessage({
                         {attachments.length > 0 && (
                             <div className={cn("space-y-2", content ? "mt-3" : "")}>
                                 {attachments.map((attachment) => {
-                                    const isImage = attachment.mimeType.startsWith('image/');
                                     return (
-                                        <div
-                                            key={attachment.id}
-                                            className="rounded-xl border border-border bg-card p-2"
-                                        >
-                                            {isImage && (
-                                                <a
-                                                    href={attachment.url}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className="block mb-2 overflow-hidden rounded-lg border border-border bg-background"
-                                                >
-                                                    <Image
-                                                        src={attachment.url}
-                                                        alt={attachment.name}
-                                                        width={480}
-                                                        height={320}
-                                                        className="h-auto w-full object-cover"
-                                                        unoptimized={isLegacyAttachmentProxyUrl(attachment.url)}
-                                                    />
-                                                </a>
-                                            )}
-                                            <a
-                                                href={attachment.url}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="text-sm text-foreground hover:text-foreground underline underline-offset-2 truncate block"
-                                                title={attachment.name}
-                                            >
-                                                {attachment.name}
-                                            </a>
-                                            <p className="text-xs text-muted-foreground">{attachment.mimeType}</p>
-                                        </div>
+                                        <AttachmentPreview key={attachment.id} attachment={attachment} />
                                     );
                                 })}
                             </div>
@@ -140,11 +112,11 @@ export function UserMessage({
                                 onClick={() => onRetry(id)}
                             />
                         )}
-                        <ActionIcon
+                        {onBranch && <ActionIcon
                             icon={GitBranch}
                             title="Branch"
-                            onClick={() => onBranch?.(id)}
-                        />
+                            onClick={() => onBranch(id)}
+                        />}
                         {onEdit && (
                             <ActionIcon
                                 icon={SquarePen}

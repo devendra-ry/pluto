@@ -25,6 +25,7 @@ import {
 } from '@/server/http/api-security';
 import { assertRateLimit, uploadRateLimiter } from '@/server/http/rate-limit';
 import { MAX_MULTIPART_OVERHEAD_BYTES } from '@/shared/validation/request-limits';
+import { withResultSpan } from '@/server/observability/tracing';
 
 function sanitizeFileName(fileName: string) {
     return fileName
@@ -106,15 +107,19 @@ async function removePathsInChunks(
     paths: string[]
 ) {
     const chunkSize = 100;
+    let removed = 0;
     for (let i = 0; i < paths.length; i += chunkSize) {
         const batch = paths.slice(i, i + chunkSize);
         if (batch.length === 0) continue;
-        const { error } = await supabase.storage.from(bucket).remove(batch);
+        const { data, error } = await withResultSpan('storage.delete', { 'storage.object_count': batch.length },
+            () => supabase.storage.from(bucket).remove(batch));
         if (error) {
             const message = error.message || 'Failed to delete attachments';
             throw new ApiRequestError(mapStorageErrorStatus(message), message);
         }
+        removed += data?.length ?? 0;
     }
+    return removed;
 }
 
 export async function POST(req: Request) {
@@ -221,13 +226,13 @@ export async function POST(req: Request) {
         const objectPath = `${user.id}/${threadId}/${Date.now()}-${attachmentId}-${sanitizedName}`;
         const arrayBuffer = await file.arrayBuffer();
 
-        const { error: uploadError } = await supabase.storage
+        const { error: uploadError } = await withResultSpan('storage.upload', { 'storage.bytes': file.size, 'storage.mime_type': mimeType }, () => supabase.storage
             .from(bucket)
             .upload(objectPath, arrayBuffer, {
                 contentType: mimeType,
                 upsert: false,
                 cacheControl: '3600',
-            });
+            }));
 
         if (uploadError) {
             logger.error('[uploads] failed to store attachment', uploadError);
@@ -330,8 +335,8 @@ export async function DELETE(req: Request) {
             return jsonResponse({ removed: 0 });
         }
 
-        await removePathsInChunks(supabase, bucket, pathsToDelete);
-        return jsonResponse({ removed: pathsToDelete.length });
+        const removed = await removePathsInChunks(supabase, bucket, pathsToDelete);
+        return jsonResponse({ removed });
             } catch (error) {
                 const response = toJsonErrorResponse(error);
                 if (response) {
@@ -375,12 +380,23 @@ export async function GET(req: Request) {
             user.id,
             () => new ApiRequestError(403, 'Thread not found or access denied')
         );
-        if (!path.startsWith(`${user.id}/${threadId}/`)) {
+        if (!path.startsWith(`${user.id}/`) || path.split('/').length !== 3) {
             return new Response('Forbidden', { status: 403 });
         }
 
+        if (!path.startsWith(`${user.id}/${threadId}/`)) {
+            // A branch can share an object with a deleted parent, but only
+            // while a live message in this owned conversation references it.
+            const { data: references, error: referenceError } = await supabase
+                .from('messages').select('id').eq('thread_id', threadId)
+                .eq('user_id', user.id).is('deleted_at', null)
+                .contains('attachments', [{ path }]).limit(1);
+            if (referenceError) throw referenceError;
+            if (!references?.length) return new Response('Forbidden', { status: 403 });
+        }
+
         const bucket = getAttachmentsBucketName();
-        const { data, error } = await supabase.storage.from(bucket).download(path);
+        const { data, error } = await withResultSpan('storage.download', {}, () => supabase.storage.from(bucket).download(path));
         if (error || !data) {
             return new Response('Not found', { status: 404 });
         }
@@ -393,6 +409,7 @@ export async function GET(req: Request) {
         const baseHeaders: Record<string, string> = {
             'Content-Type': contentType,
             'Cache-Control': 'private, max-age=3600',
+            'Vary': 'Cookie',
             'Content-Disposition': `inline; filename="${fallbackFilename}"; filename*=UTF-8''${encodedFilename}`,
             'Accept-Ranges': 'bytes',
         };

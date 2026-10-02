@@ -5,13 +5,16 @@ import { Button } from '@/components/ui/button';
 import { ArrowUp, Square, Paperclip } from 'lucide-react';
 import { AVAILABLE_MODELS } from '@/shared/core/constants';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
-import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_TOTAL_ATTACHMENT_BYTES, isImageAttachment } from '@/features/attachments';
-import { startUploadFileForThread } from '@/features/uploads';
+import { MAX_ATTACHMENTS_PER_MESSAGE, isImageAttachment } from '@/features/attachments';
+import { cleanupThreadAttachments, startUploadFileForThread } from '@/features/uploads';
 import { useToast } from '@/components/ui/toast';
 import { AttachmentList, type LocalAttachmentItem } from './chat-input-attachments';
 import { ReasoningSelector, SystemPromptSelector } from './chat-input-settings';
 import { ModelSelector } from './model-selector';
-import { isFileAllowedForChatInput } from '../lib/chat-input-policy';
+import { isFileAllowedForChatInput, selectChatInputFiles } from '../lib/chat-input-policy';
+import { MAX_CHAT_MESSAGE_CHARS } from '@/shared/validation/request-limits';
+import { useAuthUserId } from '@/features/shell';
+import { useTextDraftRecovery } from '../hooks/use-text-draft-recovery';
 
 export interface ChatInputHandle {
     setValue: (value: string) => void;
@@ -20,6 +23,7 @@ export interface ChatInputHandle {
 
 interface ChatInputProps {
     initialValue?: string;
+    draftScopeId?: string;
     onInputChange?: (value: string) => void;
     onSubmit: (
         value: string,
@@ -29,6 +33,7 @@ interface ChatInputProps {
     threadId?: string | null;
     onStop?: () => void;
     isLoading: boolean;
+    submitDisabled?: boolean;
     currentModel: string;
     onModelChange: (model: string) => void;
     reasoningEffort: ReasoningEffort;
@@ -39,12 +44,14 @@ interface ChatInputProps {
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     initialValue = '',
+    draftScopeId,
     onInputChange,
     onSubmit,
     onEnsureThread,
     threadId,
     onStop,
     isLoading,
+    submitDisabled = false,
     currentModel,
     onModelChange,
     reasoningEffort,
@@ -52,6 +59,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     systemPrompt = '',
     onSystemPromptChange,
 }, ref) => {
+    const userId = useAuthUserId();
+    const effectiveDraftScopeId = draftScopeId ?? threadId ?? 'home';
+    const draftRecovery = useTextDraftRecovery(userId, effectiveDraftScopeId);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const resizeAnimationRef = useRef<Animation | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -63,7 +73,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const mountedRef = useRef(true);
     const previousThreadIdRef = useRef(threadId);
     const [value, setValue] = useState(initialValue);
+    const [showRecoveredHint, setShowRecoveredHint] = useState(false);
     const [attachmentItems, setAttachmentItems] = useState<LocalAttachmentItem[]>([]);
+    const [isDraggingFiles, setIsDraggingFiles] = useState(false);
     const { showToast } = useToast();
     const selectedModel = AVAILABLE_MODELS.find((m) => m.id === currentModel) ?? AVAILABLE_MODELS[0];
     const supportsImages = selectedModel.capabilities.includes('vision');
@@ -71,10 +83,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     const supportsTexts = selectedModel.provider === 'google';
     const supportsImageUploads = supportsImages;
     const supportsAttachments = supportsImages || supportsPdfs || supportsTexts;
-    const activeAttachmentItems = useMemo(
-        () => (supportsAttachments ? attachmentItems : []),
-        [supportsAttachments, attachmentItems]
-    );
+    const activeAttachmentItems = attachmentItems;
     const acceptedMimeTypes = [
         supportsImages ? 'image/png,image/jpeg,image/webp,image/gif' : '',
         supportsPdfs ? 'application/pdf' : '',
@@ -89,6 +98,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     );
     const hasUploadingAttachments = activeAttachmentItems.some((item) => item.status === 'uploading');
     const hasFailedAttachments = activeAttachmentItems.some((item) => item.status === 'failed');
+    const hasIncompatibleAttachments = activeAttachmentItems.some(item => !isFileAllowedForChatInput(
+        item.file.type, { images: supportsImages, pdfs: supportsPdfs, texts: supportsTexts },
+    ));
+    const isMessageTooLong = value.length > MAX_CHAT_MESSAGE_CHARS;
 
 
     const resizeTextarea = useCallback(() => {
@@ -117,6 +130,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         valueRef.current = value;
     }, [value, resizeTextarea]);
 
+    useEffect(() => {
+        if (!draftRecovery.isLoaded || draftRevisionRef.current !== 0 || valueRef.current !== initialValue) return;
+        if (!draftRecovery.restoredText) return;
+        valueRef.current = draftRecovery.restoredText;
+        setValue(draftRecovery.restoredText);
+        onInputChange?.(draftRecovery.restoredText);
+        setShowRecoveredHint(true);
+    }, [draftRecovery.isLoaded, draftRecovery.restoredText, initialValue, onInputChange]);
+
     useEffect(() => () => resizeAnimationRef.current?.cancel(), []);
 
     useEffect(() => {
@@ -136,7 +158,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         previousThreadIdRef.current = threadId;
         // null -> id is creation of the same draft; switching existing chats
         // must cancel every pending task, including thread preparation.
-        if (previousThreadId && threadId && previousThreadId !== threadId) {
+        if (previousThreadId && previousThreadId !== threadId) {
             for (const cancel of uploadTasksRef.current.values()) cancel();
             uploadTasksRef.current.clear();
             attachmentItemsRef.current = [];
@@ -190,7 +212,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            if (!isLoading && !hasUploadingAttachments && !hasFailedAttachments && (value.trim() || uploadedAttachments.length > 0)) {
+            if (!isLoading && !submitDisabled && !hasUploadingAttachments && !hasFailedAttachments && !hasIncompatibleAttachments && !isMessageTooLong && (value.trim() || uploadedAttachments.length > 0)) {
                 void handleSubmit();
             }
         }
@@ -202,10 +224,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         valueRef.current = newValue;
         setValue(newValue);
         onInputChange?.(newValue);
+        draftRecovery.update(newValue);
+        setShowRecoveredHint(false);
     };
 
     const handleSubmit = async () => {
-        if (submissionInFlightRef.current || (!value.trim() && uploadedAttachments.length === 0) || hasUploadingAttachments || hasFailedAttachments || isLoading) {
+        if (submissionInFlightRef.current || (!value.trim() && uploadedAttachments.length === 0) || hasUploadingAttachments || hasFailedAttachments || hasIncompatibleAttachments || isMessageTooLong || isLoading || submitDisabled) {
             return;
         }
 
@@ -214,6 +238,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         const submittedAttachments = uploadedAttachments;
         const submittedRevision = draftRevisionRef.current;
         submissionInFlightRef.current = true;
+        draftRecovery.beginSubmission(submittedValue);
 
         // Clear immediately so user can start typing the next prompt while generation runs.
         setValue('');
@@ -233,6 +258,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                     valueRef.current = submittedValue;
                     setValue(submittedValue);
                     onInputChange?.(submittedValue);
+                    draftRecovery.update(submittedValue);
+                    setShowRecoveredHint(true);
                     setAttachmentItems(submittedItems);
                     attachmentItemsRef.current = submittedItems;
                     if (fileInputRef.current) {
@@ -241,6 +268,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                 }
                 return;
             }
+            if (draftRevisionRef.current === submittedRevision) draftRecovery.clear();
         } catch (error) {
             if (process.env.NODE_ENV !== 'production') {
                 console.warn('[chat-input] Submit failed, restoring local draft state', error);
@@ -251,6 +279,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                 valueRef.current = submittedValue;
                 setValue(submittedValue);
                 onInputChange?.(submittedValue);
+                draftRecovery.update(submittedValue);
+                setShowRecoveredHint(true);
                 setAttachmentItems(submittedItems);
                 attachmentItemsRef.current = submittedItems;
                 if (fileInputRef.current) {
@@ -267,32 +297,39 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             draftRevisionRef.current += 1;
             valueRef.current = newValue;
             setValue(newValue);
+            draftRecovery.update(newValue);
+            setShowRecoveredHint(false);
         },
         focus: () => textareaRef.current?.focus(),
-    }), []);
+    }), [draftRecovery]);
 
     const handleAttachClick = () => {
         if (isLoading || !supportsAttachments) return;
         fileInputRef.current?.click();
     };
 
-    const enqueueLocalFiles = useCallback((files: File[], source: 'picker' | 'paste') => {
+    const enqueueLocalFiles = useCallback((files: File[]) => {
         if (files.length === 0) return;
         if (!supportsAttachments) {
             showToast('Attachments are not supported for the current model', 'error');
             return;
         }
 
-        const availableSlots = Math.max(0, MAX_ATTACHMENTS_PER_MESSAGE - attachmentItemsRef.current.length);
         const currentBytes = attachmentItemsRef.current.reduce((total, item) => total + item.file.size, 0);
-        const selectedFiles = files.slice(0, availableSlots).filter((file, index, selected) => {
-            const previousBytes = selected.slice(0, index).reduce((total, previous) => total + previous.size, 0);
-            return currentBytes + previousBytes + file.size <= MAX_TOTAL_ATTACHMENT_BYTES;
+        const { accepted: selectedFiles, rejected } = selectChatInputFiles(files, {
+            currentCount: attachmentItemsRef.current.length,
+            currentBytes,
         });
-        if (selectedFiles.length === 0) {
-            showToast(`Maximum ${MAX_ATTACHMENTS_PER_MESSAGE} attachments allowed per message`, 'error');
-            return;
+        if (rejected.length) {
+            const reasons = new Set(rejected.map(item => item.reason));
+            const limits = [
+                reasons.has('individual-size') ? '20 MB per file' : '',
+                reasons.has('total-size') ? '50 MB total' : '',
+                reasons.has('count') ? `${MAX_ATTACHMENTS_PER_MESSAGE} files per message` : '',
+            ].filter(Boolean).join(', ');
+            showToast(`${rejected.length} file(s) not added. Limit: ${limits}.`, 'error');
         }
+        if (!selectedFiles.length) return;
 
         const nextItems: LocalAttachmentItem[] = selectedFiles.map((file) => {
             const localId = crypto.randomUUID();
@@ -328,15 +365,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             }
         }
 
-        if (files.length > selectedFiles.length) {
-            const addedCount = selectedFiles.length;
-            showToast(
-                source === 'paste'
-                    ? `Only ${addedCount} pasted image(s) were added due to attachment limits`
-                    : `Only ${addedCount} file(s) were added due to attachment limits`,
-                'error'
-            );
-        }
     }, [
         supportsAttachments,
         supportsImages,
@@ -348,7 +376,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files ?? []);
-        enqueueLocalFiles(files, 'picker');
+        enqueueLocalFiles(files);
         e.target.value = '';
     };
 
@@ -376,11 +404,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             return;
         }
 
-        enqueueLocalFiles(pastedImageFiles, 'paste');
+        enqueueLocalFiles(pastedImageFiles);
     };
 
     const handleRemoveAttachment = (localId: string) => {
         draftRevisionRef.current += 1;
+        const item = attachmentItemsRef.current.find(item => item.localId === localId);
         const cancel = uploadTasksRef.current.get(localId);
         if (cancel) {
             cancel();
@@ -388,6 +417,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
         }
         attachmentItemsRef.current = attachmentItemsRef.current.filter(item => item.localId !== localId);
         setAttachmentItems(attachmentItemsRef.current);
+        if (item?.status === 'uploaded' && threadId && item.attachment.path) {
+            void cleanupThreadAttachments(threadId, [item.attachment.path]).catch(error => {
+                console.warn('[chat-input] Failed to clean up removed file:', error);
+            });
+        }
     };
 
     const handleRetryAttachment = (localId: string) => {
@@ -397,9 +431,27 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
     };
 
     return (
-        <div className="px-3 md:px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] bg-background">
+        <div className="px-3 md:px-6 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-background">
             <div className="max-w-3xl mx-auto">
-                <div className="relative rounded-2xl bg-card border border-input shadow-lg transition-[border-color,box-shadow] duration-200 ease-fluid focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+                <div
+                    className={`relative rounded-2xl bg-card border shadow-[0_8px_32px_#0003] transition-[border-color,box-shadow] duration-200 ease-fluid focus-within:border-ring/70 focus-within:ring-2 focus-within:ring-ring/10 ${isDraggingFiles ? 'border-ring ring-2 ring-ring/20' : 'border-input'}`}
+                    onDragOver={event => {
+                        if (!Array.from(event.dataTransfer.types).includes('Files')) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = isLoading || !supportsAttachments ? 'none' : 'copy';
+                        setIsDraggingFiles(true);
+                    }}
+                    onDragLeave={event => {
+                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDraggingFiles(false);
+                    }}
+                    onDrop={event => {
+                        if (!Array.from(event.dataTransfer.types).includes('Files')) return;
+                        event.preventDefault();
+                        setIsDraggingFiles(false);
+                        if (isLoading) { showToast('Wait for the response to finish before attaching files.', 'info'); return; }
+                        enqueueLocalFiles(Array.from(event.dataTransfer.files));
+                    }}
+                >
                     <input
                         ref={fileInputRef}
                         type="file"
@@ -416,8 +468,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                         onChange={handleChange}
                         onKeyDown={handleKeyDown}
                         onPaste={handlePaste}
-                        placeholder="Type your message here..."
+                        placeholder={isDraggingFiles ? 'Drop files here to attach…' : 'Ask anything, or share a file…'}
                         aria-label="Message"
+                        aria-describedby="composer-hint"
+                        aria-invalid={isMessageTooLong || undefined}
                         className="block w-full px-4 md:px-5 pt-4 pb-3 bg-transparent text-foreground placeholder:text-muted-foreground focus-visible:outline-none resize-none min-h-[60px] text-base leading-relaxed overflow-y-auto"
                     />
 
@@ -428,7 +482,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                     />
 
                     <div className="flex items-center justify-between gap-2 px-2 md:px-4 pb-3 pt-1">
-                        <div className="flex min-w-0 flex-1 items-center gap-1 md:gap-3">
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 md:gap-2">
                             <div className="min-w-0">
                                 <ModelSelector
                                     currentModel={currentModel}
@@ -460,7 +514,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                         || !supportsAttachments
                                         || activeAttachmentItems.length >= MAX_ATTACHMENTS_PER_MESSAGE
                                     }
-                                    className="h-8 w-8 md:w-11 p-0 text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent border border-border rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] flex items-center justify-center"
+                                    title="Attach images, PDFs, or text · 20 MB per file"
+                                    className="h-10 w-10 p-0 text-muted-foreground hover:text-foreground hover:bg-accent rounded-xl transition-colors flex items-center justify-center"
                                 >
                                     <Paperclip className="h-3.5 w-3.5 md:h-4 md:w-4" />
                                 </Button>
@@ -483,7 +538,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 size="icon"
                                 aria-label="Stop generating"
                                 onClick={onStop}
-                                className="shrink-0 h-9 w-9 rounded-xl bg-destructive/10 hover:bg-destructive/20 text-destructive transition-colors border border-destructive/30"
+                                className="shrink-0 h-10 w-10 rounded-xl bg-destructive/10 hover:bg-destructive/20 text-destructive transition-colors border border-destructive/30"
                             >
                                 <Square className="h-3.5 w-3.5 fill-current" />
                             </Button>
@@ -494,18 +549,52 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
                                 aria-label="Send message"
                                 onClick={() => void handleSubmit()}
                                 disabled={
-                                    isLoading ||
+                                    isLoading || submitDisabled ||
                                     hasUploadingAttachments ||
                                     hasFailedAttachments ||
+                                    hasIncompatibleAttachments ||
+                                    isMessageTooLong ||
                                     (!value.trim() && uploadedAttachments.length === 0)
                                 }
-                                className="shrink-0 h-9 w-9 rounded-xl bg-primary hover:bg-brand-600 text-primary-foreground transition-colors disabled:bg-secondary disabled:text-muted-foreground disabled:opacity-100 disabled:cursor-not-allowed"
+                                className="shrink-0 h-10 w-10 rounded-xl bg-primary hover:bg-brand-600 text-primary-foreground transition-colors disabled:bg-secondary disabled:text-muted-foreground disabled:opacity-100 disabled:cursor-not-allowed"
                             >
                                 <ArrowUp className="h-4 w-4" />
                             </Button>
                         )}
                     </div>
                 </div>
+                <p id="composer-hint" role={isMessageTooLong || hasIncompatibleAttachments ? 'alert' : undefined} className={`mt-2 px-1 text-xs ${isMessageTooLong || hasIncompatibleAttachments ? 'text-destructive' : 'text-muted-foreground'}`}>
+                    {isMessageTooLong ? `Message exceeds ${MAX_CHAT_MESSAGE_CHARS.toLocaleString()} characters. Shorten it to send.`
+                        : hasIncompatibleAttachments ? 'This model cannot read one or more files. Change models or remove those files.'
+                        : hasUploadingAttachments ? 'Uploading files… You can send when all files are ready.'
+                        : hasFailedAttachments ? 'Retry or remove failed files to send your message.'
+                        : isLoading ? 'You can draft your next message while the response finishes.'
+                        : <><span className="hidden sm:inline">Enter to send · Shift + Enter for a new line<span aria-hidden="true"> · </span></span>AI can make mistakes. Check important details.</>}
+                </p>
+                {showRecoveredHint && (
+                    <div className="mt-1 flex items-center gap-2 px-1 text-xs text-muted-foreground" role="status" aria-live="polite">
+                        <span>Draft restored</span>
+                        <button
+                            type="button"
+                            className="underline underline-offset-2 hover:text-foreground"
+                            onClick={() => {
+                                draftRevisionRef.current += 1;
+                                valueRef.current = '';
+                                setValue('');
+                                onInputChange?.('');
+                                draftRecovery.clear();
+                                setShowRecoveredHint(false);
+                            }}
+                        >
+                            Discard
+                        </button>
+                    </div>
+                )}
+                {draftRecovery.saveWarning && (
+                    <p className="mt-1 px-1 text-xs text-muted-foreground" role="status" aria-live="polite">
+                        {draftRecovery.saveWarning}
+                    </p>
+                )}
             </div>
         </div>
     );

@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { dehydrate, HydrationBoundary, QueryClient } from '@tanstack/react-query';
 
 import { ChatPageClient } from '@/features/chat';
-import { loadThreadMessages } from '@/features/messages/server';
+import { loadMessagePage } from '@/features/messages/server';
 import { mapThreadRowToThread, THREAD_SELECT_COLUMNS } from '@/features/threads';
 import type { Thread } from '@/shared/contracts/thread';
 import { createClient } from '@/server/supabase/server';
@@ -42,9 +42,10 @@ export default async function ChatPage({ params }: PageProps) {
                 })
         ).catch(() => undefined),
         Promise.resolve(
-            queryClient.prefetchQuery({
+            queryClient.prefetchInfiniteQuery({
                 queryKey: getMessagesQueryKey(chatId),
-                queryFn: () => loadThreadMessages(supabase, chatId),
+                initialPageParam: null,
+                queryFn: () => loadMessagePage(supabase, chatId),
             })
         ).catch(() => undefined),
     ]);

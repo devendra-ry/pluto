@@ -39,6 +39,50 @@ test('parseJsonRequest enforces streamed body bounds', async (t) => {
     });
 });
 
+test('request security validates JSON media types and rejects invalid explicit origins', async (t) => {
+    const { ApiRequestError, assertJsonRequest, assertValidPostOrigin } = await import('../src/server/http/api-security');
+
+    await t.test('accepts JSON and structured JSON media types with parameters', () => {
+        assertJsonRequest(new Request('https://example.com/api', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        }));
+        assertJsonRequest(new Request('https://example.com/api', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/problem+json' },
+        }));
+    });
+
+    await t.test('rejects lookalike non-JSON media types', () => {
+        for (const contentType of ['text/application/json', 'application/jsonp', 'text/plain; format=+json']) {
+            assert.throws(
+                () => assertJsonRequest(new Request('https://example.com/api', {
+                    method: 'POST',
+                    headers: { 'Content-Type': contentType },
+                })),
+                (error: unknown) => error instanceof ApiRequestError && error.status === 415,
+            );
+        }
+    });
+
+    await t.test('does not fall back to Referer when an explicit Origin is invalid', () => {
+        assert.throws(
+            () => assertValidPostOrigin(new Request('https://example.com/api', {
+                method: 'POST',
+                headers: { Origin: 'null', Referer: 'https://example.com/page' },
+            })),
+            (error: unknown) => error instanceof ApiRequestError && error.status === 403,
+        );
+    });
+
+    await t.test('allows a same-origin Referer only when Origin is absent', () => {
+        assert.doesNotThrow(() => assertValidPostOrigin(new Request('https://example.com/api', {
+            method: 'POST',
+            headers: { Referer: 'https://example.com/page' },
+        })));
+    });
+});
+
 test('parseFormDataRequest enforces streamed body bounds without Content-Length', async (t) => {
     const { ApiRequestError, parseFormDataRequest } = await import('../src/server/http/api-security');
 

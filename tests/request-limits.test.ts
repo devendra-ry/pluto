@@ -37,6 +37,20 @@ test('request schemas enforce resource bounds', async (t) => {
         assert.strictEqual(result.success, true);
     });
 
+    await t.test('accepts a UUID claim token and rejects malformed claim tokens', () => {
+        const request = {
+            threadId: 'thread',
+            userMessageId: 'message',
+            model: 'model',
+            generationJobClaimToken: '9e415801-6c61-4cf5-bf17-c92a23f68e41',
+        };
+        assert.strictEqual(ChatRequestSchema.safeParse(request).success, true);
+        assert.strictEqual(ChatRequestSchema.safeParse({
+            ...request,
+            generationJobClaimToken: 'not-a-uuid',
+        }).success, false);
+    });
+
     await t.test('rejects oversized cleanup batches', () => {
         const result = UploadCleanupRequestSchema.safeParse({
             threadId: 'thread',

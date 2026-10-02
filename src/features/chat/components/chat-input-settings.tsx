@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Brain, Check, ScrollText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -35,7 +36,7 @@ export function ReasoningSelector({ reasoningEffort, onReasoningEffortChange }: 
                     <Button
                         variant="ghost"
                         aria-label={`Reasoning effort: ${selectedReasoning.label}`}
-                        className="h-8 px-2 md:px-3 gap-1.5 md:gap-2 text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent border border-border rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] text-sm font-semibold"
+                        className="h-10 px-3 gap-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-xl transition-colors text-sm font-medium"
                     >
                         <Brain className="h-3.5 w-3.5 md:h-4 md:w-4" />
                         <span className="capitalize hidden md:inline">{selectedReasoning.label}</span>
@@ -84,16 +85,18 @@ export function SystemPromptSelector({ systemPrompt, onSystemPromptChange }: Sys
     const [systemPromptDraft, setSystemPromptDraft] = useState(systemPrompt);
     const [isSavingSystemPrompt, setIsSavingSystemPrompt] = useState(false);
     const savingRef = useRef(false);
+    const triggerRef = useRef<HTMLButtonElement>(null);
     const { showToast } = useToast();
 
     useEffect(() => {
-        setSystemPromptDraft(systemPrompt);
-    }, [systemPrompt]);
+        if (!isSystemMenuOpen) setSystemPromptDraft(systemPrompt);
+    }, [systemPrompt, isSystemMenuOpen]);
 
     const hasSystemPrompt = systemPrompt.trim().length > 0;
+    const promptTooLong = systemPromptDraft.length > 50_000;
 
     const handleSaveSystemPrompt = async () => {
-        if (savingRef.current) return;
+        if (savingRef.current || promptTooLong) return;
         if (!onSystemPromptChange) {
             setIsSystemMenuOpen(false);
             return;
@@ -134,44 +137,45 @@ export function SystemPromptSelector({ systemPrompt, onSystemPromptChange }: Sys
     };
 
     return (
-        <DropdownMenu open={isSystemMenuOpen} onOpenChange={setIsSystemMenuOpen}>
-            <DropdownMenuTrigger asChild>
+        <Dialog open={isSystemMenuOpen} onOpenChange={open => { if (!savingRef.current) setIsSystemMenuOpen(open); }}>
                 <Button
+                    ref={triggerRef}
                     variant="ghost"
                     type="button"
                     aria-label="System prompt"
+                    aria-haspopup="dialog"
+                    aria-expanded={isSystemMenuOpen}
+                    onClick={() => setIsSystemMenuOpen(true)}
                     className={cn(
-                        "shrink-0 h-8 px-2 md:px-3 gap-1.5 md:gap-2 border rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] text-sm font-semibold",
+                        "shrink-0 h-10 px-3 gap-2 rounded-xl transition-colors text-sm font-medium",
                         hasSystemPrompt
                             ? "text-brand-300 bg-primary/10 hover:bg-primary/20 border-ring/50"
-                            : "text-muted-foreground hover:text-foreground bg-secondary hover:bg-accent border-border"
+                            : "text-muted-foreground hover:text-foreground hover:bg-accent"
                     )}
                 >
                     <ScrollText className="h-3.5 w-3.5 md:h-4 md:w-4" />
                     <span className="hidden md:inline">System</span>
                 </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-                align="start"
-                side="top"
-                className="w-[min(90vw,420px)] p-3 bg-popover border-input shadow-2xl mb-2"
-                onCloseAutoFocus={(e) => e.preventDefault()}
-            >
+            <DialogContent className="max-w-lg" onCloseAutoFocus={event => { event.preventDefault(); triggerRef.current?.focus(); }}>
                 <div className="space-y-2">
-                    <p className="text-xs text-foreground font-semibold tracking-tight">
-                        System Prompt (chat only)
-                    </p>
+                    <DialogTitle>Customize this conversation</DialogTitle>
+                    <DialogDescription>Set the tone, context, or instructions Pluto should follow in this chat.</DialogDescription>
                     <Textarea
                         aria-label="System prompt instructions"
+                        aria-invalid={promptTooLong || undefined}
+                        aria-describedby="system-prompt-help"
                         value={systemPromptDraft}
                         onChange={(e) => setSystemPromptDraft(e.target.value)}
+                        disabled={isSavingSystemPrompt}
+                        autoFocus
                         placeholder="Set behavior, rules, or lore for this thread..."
                         className="min-h-[120px] max-h-[260px] resize-y rounded-xl bg-background text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
                     />
-                    <p className="text-[11px] text-muted-foreground">
-                        Applied to responses in this thread.
+                    <p id="system-prompt-help" role={promptTooLong ? 'alert' : undefined} className={`text-xs ${promptTooLong ? 'text-destructive' : 'text-muted-foreground'}`}>
+                        {promptTooLong ? 'Instructions exceed 50,000 characters. Shorten them to save.' : 'Applied to responses in this thread. Maximum 50,000 characters.'}
                     </p>
-                    <div className="flex items-center justify-end gap-2">
+                    <DialogFooter className="pt-3">
+                        <Button type="button" variant="ghost" onClick={() => setIsSystemMenuOpen(false)} disabled={isSavingSystemPrompt}>Cancel</Button>
                         <Button
                             type="button"
                             variant="ghost"
@@ -184,14 +188,14 @@ export function SystemPromptSelector({ systemPrompt, onSystemPromptChange }: Sys
                         <Button
                             type="button"
                             onClick={() => void handleSaveSystemPrompt()}
-                            disabled={isSavingSystemPrompt}
+                            disabled={isSavingSystemPrompt || promptTooLong}
                             className="h-8 px-3 bg-primary hover:bg-brand-600 text-primary-foreground"
                         >
-                            Save
+                            {isSavingSystemPrompt ? 'Saving…' : 'Save'}
                         </Button>
-                    </div>
+                    </DialogFooter>
                 </div>
-            </DropdownMenuContent>
-        </DropdownMenu>
+            </DialogContent>
+        </Dialog>
     );
 }

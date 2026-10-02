@@ -54,8 +54,9 @@ test('an already aborted request closes its stream and releases its reserved loc
         const response = await handleChatRequest(request, {
             user: { id: 'user-1' } as never,
             supabase: {} as never,
-        });
+        }, 'early-abort-correlation-id');
 
+        assert.strictEqual(response.headers.get('X-Request-ID'), 'early-abort-correlation-id');
         const result = await response.body!.getReader().read();
         assert.strictEqual(result.done, true);
         assert.ok(commands.some(([name, key]) => name === 'set' && key?.includes('chat-stream-lock')));
@@ -82,6 +83,10 @@ test('cancelling the response body aborts an in-flight provider stream', async (
     const readyProviderFrames = 64;
     let resolveJobLookup!: () => void;
     const jobLookupStarted = new Promise<void>((resolve) => { resolveJobLookup = resolve; });
+    const waitForJobLookup = Promise.race([
+        jobLookupStarted.then(() => true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1000)),
+    ]);
     let resolveLockRelease!: () => void;
     const lockReleaseCompleted = new Promise<void>((resolve) => { resolveLockRelease = resolve; });
     const redisCommandLog: string[] = [];
@@ -165,7 +170,13 @@ test('cancelling the response body aborts an in-flight provider stream', async (
                 limit() { return query; },
                 update() { return query; },
                 insert() { return query; },
-                maybeSingle() { return Promise.resolve({ data: null, error: null }); },
+                maybeSingle() {
+                    if (table === 'generation_jobs') {
+                        resolveJobLookup();
+                        return Promise.resolve({ data: { id: 'job-1' }, error: null });
+                    }
+                    return Promise.resolve({ data: null, error: null });
+                },
                 single() { return Promise.resolve({ data: { id: 'assistant-message' }, error: null }); },
                 then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) {
                     if (table === 'generation_jobs') resolveJobLookup();
@@ -185,6 +196,7 @@ test('cancelling the response body aborts an in-flight provider stream', async (
                 threadId: 'thread-1',
                 userMessageId: 'user-message',
                 model: 'gemini-3.8-flash',
+                generationJobClaimToken: '9e415801-6c61-4cf5-bf17-c92a23f68e41',
                 messages: [{ role: 'user', content: 'hello' }],
             }),
         });
@@ -200,7 +212,7 @@ test('cancelling the response body aborts an in-flight provider stream', async (
         );
 
         await response.body!.cancel('client disconnected');
-        await jobLookupStarted;
+        assert.strictEqual(await waitForJobLookup, true, 'expected claim validation or completion to look up the job');
         const lockReleased = await Promise.race([
             lockReleaseCompleted.then(() => true),
             new Promise<false>((resolve) => setTimeout(() => resolve(false), 1000)),
@@ -220,9 +232,9 @@ test('the controller withholds its terminal SSE event until the reply is persist
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'dummy';
     const { handleChatRequest } = await import('../src/server/chat/chat-controller');
 
-    let resolvePersistence!: (value: { data: { id: string }; error: null }) => void;
+    let resolvePersistence!: (value: { data: string; error: null }) => void;
     let resolveInsertStarted!: () => void;
-    const persistence = new Promise<{ data: { id: string }; error: null }>((resolve) => { resolvePersistence = resolve; });
+    const persistence = new Promise<{ data: string; error: null }>((resolve) => { resolvePersistence = resolve; });
     const insertStarted = new Promise<void>((resolve) => { resolveInsertStarted = resolve; });
     const originalFetch = globalThis.fetch;
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
@@ -286,7 +298,11 @@ test('the controller withholds its terminal SSE event until the reply is persist
                 in() { return query; },
                 update() { return query; },
                 insert() { inserting = true; resolveInsertStarted(); return query; },
-                maybeSingle() { return Promise.resolve({ data: null, error: null }); },
+                maybeSingle() {
+                    return Promise.resolve(table === 'generation_jobs'
+                        ? { data: { id: 'generation-job' }, error: null }
+                        : { data: null, error: null });
+                },
                 single() { return inserting ? persistence : Promise.resolve({ data: { id: 'assistant-message' }, error: null }); },
                 then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) {
                     const result = table === 'messages'
@@ -297,7 +313,15 @@ test('the controller withholds its terminal SSE event until the reply is persist
             };
             return query;
         },
-        rpc() { return Promise.resolve({ error: null }); },
+        rpc(name: string, args: Record<string, unknown>) {
+            if (name === 'persist_generation_response') {
+                assert.strictEqual(args.p_claim_token, '9e415801-6c61-4cf5-bf17-c92a23f68e41');
+                assert.strictEqual(args.p_job_id, 'generation-job');
+                resolveInsertStarted();
+                return persistence;
+            }
+            return Promise.resolve({ error: null });
+        },
     };
 
     try {
@@ -308,6 +332,7 @@ test('the controller withholds its terminal SSE event until the reply is persist
                 threadId: 'thread-1',
                 userMessageId: 'user-message',
                 model: 'gemini-3.8-flash',
+                generationJobClaimToken: '9e415801-6c61-4cf5-bf17-c92a23f68e41',
                 messages: [{ role: 'user', content: 'hello' }],
             }),
         });
@@ -329,14 +354,79 @@ test('the controller withholds its terminal SSE event until the reply is persist
         await new Promise<void>((resolve) => setImmediate(resolve));
         assert.strictEqual(pendingReadSettled, false);
 
-        resolvePersistence({ data: { id: 'assistant-message' }, error: null });
+        resolvePersistence({ data: 'assistant-message', error: null });
         const terminal = await pendingRead;
         assert.strictEqual(terminal.done, false);
         assert.match(new TextDecoder().decode(terminal.value), /data: \[DONE\]/);
         assert.strictEqual((await reader.read()).done, true);
     } finally {
-        resolvePersistence({ data: { id: 'assistant-message' }, error: null });
+        resolvePersistence({ data: 'assistant-message', error: null });
         try { await reader?.cancel('test cleanup'); } catch { /* already closed */ }
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('the controller rejects missing or stale job tokens before contacting the provider', async () => {
+    process.env.GEMINI_API_KEY = 'dummy';
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'dummy';
+    const { handleChatRequest } = await import('../src/server/chat/chat-controller');
+
+    let providerRequests = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+        if (String(input).includes('generativelanguage.googleapis.com')) {
+            providerRequests += 1;
+            throw new Error('provider must not be contacted for stale claims');
+        }
+        return Response.json({ result: 1 });
+    }) as typeof fetch;
+
+    try {
+        for (const { claimToken, expectedMessage } of [
+            { claimToken: undefined, expectedMessage: 'Refresh this chat before retrying' },
+            { claimToken: '9e415801-6c61-4cf5-bf17-c92a23f68e40', expectedMessage: 'no longer current' },
+        ]) {
+            let requestedToken: unknown;
+            const supabase = {
+                from(table: string) {
+                    const query: Record<string, any> = {
+                        select() { return query; },
+                        eq(column: string, value: unknown) {
+                            if (column === 'claim_token') requestedToken = value;
+                            return query;
+                        },
+                        in() { return query; },
+                        maybeSingle() {
+                            if (table === 'generation_jobs') {
+                                const current = requestedToken === undefined || requestedToken === '9e415801-6c61-4cf5-bf17-c92a23f68e41';
+                                return Promise.resolve({ data: current ? { id: 'job-1' } : null, error: null });
+                            }
+                            return Promise.resolve({ data: null, error: null });
+                        },
+                    };
+                    return query;
+                },
+            };
+            const response = await handleChatRequest(new Request('https://example.test/api/chat', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    threadId: 'thread-1',
+                    userMessageId: 'user-message',
+                    model: 'gemini-3.8-flash',
+                    ...(claimToken ? { generationJobClaimToken: claimToken } : {}),
+                }),
+            }), {
+                user: { id: 'user-1' } as never,
+                supabase: supabase as never,
+            });
+            const body = await response.text();
+            assert.match(body, new RegExp(expectedMessage));
+        }
+
+        assert.strictEqual(providerRequests, 0);
+    } finally {
         globalThis.fetch = originalFetch;
     }
 });

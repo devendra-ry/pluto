@@ -1,42 +1,27 @@
 'use client';
 
-import Image from 'next/image';
 import { Copy, RefreshCcw, GitBranch, ChevronDown, Check, Brain, Loader2 } from 'lucide-react';
-import { useCallback, useId, useState, type ComponentProps } from 'react';
+import { useCallback, useId, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { FLUID_TRANSITION } from '@/shared/lib/motion';
-import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import { useCopyToClipboard } from '@/shared/hooks/use-copy-to-clipboard';
 import { cn } from '@/shared/core/utils';
 import { type Attachment } from '@/shared/core/types';
-import { isLegacyAttachmentProxyUrl } from '@/features/attachments';
 import type { ChatResponseStats } from '@/shared/core/types';
 import { ActionIcon } from './chat-action-icon';
 import { StreamingMarkdown } from './streaming-markdown';
+import { ChatCodeBlock } from './chat-code-block';
+import { AttachmentPreview } from './attachment-preview';
 import { useClearCommittedStream, useStreamedMessageSelector, type StreamedMessageSnapshot } from './chat-stream-message-store';
 
 const selectContent = (snapshot: StreamedMessageSnapshot) => snapshot.content;
 const selectReasoningPresence = (snapshot: StreamedMessageSnapshot) => Boolean(snapshot.reasoning);
 const selectStats = (snapshot: StreamedMessageSnapshot) => snapshot.stats;
 
-const MARKDOWN_COMPONENTS: ComponentProps<typeof ReactMarkdown>['components'] = {
-    pre: ({ children }) => (
-        <pre className="bg-popover backdrop-blur-sm rounded-xl p-5 overflow-x-auto my-4 border border-border scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-            {children}
-        </pre>
-    ),
-    code: ({ className, children, ...props }) => {
-        const isInline = !className;
-        return isInline ? (
-            <code className="bg-accent px-1.5 py-0.5 rounded-md text-[15px] text-brand-300 font-mono border border-border" {...props}>
-                {children}
-            </code>
-        ) : (
-            <code className={cn(className, "font-mono text-[15px] leading-relaxed")} {...props}>
-                {children}
-            </code>
-        );
-    },
+const MARKDOWN_COMPONENTS: Components = {
+    pre: ({ children }) => <ChatCodeBlock>{children}</ChatCodeBlock>,
+    code: ({ className, children }) => <code className={cn(className, 'font-mono text-[0.9em] leading-relaxed')}>{children}</code>,
     li: ({ children }) => (
         <li className="text-foreground my-1">{children}</li>
     ),
@@ -111,7 +96,7 @@ export function AssistantMessage({
             <div className="max-w-3xl">
                 {/* Loading indicator for non-thinking models */}
                 {showLoadingDots && (
-                    <div className="flex items-center gap-1.5 h-6 py-4">
+                    <div role="status" aria-label="Generating response" className="flex items-center gap-1.5 h-6 py-4">
                         <span className="w-2 h-2 rounded-full bg-muted-foreground thinking-dot [animation-delay:-0.3s]" />
                         <span className="w-2 h-2 rounded-full bg-muted-foreground thinking-dot [animation-delay:-0.15s]" />
                         <span className="w-2 h-2 rounded-full bg-muted-foreground thinking-dot" />
@@ -217,39 +202,9 @@ export function AssistantMessage({
                 {attachments.length > 0 && (
                     <div className={cn("space-y-2", renderedContent ? "mt-3" : "")}>
                         {attachments.map((attachment) => {
-                            const isImage = attachment.mimeType.startsWith('image/');
                             return (
-                                <div
-                                    key={attachment.id}
-                                    className="rounded-xl border border-border bg-card p-2 max-w-xl"
-                                >
-                                    {isImage && (
-                                        <a
-                                            href={attachment.url}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="block mb-2 overflow-hidden rounded-lg border border-border bg-background"
-                                        >
-                                            <Image
-                                                src={attachment.url}
-                                                alt={attachment.name}
-                                                width={768}
-                                                height={512}
-                                                className="h-auto w-full object-cover"
-                                                unoptimized={isLegacyAttachmentProxyUrl(attachment.url)}
-                                            />
-                                        </a>
-                                    )}
-                                    <a
-                                        href={attachment.url}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-sm text-foreground hover:text-foreground underline underline-offset-2 truncate block"
-                                        title={attachment.name}
-                                    >
-                                        {attachment.name}
-                                    </a>
-                                    <p className="text-xs text-muted-foreground">{attachment.mimeType}</p>
+                                <div className="max-w-xl" key={attachment.id}>
+                                    <AttachmentPreview attachment={attachment} />
                                 </div>
                             );
                         })}
@@ -280,11 +235,11 @@ export function AssistantMessage({
                                 onClick={() => onRetry(id)}
                             />
                         )}
-                        <ActionIcon
+                        {onBranch && <ActionIcon
                             icon={GitBranch}
                             title="Branch"
-                            onClick={() => onBranch?.(id)}
-                        />
+                            onClick={() => onBranch(id)}
+                        />}
                         <ActionIcon
                             icon={copied ? Check : Copy}
                             title={copied ? "Copied!" : "Copy message"}

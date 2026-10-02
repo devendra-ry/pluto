@@ -132,6 +132,7 @@ export function useChatStream({
         currentMessages: ChatViewMessage[],
         forcedModelId?: string,
         forcedSystemPrompt?: string,
+        generationJobClaimToken?: string,
         recoveryAttempt = 0,
     ): Promise<boolean> => {
         const lastMsg = currentMessages[currentMessages.length - 1];
@@ -331,6 +332,7 @@ export function useChatStream({
                 model: activeModelId,
                 reasoningEffort: effectiveReasoningEffort,
                 systemPrompt: effectiveSystemPrompt || undefined,
+                generationJobClaimToken,
                 signal: controller.signal,
             });
 
@@ -466,7 +468,7 @@ export function useChatStream({
         if (shouldRegenerate && isCurrentLifecycle(lifecycle, chatId)) {
             // Await the single recovery so callers finalize the generation job
             // using its actual result, rather than racing a detached retry.
-            return generateResponseRef.current(currentMessages, forcedModelId, forcedSystemPrompt, recoveryAttempt + 1);
+            return generateResponseRef.current(currentMessages, forcedModelId, forcedSystemPrompt, generationJobClaimToken, recoveryAttempt + 1);
         }
         return requestSucceeded;
     }, [chatId, model, reasoningEffortRef, systemPrompt, showToast, setMessages, refreshPersistedReply, streamedMessageStore, isCurrentRun, isCurrentLifecycle]);

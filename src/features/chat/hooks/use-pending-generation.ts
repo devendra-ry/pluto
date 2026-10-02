@@ -17,7 +17,8 @@ interface UsePendingGenerationParams {
     generateResponse: (
         currentMessages: ChatViewMessage[],
         forcedModelId?: string,
-        forcedSystemPrompt?: string
+        forcedSystemPrompt?: string,
+        generationJobClaimToken?: string
     ) => Promise<boolean>;
 }
 
@@ -76,7 +77,16 @@ export function usePendingGeneration({
                 }
             })();
 
-            if (activeChatIdRef.current !== chatId || inFlightRef.current !== run || !claimedJob) {
+            if (!claimedJob) return;
+
+            if (activeChatIdRef.current !== chatId || inFlightRef.current !== run) {
+                // The claim token fences this release from any later claimant.
+                await completeGenerationJob(
+                    claimedJob.id,
+                    claimedJob.claimToken,
+                    'failed',
+                    'Chat changed before generation started',
+                );
                 return;
             }
 
@@ -90,19 +100,19 @@ export function usePendingGeneration({
                 succeeded = await generateResponse(
                     messages,
                     forcedModelId,
-                    forcedSystemPrompt
+                    forcedSystemPrompt,
+                    claimedJob.claimToken,
                 );
             } catch (error) {
                 console.error('Failed during pending generation:', error);
                 succeeded = false;
             }
 
-            if (activeChatIdRef.current !== chatId || inFlightRef.current !== run) {
-                return;
-            }
-
+            // The database rejects stale claim tokens, so completion is safe to
+            // persist even when the user navigated away while generation ran.
             await completeGenerationJob(
                 claimedJob.id,
+                claimedJob.claimToken,
                 succeeded ? 'completed' : 'failed',
                 succeeded ? undefined : 'Generation did not complete'
             );

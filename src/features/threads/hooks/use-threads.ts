@@ -11,6 +11,7 @@ import {
     toThread,
     upsertThreadSorted,
 } from '../lib/thread-model';
+import { reconcileThreadPage, threadCursorFromPage, threadCursorPostgrestFilter, type ThreadCursor } from '../lib/thread-pagination';
 import type { Thread } from '@/shared/contracts/thread';
 import { createClient } from '@/shared/lib/supabase/client';
 
@@ -19,22 +20,31 @@ export type { Thread } from '@/shared/contracts/thread';
 export function useThreads(currentUserId: string | null) {
     const [threads, setThreads] = useState<Thread[]>([]);
     const [hasMoreThreads, setHasMoreThreads] = useState(false);
+    const [isLoadingThreads, setIsLoadingThreads] = useState(false);
+    const [threadsError, setThreadsError] = useState<string | null>(null);
+    const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
     const channelRef = useRef<ReturnType<ReturnType<typeof createClient>['channel']> | null>(null);
     const backfillRunRef = useRef(0);
-    const nextOffsetRef = useRef(0);
+    const nextCursorRef = useRef<ThreadCursor | null>(null);
     const loadMorePromiseRef = useRef<Promise<boolean> | null>(null);
     const realtimeOverridesRef = useRef(new Map<string, Thread | null>());
     const realtimeUserIdRef = useRef<string | null>(null);
     const [supabase] = useState(() => createClient());
 
-    const fetchThreadsPage = useCallback(async (userId: string, offset: number) => {
-        return await supabase
+    const fetchThreadsPage = useCallback(async (userId: string, cursor: ThreadCursor | null) => {
+        let query = supabase
             .from('threads')
             .select(THREAD_SELECT_COLUMNS)
-            .eq('user_id', userId)
+            .eq('user_id', userId);
+        if (cursor) {
+            const filter = threadCursorPostgrestFilter(cursor);
+            if (!filter) throw new Error('Invalid conversation cursor');
+            query = query.or(filter);
+        }
+        return await query
             .order('updated_at', { ascending: false })
             .order('id', { ascending: false })
-            .range(offset, offset + THREADS_PAGE_SIZE - 1);
+            .limit(THREADS_PAGE_SIZE);
     }, [supabase]);
 
     const loadThreadsPaged = useCallback(async (
@@ -42,80 +52,88 @@ export function useThreads(currentUserId: string | null) {
         isActive: () => boolean = () => true
     ) => {
         const runId = ++backfillRunRef.current;
-        nextOffsetRef.current = 0;
         loadMorePromiseRef.current = null;
-        setHasMoreThreads(false);
+        setIsLoadingThreads(true);
+        setThreadsError(null);
+        setLoadMoreError(null);
         const isCurrentRun = () => isActive() && backfillRunRef.current === runId;
 
-        const reconcilePageWithRealtime = (page: Thread[]) => {
-            const byId = new Map(page.map((thread) => [thread.id, thread]));
-            for (const [id, override] of realtimeOverridesRef.current) {
-                if (override === null) byId.delete(id);
-                else if (override.user_id === userId) byId.set(id, override);
-            }
-            return Array.from(byId.values()).sort((a, b) =>
-                b.updated_at.localeCompare(a.updated_at) || b.id.localeCompare(a.id)
-            );
-        };
-
         try {
-            const { data, error } = await fetchThreadsPage(userId, 0);
+            const { data, error } = await fetchThreadsPage(userId, null);
             if (!isCurrentRun()) return;
             if (error) {
                 console.error('[useThreads] Error fetching threads:', error);
+                setThreadsError('Could not load conversations. Try again.');
                 return;
             }
 
-            nextOffsetRef.current = data?.length ?? 0;
-            setHasMoreThreads((data?.length ?? 0) === THREADS_PAGE_SIZE);
-            const firstPage = reconcilePageWithRealtime((data ?? []).map(mapThreadRowToThread));
+            const rows = data ?? [];
+            nextCursorRef.current = threadCursorFromPage(rows.map(mapThreadRowToThread));
+            setHasMoreThreads(rows.length === THREADS_PAGE_SIZE);
+            const overrides = new Map([...realtimeOverridesRef.current].filter(([, override]) =>
+                override === null || override.user_id === userId
+            ));
+            const firstPage = reconcileThreadPage(rows.map(mapThreadRowToThread), overrides);
+            realtimeOverridesRef.current.clear();
             setThreads((previous) => {
-                // Preserve events received after this request started, including a
-                // deletion that a stale first-page response cannot represent.
-                const liveIds = new Set(realtimeOverridesRef.current.keys());
-                const preservedLive = previous.filter((thread) => liveIds.has(thread.id));
-                return reconcilePageWithRealtime(mergeThreadsSorted(firstPage, preservedLive));
+                // Keep events that landed while the request was in flight, then
+                // release their overrides so future reads can reconcile normally.
+                const preservedLive = previous.filter((thread) => overrides.has(thread.id) && overrides.get(thread.id) !== null);
+                const merged = mergeThreadsSorted(firstPage, preservedLive);
+                for (const [id, override] of overrides) {
+                    if (override === null) {
+                        const index = merged.findIndex((thread) => thread.id === id);
+                        if (index >= 0) merged.splice(index, 1);
+                    } else if (override.user_id === userId) {
+                        const index = merged.findIndex((thread) => thread.id === id);
+                        if (index >= 0) merged.splice(index, 1);
+                        merged.push(override);
+                    }
+                }
+                return merged.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.id.localeCompare(a.id));
             });
         } catch (error) {
             if (!isCurrentRun()) return;
             console.error('[useThreads] Unexpected error in loadThreadsPaged:', error);
+            setThreadsError('Could not load conversations. Try again.');
+        } finally {
+            if (isCurrentRun()) setIsLoadingThreads(false);
         }
     }, [fetchThreadsPage]);
 
-    const loadMoreThreads = useCallback((): Promise<boolean> => {
+    const loadMoreThreads = useCallback((retry = false): Promise<boolean> => {
         if (loadMorePromiseRef.current) return loadMorePromiseRef.current;
         const userId = currentUserId;
-        if (!userId || !hasMoreThreads) return Promise.resolve(false);
+        if (!userId || !hasMoreThreads || isLoadingThreads || (loadMoreError && !retry)) return Promise.resolve(false);
+        setLoadMoreError(null);
         const runId = backfillRunRef.current;
         const isCurrentRun = () => backfillRunRef.current === runId;
-        const offset = nextOffsetRef.current;
+        const cursor = nextCursorRef.current;
         const loadPromise = Promise.resolve().then(async () => {
             try {
-                const { data, error } = await fetchThreadsPage(userId, offset);
+                const { data, error } = await fetchThreadsPage(userId, cursor);
                 if (!isCurrentRun()) return false;
                 if (error) {
                     console.error('[useThreads] Error fetching older threads:', error);
+                    setLoadMoreError('Could not load older conversations.');
                     return false;
                 }
 
                 const rows = data ?? [];
-                nextOffsetRef.current = offset + rows.length;
+                if (rows.length > 0) nextCursorRef.current = threadCursorFromPage(rows.map(mapThreadRowToThread));
                 const hasNextPage = rows.length === THREADS_PAGE_SIZE;
                 setHasMoreThreads(hasNextPage);
                 if (rows.length === 0) return false;
-                const page = Array.from(realtimeOverridesRef.current.entries()).reduce<Thread[]>(
-                    (result, [id, override]) => {
-                        if (override === null) return result.filter((thread) => thread.id !== id);
-                        if (override.user_id !== userId) return result;
-                        return upsertThreadSorted(result, override);
-                    },
-                    rows.map(mapThreadRowToThread)
-                );
+                const overrides = new Map([...realtimeOverridesRef.current].filter(([, override]) =>
+                    override === null || override.user_id === userId
+                ));
+                const page = reconcileThreadPage(rows.map(mapThreadRowToThread), overrides);
                 setThreads((previous) => mergeThreadsSorted(previous, page));
                 return hasNextPage;
             } catch (error) {
                 if (isCurrentRun()) {
                     console.error('[useThreads] Unexpected error loading older threads:', error);
+                    setLoadMoreError('Could not load older conversations.');
                 }
                 return false;
             } finally {
@@ -126,12 +144,15 @@ export function useThreads(currentUserId: string | null) {
         });
         loadMorePromiseRef.current = loadPromise;
         return loadPromise;
-    }, [currentUserId, hasMoreThreads, fetchThreadsPage]);
+    }, [currentUserId, hasMoreThreads, isLoadingThreads, loadMoreError, fetchThreadsPage]);
 
     const refreshThreads = useCallback(async () => {
         if (!currentUserId) {
             setThreads([]);
             setHasMoreThreads(false);
+            setIsLoadingThreads(false);
+            setThreadsError(null);
+            setLoadMoreError(null);
             return;
         }
         await loadThreadsPaged(currentUserId);
@@ -140,6 +161,10 @@ export function useThreads(currentUserId: string | null) {
     useEffect(() => {
         let isActive = true;
         const localUserId = currentUserId;
+        let hasConnected = false;
+        let recovering = false;
+        let reconnectDelayMs = 1_000;
+        let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
         const unsubscribeRealtime = () => {
             if (!channelRef.current) return;
@@ -155,7 +180,7 @@ export function useThreads(currentUserId: string | null) {
                 realtimeUserIdRef.current = localUserId;
             }
 
-            channelRef.current = supabase
+            const subscribingChannel = supabase
                 .channel(`threads_changes_${localUserId}`)
                 .on('postgres_changes', {
                     event: '*',
@@ -163,7 +188,7 @@ export function useThreads(currentUserId: string | null) {
                     table: 'threads',
                     filter: `user_id=eq.${localUserId}`,
                 }, (payload) => {
-                    if (!isActive) return;
+                    if (!isActive || channelRef.current !== subscribingChannel) return;
                     if (payload.eventType === 'DELETE') {
                         const deletedId = typeof payload.old?.id === 'string' ? payload.old.id : null;
                         if (deletedId) {
@@ -178,10 +203,34 @@ export function useThreads(currentUserId: string | null) {
                         realtimeOverridesRef.current.set(nextThread.id, nextThread);
                         setThreads((previous) => upsertThreadSorted(previous, nextThread));
                     }
-                })
-                .subscribe((status) => {
+                });
+            channelRef.current = subscribingChannel;
+            subscribingChannel.subscribe((status) => {
+                    if (!isActive || channelRef.current !== subscribingChannel) return;
+                    if (status === 'SUBSCRIBED') {
+                        const isReconnect = hasConnected;
+                        hasConnected = true;
+                        reconnectDelayMs = 1_000;
+                        if (isReconnect && !recovering) {
+                            recovering = true;
+                            realtimeOverridesRef.current.clear();
+                            void loadThreadsPaged(localUserId, () => isActive).finally(() => {
+                                recovering = false;
+                            });
+                        }
+                    }
                     if (status === 'CHANNEL_ERROR') {
                         console.error('[useThreads] Realtime channel error');
+                    }
+                    if (status === 'CLOSED') {
+                        channelRef.current = null;
+                        if (reconnectTimer) clearTimeout(reconnectTimer);
+                        const delay = reconnectDelayMs;
+                        reconnectDelayMs = Math.min(reconnectDelayMs * 2, 30_000);
+                        reconnectTimer = setTimeout(() => {
+                            reconnectTimer = null;
+                            if (isActive && navigator.onLine) subscribeRealtime();
+                        }, delay);
                     }
                 });
         };
@@ -190,10 +239,13 @@ export function useThreads(currentUserId: string | null) {
             if (!localUserId) {
                 if (isActive) {
                     backfillRunRef.current += 1;
-                    nextOffsetRef.current = 0;
+                    nextCursorRef.current = null;
                     loadMorePromiseRef.current = null;
                     setThreads([]);
                     setHasMoreThreads(false);
+                    setIsLoadingThreads(false);
+                    setThreadsError(null);
+                    setLoadMoreError(null);
                 }
                 return;
             }
@@ -218,8 +270,22 @@ export function useThreads(currentUserId: string | null) {
                 void fetchThreads();
             }
         };
+        const handleOnline = () => {
+            if (!isActive || !localUserId) return;
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+            if (!channelRef.current) subscribeRealtime();
+            void fetchThreads();
+        };
+        const handleOffline = () => {
+            if (!isActive || !localUserId || channelRef.current) return;
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        };
         window.addEventListener(REFRESH_THREADS_EVENT, handleRefresh);
         document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
 
         return () => {
             isActive = false;
@@ -227,16 +293,30 @@ export function useThreads(currentUserId: string | null) {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             unsubscribeRealtime();
             window.removeEventListener(REFRESH_THREADS_EVENT, handleRefresh);
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+            if (reconnectTimer) clearTimeout(reconnectTimer);
         };
     }, [supabase, loadThreadsPaged, currentUserId]);
 
-    return { threads, refreshThreads, loadMoreThreads, hasMoreThreads };
+    const retryLoadMoreThreads = useCallback(() => loadMoreThreads(true), [loadMoreThreads]);
+
+    return {
+        threads,
+        refreshThreads,
+        loadMoreThreads,
+        retryLoadMoreThreads,
+        hasMoreThreads,
+        isLoadingThreads,
+        threadsError,
+        loadMoreError,
+    };
 }
 
 export function useThread(id: string | null, initialThread?: Thread) {
     const [threadState, setThreadState] = useState<{ id: string | null; thread?: Thread }>(() => ({
         id,
-        ...(initialThread ? { thread: initialThread } : {}),
+        ...(initialThread?.id === id ? { thread: initialThread } : {}),
     }));
     const [supabase] = useState(() => createClient());
 
@@ -245,8 +325,20 @@ export function useThread(id: string | null, initialThread?: Thread) {
             setThreadState({ id: null });
             return;
         }
+
+        // The chat route already loads this row on the server. Reuse that
+        // result instead of issuing the same SELECT again after hydration.
+        // Scope it to the requested ID so a route transition never exposes
+        // the previous chat while the next row is loading.
+        if (initialThread?.id === id) {
+            setThreadState((previous) => previous.id === id && previous.thread === initialThread
+                ? previous
+                : { id, thread: initialThread });
+            return;
+        }
+
         let cancelled = false;
-        setThreadState({ id, ...(initialThread ? { thread: initialThread } : {}) });
+        setThreadState({ id });
         const fetchThread = async () => {
             try {
                 const { data, error } = await supabase
@@ -268,5 +360,5 @@ export function useThread(id: string | null, initialThread?: Thread) {
         return () => { cancelled = true; };
     }, [id, initialThread, supabase]);
 
-    return threadState.id === id ? threadState.thread : initialThread;
+    return threadState.id === id ? threadState.thread : initialThread?.id === id ? initialThread : undefined;
 }

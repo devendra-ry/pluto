@@ -161,6 +161,19 @@ pre code.hljs {
   --tw-prose-invert-counters: var(--muted-foreground);
 }
 
+.prose :not(pre) > code {
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--accent);
+  padding: 0.1rem 0.35rem;
+  color: var(--brand-300);
+}
+
+.prose :not(pre) > code::before,
+.prose :not(pre) > code::after {
+  content: none;
+}
+
 @layer utilities {
   .motion-surface {
     transform-origin: var(--radix-dropdown-menu-content-transform-origin, var(--radix-tooltip-content-transform-origin, center));

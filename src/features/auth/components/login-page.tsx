@@ -5,14 +5,13 @@ import { Button } from '@/components/ui/button';
 import { MessageSquare } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { FLUID_EASE } from '@/shared/lib/motion';
-import { useRef, useState } from 'react';
-import { useToast } from '@/components/ui/toast';
+import { useEffect, useRef, useState } from 'react';
 
 export default function LoginPage() {
     const [supabase] = useState(() => createClient());
     const signingInRef = useRef(false);
     const [isSigningIn, setIsSigningIn] = useState(false);
-    const { showToast } = useToast();
+    const [signInError, setSignInError] = useState<string | null>(null);
     const shouldReduceMotion = useReducedMotion();
 
     const entranceTransition = (delay: number) => ({
@@ -22,10 +21,18 @@ export default function LoginPage() {
         ease: FLUID_EASE,
     });
 
+    useEffect(() => {
+        const error = new URLSearchParams(window.location.search).get('error');
+        if (error === 'auth_failed') {
+            setSignInError('Google sign-in could not be completed. Please try again.');
+        }
+    }, []);
+
     const handleLogin = async () => {
         if (signingInRef.current) return;
         signingInRef.current = true;
         setIsSigningIn(true);
+        setSignInError(null);
         try {
             const { error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
@@ -35,7 +42,8 @@ export default function LoginPage() {
             });
             if (error) throw error;
         } catch (error) {
-            showToast(error instanceof Error ? error.message : 'Unable to sign in. Please try again.', 'error');
+            console.error('[login] Unable to start Google sign-in:', error);
+            setSignInError('Could not open Google sign-in. Check your connection and try again.');
         } finally {
             signingInRef.current = false;
             setIsSigningIn(false);
@@ -73,6 +81,11 @@ export default function LoginPage() {
                     transition={entranceTransition(0.14)}
                     className="w-full rounded-3xl border border-border bg-card p-6 shadow-xl shadow-black/20 sm:p-8"
                 >
+                    {signInError && (
+                        <p role="alert" className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                            {signInError}
+                        </p>
+                    )}
                     <Button
                         onClick={handleLogin}
                         disabled={isSigningIn}
@@ -98,7 +111,7 @@ export default function LoginPage() {
                                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
                             />
                         </svg>
-                        Continue with Google
+                        {isSigningIn ? 'Opening Google sign-in…' : 'Continue with Google'}
                     </Button>
                 </motion.div>
 
@@ -110,7 +123,7 @@ export default function LoginPage() {
                     className="text-center"
                 >
                     <p className="text-sm text-muted-foreground">
-                        Terms of Service and Privacy Policy
+                        Secure sign-in powered by Google
                     </p>
                 </motion.div>
             </div>

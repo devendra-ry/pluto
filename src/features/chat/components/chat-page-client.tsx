@@ -4,11 +4,13 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type VirtuosoHandle } from 'react-virtuoso';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
 
 import { ChatDestructiveConfirmDialog } from './chat-destructive-confirm-dialog';
 import { ChatEmptyState } from './chat-empty-state';
 import { ErrorBoundary } from '@/shared/components/error-boundary';
 import { ChatHeader } from './chat-header';
+import { MessageSearchDialog } from './message-search-dialog';
 import { ChatInput, type ChatInputHandle } from './chat-input';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
@@ -63,14 +65,30 @@ function restoreMissingMessages(
 export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
     const router = useRouter();
     const thread = useThread(chatId, initialThread);
-    const { messages: storedMessages } = useMessages(chatId);
+    const { messages: storedMessages, error: messagesError, isLoading: isLoadingMessages, refreshMessages,
+        hasOlderMessages, isLoadingOlder, olderMessagesError, loadOlderMessages, loadMessagesThroughMessage, syncStatus } = useMessages(chatId);
+    const [isRefreshingMessages, setIsRefreshingMessages] = useState(false);
+    const retryMessages = async () => {
+        setIsRefreshingMessages(true);
+        try {
+            const result = await refreshMessages();
+            if (!result.ok) showToast(result.error, 'error');
+        } finally { setIsRefreshingMessages(false); }
+    };
     const refreshPersistedReply = useCallback(
         (userMessageId: string) => refreshThreadReply(chatId, userMessageId),
         [chatId]
     );
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const chatInputRef = useRef<ChatInputHandle>(null);
+    const activeChatIdRef = useRef(chatId);
+    activeChatIdRef.current = chatId;
     const [messages, setMessages] = useState<ChatViewMessage[]>([]);
+    const [isMessageSearchOpen, setIsMessageSearchOpen] = useState(false);
+    const [jumpingMessageId, setJumpingMessageId] = useState<string | null>(null);
+    const [pendingScrollMessageId, setPendingScrollMessageId] = useState<string | null>(null);
+    const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+    const searchJumpRevisionRef = useRef(0);
     const messagesRef = useRef(messages);
     messagesRef.current = messages;
     const justAddedMessageIdRef = useRef<string | null>(null);
@@ -161,6 +179,61 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
     }, [chatId]);
 
     useLayoutEffect(() => {
+        searchJumpRevisionRef.current += 1;
+        setIsMessageSearchOpen(false);
+        setJumpingMessageId(null);
+        setPendingScrollMessageId(null);
+        setHighlightedMessageId(null);
+        return () => {
+            searchJumpRevisionRef.current += 1;
+        };
+    }, [chatId]);
+
+    useLayoutEffect(() => {
+        if (!highlightedMessageId) return;
+        const timer = window.setTimeout(() => setHighlightedMessageId(null), 3500);
+        return () => window.clearTimeout(timer);
+    }, [highlightedMessageId]);
+
+    const handleSearchResultSelected = useCallback(async (messageId: string) => {
+        const scopeChatId = chatId;
+        const revision = ++searchJumpRevisionRef.current;
+        const shouldContinue = () => searchJumpRevisionRef.current === revision && activeChatIdRef.current === scopeChatId;
+        setJumpingMessageId(messageId);
+        try {
+            const found = await loadMessagesThroughMessage(messageId, shouldContinue);
+            if (!shouldContinue()) return;
+            if (!found) {
+                setJumpingMessageId(null);
+                showToast('That message is no longer available in this conversation.', 'error');
+                return;
+            }
+            setPendingScrollMessageId(messageId);
+        } catch (error) {
+            if (!shouldContinue()) return;
+            console.error('[chat] Unable to load the selected search result:', error);
+            setJumpingMessageId(null);
+            showToast('Could not load that message. Try again.', 'error');
+        }
+    }, [chatId, loadMessagesThroughMessage, showToast]);
+
+    const handleMessageSearchOpenChange = useCallback((open: boolean) => {
+        if (!open) {
+            searchJumpRevisionRef.current += 1;
+            setJumpingMessageId(null);
+            setPendingScrollMessageId(null);
+        }
+        setIsMessageSearchOpen(open);
+    }, []);
+
+    const handleMessageScrolled = useCallback((messageId: string) => {
+        setHighlightedMessageId(messageId);
+        setPendingScrollMessageId(null);
+        setJumpingMessageId(null);
+        handleMessageSearchOpenChange(false);
+    }, [handleMessageSearchOpenChange]);
+
+    useLayoutEffect(() => {
         // Only reset when actually switching between different chats, not on initial mount.
         if (prevChatIdRef.current !== null && prevChatIdRef.current !== chatId) {
             closeDeleteConfirm(false);
@@ -242,10 +315,10 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
     }, [chatId, generateResponse, showToast, setIsLoading, clearLastRequestFailure, modelRef]);
 
     const handleSend = useCallback(async (value: string, attachments: Attachment[]) => {
-        if ((!value.trim() && attachments.length === 0) || isLoading) return false;
+        if ((!value.trim() && attachments.length === 0) || isLoading || !messagesReady || messagesError) return false;
         setIsAtBottom(true);
         return sendMessage(value, attachments, messagesRef.current);
-    }, [isLoading, sendMessage, setIsAtBottom]);
+    }, [isLoading, messagesReady, messagesError, sendMessage, setIsAtBottom]);
 
     const handlePromptClick = useCallback((prompt: string) => {
         if (chatInputRef.current) {
@@ -391,11 +464,11 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
         }
     }, [chatId, thread, isLoading, showToast, router, setIsLoading]);
 
-    const shouldShowEmptyState = messagesReady && visibleMessages.length === 0 && !isThinking;
+    const shouldShowEmptyState = messagesReady && !messagesError && visibleMessages.length === 0 && !isThinking;
     // Keep Virtuoso permanently mounted so it never loses scroll position or
     // measured item sizes across thread switches. Hide it with CSS when we
     // need to show the empty state or while messages are still loading.
-    const hideMessageList = !messagesReady || shouldShowEmptyState;
+    const hideMessageList = !messagesReady || shouldShowEmptyState || (Boolean(messagesError) && visibleMessages.length === 0);
 
     return (
         <div className="flex h-full flex-col bg-background">
@@ -418,15 +491,36 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
                         </div>
                     )}
                 >
+                    {isLoadingMessages && visibleMessages.length === 0 && (
+                        <div role="status" className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading conversation…
+                        </div>
+                    )}
+                    {messagesError && (
+                        <div className={visibleMessages.length ? 'relative z-10 mx-auto max-w-3xl p-4' : 'flex h-full items-center justify-center px-6'}>
+                            <Alert variant="destructive" className="w-full max-w-lg rounded-2xl p-5">
+                                <h2 className="font-semibold">Unable to load this conversation</h2>
+                                <AlertDescription className="mt-2">Your draft is still here. Try loading your messages again before sending.</AlertDescription>
+                                <Button variant="outline" className="mt-3" disabled={isRefreshingMessages} onClick={() => void retryMessages()}>{isRefreshingMessages ? 'Retrying…' : 'Try again'}</Button>
+                            </Alert>
+                        </div>
+                    )}
                     {shouldShowEmptyState && (
                         <ChatEmptyState onPromptClick={handlePromptClick} />
                     )}
+                    {(syncStatus === 'offline' || syncStatus === 'reconnecting') && <div role="status" className="absolute inset-x-0 top-0 z-20 flex items-center justify-center gap-3 border-b border-border bg-background/95 px-4 py-2 text-sm text-muted-foreground">
+                        <span>{syncStatus === 'offline' ? 'You are offline. Your draft stays available.' : 'Live updates interrupted. Reconnecting…'}</span>
+                        {syncStatus === 'reconnecting' && <button type="button" onClick={() => void retryMessages()} disabled={isRefreshingMessages} className="rounded-lg px-2 py-1 text-foreground hover:bg-accent">Refresh</button>}
+                    </div>}
                     <div
                         className="absolute inset-0"
+                        aria-hidden={hideMessageList || undefined}
+                        inert={hideMessageList || undefined}
                         style={hideMessageList ? { opacity: 0, pointerEvents: 'none' } : undefined}
                     >
                         <ChatStreamMessageStoreProvider store={streamedMessageStore}>
                             <ChatMessageList
+                                key={chatId}
                                 messages={visibleMessages}
                                 model={model}
                                 isLoading={isLoading}
@@ -437,6 +531,13 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
                                 onEdit={handleEdit}
                                 onRetry={handleRetry}
                                 onBranch={handleBranch}
+                                hasOlderMessages={hasOlderMessages}
+                                isLoadingOlder={isLoadingOlder}
+                                olderMessagesError={olderMessagesError}
+                                onLoadOlder={() => void loadOlderMessages()}
+                                highlightedMessageId={highlightedMessageId}
+                                scrollToMessageId={pendingScrollMessageId}
+                                onMessageScrolled={handleMessageScrolled}
                             />
                         </ChatStreamMessageStoreProvider>
                     </div>
@@ -447,14 +548,25 @@ export function ChatPageClient({ chatId, initialThread }: ChatPageClientProps) {
                 showScrollButton={!isAtBottom}
                 hasMessages={visibleMessages.length > 0}
                 onScrollToBottom={scrollToBottom}
+                onSearchMessages={() => setIsMessageSearchOpen(true)}
+            />
+
+            <MessageSearchDialog
+                threadId={chatId}
+                open={isMessageSearchOpen}
+                onOpenChange={handleMessageSearchOpenChange}
+                onSelectMessage={handleSearchResultSelected}
+                jumpingMessageId={jumpingMessageId}
             />
 
             <ChatInput
+                key={chatId}
                 ref={chatInputRef}
                 onSubmit={handleSend}
                 threadId={chatId}
                 onStop={handleStop}
                 isLoading={isLoading}
+                submitDisabled={!messagesReady || Boolean(messagesError)}
                 currentModel={model}
                 onModelChange={handleModelChange}
                 reasoningEffort={reasoningEffort}

@@ -36,7 +36,7 @@ test('reduced motion disables composer resizing and menu movement', async ({ pag
     await composer.fill('A line of text\n'.repeat(8));
     expect(await composer.evaluate(element => element.getAnimations().length)).toBe(0);
     await page.getByRole('button', { name: 'System prompt', exact: true }).click();
-    const menu = page.getByRole('menu');
+    const menu = page.getByRole('dialog', { name: 'Customize this conversation' });
     await expect(menu).toBeVisible();
     expect(await menu.evaluate(element => Number.parseFloat(getComputedStyle(element).animationDuration))).toBeLessThan(0.001);
     await page.keyboard.press('Escape');

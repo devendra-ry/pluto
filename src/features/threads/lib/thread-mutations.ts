@@ -1,4 +1,3 @@
-import { cleanupThreadAttachments } from '@/features/uploads';
 import { sanitizeThreadTitle } from './thread-model';
 import { triggerThreadRefresh } from './thread-events';
 import { mapThreadRowToThread } from './thread-model';
@@ -20,7 +19,8 @@ export async function cleanupEmptyThreads(excludeId?: string) {
 export async function createThread(
     model: string,
     reasoningEffort?: ReasoningEffort,
-    systemPrompt?: string | null
+    systemPrompt?: string | null,
+    options: { cleanupOtherEmptyThreads?: boolean } = {},
 ): Promise<Thread> {
     const supabase = createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -40,10 +40,12 @@ export async function createThread(
         .single();
     if (error) throw error;
 
-    try {
-        await cleanupEmptyThreads(data.id);
-    } catch (cleanupError) {
-        console.error('[threads] Failed to cleanup empty threads after create:', cleanupError);
+    if (options.cleanupOtherEmptyThreads !== false) {
+        try {
+            await cleanupEmptyThreads(data.id);
+        } catch (cleanupError) {
+            console.error('[threads] Failed to cleanup empty threads after create:', cleanupError);
+        }
     }
     triggerThreadRefresh();
     return mapThreadRowToThread(data);
@@ -89,19 +91,39 @@ export async function toggleThreadPin(id: string, isPinned: boolean) {
     await updateThreadFields(id, { is_pinned: isPinned });
 }
 
+export async function updateThreadTitle(id: string, title: string) {
+    await updateThreadFields(id, { title: sanitizeThreadTitle(title) });
+}
+
 export async function touchThread(id: string) {
     await updateThreadFields(id, {});
 }
 
-export async function deleteThread(id: string) {
+export async function deleteThread(
+    id: string,
+    options: { cleanupOtherEmptyThreads?: boolean } = {},
+): Promise<{ thread_id: string; deleted_at: string; undo_until: string }> {
     const supabase = createClient();
-    await cleanupThreadAttachments(id);
-    const { error } = await supabase.from('threads').delete().eq('id', id);
+    const { data, error } = await supabase.rpc('delete_thread', { p_thread_id: id });
     if (error) throw error;
-    try {
-        await cleanupEmptyThreads();
-    } catch (cleanupError) {
-        console.error('[threads] Failed to cleanup empty threads after delete:', cleanupError);
+    const receipt = Array.isArray(data) ? data[0] : data;
+    if (!receipt) throw new Error('The chat could not be deleted.');
+    if (options.cleanupOtherEmptyThreads !== false) {
+        try {
+            await cleanupEmptyThreads();
+        } catch (cleanupError) {
+            console.error('[threads] Failed to cleanup empty threads after delete:', cleanupError);
+        }
     }
     triggerThreadRefresh();
+    return receipt;
+}
+
+export async function restoreThread(id: string): Promise<Thread> {
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc('restore_thread', { p_thread_id: id });
+    if (error) throw error;
+    if (!data) throw new Error('The chat could not be restored.');
+    triggerThreadRefresh();
+    return mapThreadRowToThread(data);
 }

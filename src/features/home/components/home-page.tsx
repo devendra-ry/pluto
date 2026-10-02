@@ -2,14 +2,12 @@
 
 import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createThread, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt, cleanupEmptyThreads, triggerThreadRefresh } from '@/features/threads';
-import { startChatWithMessage, type StartChatWithMessageInput } from '@/features/chat';
-import { DEFAULT_MODEL, SUGGESTED_PROMPTS, CATEGORIES, DEFAULT_REASONING_EFFORT, type CategoryIconName } from '@/shared/core/constants';
-import { ChatInput, type ChatInputHandle } from '@/features/chat';
+import { createThread, deleteThread, cleanupEmptyThreads, updateReasoningEffort, updateThreadModel, updateThreadSystemPrompt, triggerThreadRefresh, NEW_CHAT_EVENT } from '@/features/threads';
+import { ChatEmptyState, ChatInput, startChatWithMessage, type ChatInputHandle, type StartChatWithMessageInput } from '@/features/chat';
+import { DEFAULT_MODEL, DEFAULT_REASONING_EFFORT } from '@/shared/core/constants';
 import { type Attachment, type ReasoningEffort } from '@/shared/core/types';
-import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
-import { Wand2, BookOpen, Code, GraduationCap, Loader2, type LucideIcon } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { z } from 'zod';
 import { SerialValueWriter } from '@/shared/lib/serial-value-writer';
 
@@ -36,13 +34,13 @@ async function persistCreatedValue<T>(
   }
 }
 
-// Map icon names to components
-const ICON_MAP = {
-  Wand2,
-  BookOpen,
-  Code,
-  GraduationCap,
-} satisfies Record<CategoryIconName, LucideIcon>;
+function createHomeWriters() {
+  return {
+    model: new SerialValueWriter<string>(DEFAULT_MODEL),
+    reasoning: new SerialValueWriter<ReasoningEffort>(DEFAULT_REASONING_EFFORT),
+    prompt: new SerialValueWriter(''),
+  };
+}
 
 export default function HomePage() {
   const router = useRouter();
@@ -54,18 +52,16 @@ export default function HomePage() {
   const [systemPrompt, setSystemPrompt] = useState('');
   const systemPromptRef = useRef('');
   const mountedRef = useRef(true);
-  const [writers] = useState(() => ({
-    model: new SerialValueWriter<string>(DEFAULT_MODEL),
-    reasoning: new SerialValueWriter<ReasoningEffort>(DEFAULT_REASONING_EFFORT),
-    prompt: new SerialValueWriter(''),
-  }));
+  const [writers, setWriters] = useState(createHomeWriters);
   useLayoutEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
   const [isLoading, setIsLoading] = useState(false);
   const [pendingSubmission, setPendingSubmission] = useState<Pick<StartChatWithMessageInput, 'content' | 'attachments'> | null>(null);
+  const [composerEpoch, setComposerEpoch] = useState(0);
   const submissionInFlightRef = useRef(false);
+  const draftEpochRef = useRef(0);
   const [draftThreadId, setDraftThreadId] = useState<string | null>(null);
   const draftThreadIdRef = useRef<string | null>(null);
   const ensureThreadPromiseRef = useRef<Promise<string> | null>(null);
@@ -78,6 +74,28 @@ export default function HomePage() {
     reasoningEffortRef.current = reasoningEffort;
   }, [reasoningEffort]);
 
+  useEffect(() => {
+    const resetDraft = () => {
+      if (submissionInFlightRef.current) return;
+      const pendingThread = ensureThreadPromiseRef.current;
+      const currentDraftId = draftThreadIdRef.current;
+      draftEpochRef.current += 1;
+      setWriters(createHomeWriters());
+      ensureThreadPromiseRef.current = null;
+      draftThreadIdRef.current = null;
+      setDraftThreadId(null);
+      setPendingSubmission(null);
+      setIsLoading(false);
+      setComposerEpoch((epoch) => epoch + 1);
+      void (currentDraftId
+        ? deleteThread(currentDraftId, { cleanupOtherEmptyThreads: false })
+        : pendingThread ? pendingThread.catch(() => undefined) : Promise.resolve())
+        .catch((error) => console.warn('[threads] Failed to clear the previous empty draft:', error));
+    };
+    window.addEventListener(NEW_CHAT_EVENT, resetDraft);
+    return () => window.removeEventListener(NEW_CHAT_EVENT, resetDraft);
+  }, []);
+
   const ensureThread = useCallback(async () => {
     if (ensureThreadPromiseRef.current) {
       return ensureThreadPromiseRef.current;
@@ -88,10 +106,16 @@ export default function HomePage() {
     }
 
     const createPromise = (async () => {
+      const epochAtStart = draftEpochRef.current;
       const savedModel = modelRef.current;
       const savedEffort = reasoningEffortRef.current;
       const savedPrompt = systemPromptRef.current;
-      const thread = await createThread(savedModel, savedEffort, savedPrompt);
+      const thread = await createThread(savedModel, savedEffort, savedPrompt, { cleanupOtherEmptyThreads: false });
+
+      if (draftEpochRef.current !== epochAtStart) {
+        await deleteThread(thread.id, { cleanupOtherEmptyThreads: false });
+        throw new DOMException('The draft was reset before it finished initializing.', 'AbortError');
+      }
 
       // Creation stored the values captured above. Establish those as the
       // confirmed writer baselines before later UI changes can enqueue writes.
@@ -109,12 +133,12 @@ export default function HomePage() {
           modelRef.current,
           value => updateThreadModel(thread.id, value),
           value => {
-            if (!mountedRef.current) return;
+            if (!mountedRef.current || draftEpochRef.current !== epochAtStart) return;
             modelRef.current = value;
             setModel(value);
           },
           error => {
-            if (mountedRef.current) showToast(error instanceof Error ? error.message : 'Failed to update model', 'error');
+            if (mountedRef.current && draftEpochRef.current === epochAtStart) showToast(error instanceof Error ? error.message : 'Failed to update model', 'error');
           },
         ),
         persistCreatedValue(
@@ -123,12 +147,12 @@ export default function HomePage() {
           reasoningEffortRef.current,
           value => updateReasoningEffort(thread.id, value),
           value => {
-            if (!mountedRef.current) return;
+            if (!mountedRef.current || draftEpochRef.current !== epochAtStart) return;
             reasoningEffortRef.current = value;
             setReasoningEffort(value);
           },
           error => {
-            if (mountedRef.current) showToast(error instanceof Error ? error.message : 'Failed to update reasoning effort', 'error');
+            if (mountedRef.current && draftEpochRef.current === epochAtStart) showToast(error instanceof Error ? error.message : 'Failed to update reasoning effort', 'error');
           },
         ),
         persistCreatedValue(
@@ -137,15 +161,19 @@ export default function HomePage() {
           systemPromptRef.current,
           value => updateThreadSystemPrompt(thread.id, value),
           value => {
-            if (!mountedRef.current) return;
+            if (!mountedRef.current || draftEpochRef.current !== epochAtStart) return;
             systemPromptRef.current = value;
             setSystemPrompt(value);
           },
           error => {
-            if (mountedRef.current) showToast(error instanceof Error ? error.message : 'Failed to update system prompt', 'error');
+            if (mountedRef.current && draftEpochRef.current === epochAtStart) showToast(error instanceof Error ? error.message : 'Failed to update system prompt', 'error');
           },
         ),
       ]);
+
+      if (draftEpochRef.current !== epochAtStart) {
+        throw new DOMException('The draft was reset before it finished initializing.', 'AbortError');
+      }
 
       if (mountedRef.current) setDraftThreadId(thread.id);
       return thread.id;
@@ -162,12 +190,13 @@ export default function HomePage() {
   }, [showToast, writers]);
 
   const handleSystemPromptChange = async (nextPrompt: string) => {
+    const epochAtStart = draftEpochRef.current;
     systemPromptRef.current = nextPrompt;
     setSystemPrompt(nextPrompt);
     const targetThreadId = draftThreadIdRef.current;
     if (!targetThreadId) { writers.prompt.synchronize(nextPrompt); return; }
     const result = await writers.prompt.write(nextPrompt, value => updateThreadSystemPrompt(targetThreadId, value));
-    if (!result.ok && mountedRef.current && writers.prompt.isLatest(result.revision)) {
+    if (!result.ok && mountedRef.current && draftEpochRef.current === epochAtStart && writers.prompt.isLatest(result.revision)) {
       systemPromptRef.current = result.value;
       setSystemPrompt(result.value);
       throw result.error;
@@ -175,12 +204,13 @@ export default function HomePage() {
   };
 
   const handleModelChange = async (nextModel: string) => {
+    const epochAtStart = draftEpochRef.current;
     modelRef.current = nextModel;
     setModel(nextModel);
     const targetThreadId = draftThreadIdRef.current;
     if (!targetThreadId) { writers.model.synchronize(nextModel); return; }
     const result = await writers.model.write(nextModel, value => updateThreadModel(targetThreadId, value));
-    if (!result.ok && mountedRef.current && writers.model.isLatest(result.revision)) {
+    if (!result.ok && mountedRef.current && draftEpochRef.current === epochAtStart && writers.model.isLatest(result.revision)) {
       modelRef.current = result.value;
       setModel(result.value);
       showToast(result.error instanceof Error ? result.error.message : 'Failed to update model', 'error');
@@ -188,12 +218,13 @@ export default function HomePage() {
   };
 
   const handleReasoningEffortChange = async (nextEffort: ReasoningEffort) => {
+    const epochAtStart = draftEpochRef.current;
     reasoningEffortRef.current = nextEffort;
     setReasoningEffort(nextEffort);
     const targetThreadId = draftThreadIdRef.current;
     if (!targetThreadId) { writers.reasoning.synchronize(nextEffort); return; }
     const result = await writers.reasoning.write(nextEffort, value => updateReasoningEffort(targetThreadId, value));
-    if (!result.ok && mountedRef.current && writers.reasoning.isLatest(result.revision)) {
+    if (!result.ok && mountedRef.current && draftEpochRef.current === epochAtStart && writers.reasoning.isLatest(result.revision)) {
       reasoningEffortRef.current = result.value;
       setReasoningEffort(result.value);
       showToast(result.error instanceof Error ? result.error.message : 'Failed to update reasoning effort', 'error');
@@ -263,7 +294,7 @@ export default function HomePage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
-      <div className={`flex min-h-0 flex-1 flex-col items-center overflow-y-auto p-4 ${pendingSubmission ? 'justify-start' : 'justify-center'}`}>
+      <div className={`flex min-h-0 flex-1 flex-col items-center overflow-y-auto ${pendingSubmission ? 'justify-start p-4' : 'justify-center p-0'}`}>
         {pendingSubmission ? (
           <div className="w-full max-w-3xl px-4 pt-8">
             <div className="mb-6 flex justify-end">
@@ -281,50 +312,15 @@ export default function HomePage() {
             </div>
           </div>
         ) : (
-        <div className="w-full max-w-3xl flex flex-col items-start px-4">
-          {/* Main heading */}
-          <h1 className="text-3xl md:text-4xl font-semibold text-foreground mb-8 tracking-tight text-center md:text-left">
-            How can I help you?
-          </h1>
-
-          {/* Category buttons */}
-          <div className="mb-10 grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-start">
-
-            {CATEGORIES.map((cat) => {
-              const IconComponent = ICON_MAP[cat.icon];
-              return (
-                <Button
-                  key={cat.label}
-                  variant="ghost"
-                  onClick={() => handleSuggestionClick(cat.prompt)}
-                  className="h-11 justify-center gap-2 rounded-full border border-border bg-card px-3 text-[15px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring sm:px-4"
-                >
-                  <IconComponent className="h-4 w-4" />
-                  {cat.label}
-                </Button>
-              );
-            })}
-          </div>
-
-          {/* Suggested prompts */}
-          <div className="space-y-1 w-full text-left">
-            {SUGGESTED_PROMPTS.map((prompt, i) => (
-              <button
-                key={i}
-                onClick={() => handleSuggestionClick(prompt)}
-                className="w-full rounded-md px-2 py-3 text-left text-base text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {prompt}
-              </button>
-            ))}
-          </div>
-        </div>
+          <ChatEmptyState onPromptClick={handleSuggestionClick} />
         )}
 
       </div>
 
       <ChatInput
+        key={composerEpoch}
         ref={chatInputRef}
+        draftScopeId="home"
         onSubmit={handleSend}
         onEnsureThread={ensureThread}
         threadId={draftThreadId}
@@ -336,12 +332,6 @@ export default function HomePage() {
         systemPrompt={systemPrompt}
         onSystemPromptChange={handleSystemPromptChange}
       />
-      {!pendingSubmission && (
-        <p className="px-4 pb-3 text-center text-xs text-muted-foreground">
-          Make sure you agree to our <span className="underline">Terms</span> and our{' '}
-          <span className="underline">Privacy Policy</span>
-        </p>
-      )}
     </div>
   );
 }

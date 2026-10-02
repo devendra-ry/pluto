@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { logger } from '@/server/logging/logger';
+import { withSpan, withResultSpan, recordSpanError, responseWithRequestId } from '@/server/observability/tracing';
 
 import { prepareMessageAttachments } from '@/server/chat/chat-attachments';
 import { persistThenEmitTerminal } from '@/server/chat/chat-stream-lifecycle';
@@ -18,7 +19,7 @@ import { resolveModelLimits } from '@/server/providers/model-limits';
 import { resolveChatProvider } from '@/server/providers/provider-registry';
 import { isInterruptedProviderStream, isTransientProviderError } from '@/server/providers/chat-streams';
 import { ChatRequestSchema, type ChatMessage } from '@/shared/core/types';
-import { MESSAGE_SELECT_COLUMNS, mapMessageRowToMessage } from '@/features/messages/server';
+import { CHAT_HISTORY_SELECT_COLUMNS, mapChatHistoryRow } from '@/server/chat/chat-history';
 import {
     MAX_CHAT_MESSAGES,
     MAX_CHAT_REQUEST_ATTACHMENTS,
@@ -96,7 +97,8 @@ async function persistAssistantResponse(
 
 export async function handleChatRequest(
     req: Request,
-    { user, supabase }: AuthenticatedContext
+    { user, supabase }: AuthenticatedContext,
+    requestId = crypto.randomUUID(),
 ): Promise<Response> {
     const requestStartedAt = performance.now();
     const timing: Record<string, number> = {};
@@ -116,34 +118,34 @@ export async function handleChatRequest(
             // original writer died (or is still streaming); fabricating a clean
             // end here would make the client persist a truncated response.
             if (cached.events[cached.events.length - 1] !== '[DONE]') {
-                return new Response(
+                return responseWithRequestId(new Response(
                     serializeChatStreamEvent({ type: 'error', message: 'Unable to resume chat stream. Please retry the request.' }),
                     {
                         status: 409,
                         headers: { 'Content-Type': 'application/json' },
                     }
-                );
+                ), requestId);
             }
-            return buildSseReplayResponse(cached.events, resumeOffset);
+            return responseWithRequestId(buildSseReplayResponse(cached.events, resumeOffset), requestId);
         }
         if (resumeOffset > 0) {
-            return new Response(
+            return responseWithRequestId(new Response(
                 serializeChatStreamEvent({ type: 'error', message: 'Unable to resume chat stream. Please retry the request.' }),
                 {
                     status: 409,
                     headers: { 'Content-Type': 'application/json' },
                 }
-            );
+            ), requestId);
         }
         streamLockToken = await reserveChatStreamLock(user.id, streamId);
         if (!streamLockToken) {
-            return new Response(
+            return responseWithRequestId(new Response(
                 serializeChatStreamEvent({ type: 'error', message: 'A matching chat request is already in progress.' }),
                 {
                     status: 409,
                     headers: { 'Content-Type': 'application/json' },
                 }
-            );
+            ), requestId);
         }
     }
 
@@ -214,43 +216,56 @@ export async function handleChatRequest(
     });
 
     async function run(controller: ReadableStreamDefaultController) {
+        await withSpan('chat.request', {
+            'request.id': requestId,
+            'http.route': '/api/chat',
+            'chat.stream.resumable': Boolean(streamId),
+        }, async (requestSpan) => {
+            let requestOutcome: 'completed' | 'failed' | 'aborted' | 'rejected' = 'completed';
             let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
             let writer: ChatStreamEventWriter | null = null;
             let requestUserMessageId: string | null = null;
+            let requestGenerationJobId: string | null = null;
+            let generationJobClaimToken: string | undefined;
             let generationCompleted = false;
 
-            const finishGenerationJob = async (status: 'completed' | 'failed', error?: string) => {
-                if (!requestUserMessageId) return;
-                const { data: jobs, error: lookupError } = await supabase
-                    .from('generation_jobs')
-                    .select('id')
-                    .eq('user_id', user.id)
-                    .eq('user_message_id', requestUserMessageId)
-                    .in('status', ['pending', 'claimed'])
-                    .limit(1);
-                if (lookupError) {
-                    if (IS_DEV) logger.warn('[chat] failed to find generation job', { error: lookupError });
-                    return;
-                }
-                const jobId = jobs?.[0]?.id;
-                if (!jobId) return;
-                const { error: jobError } = await supabase.rpc('complete_generation_job', {
-                    p_job_id: jobId,
+            const finishGenerationJob = async (
+                status: 'completed' | 'failed',
+                error?: string,
+                claimToken?: string,
+            ) => {
+                if (!requestGenerationJobId || !claimToken) return;
+                const { error: jobError } = await withResultSpan('chat.generation_job.finalize', {
+                    'db.system.name': 'supabase',
+                    'db.operation.name': 'rpc',
+                    'chat.generation.status': status,
+                }, () => supabase.rpc('complete_generation_job', {
+                    p_job_id: requestGenerationJobId,
+                    p_claim_token: claimToken,
                     p_status: status,
                     p_error: status === 'failed' ? (error ?? 'Generation failed') : null,
-                });
+                }));
                 if (jobError && IS_DEV) {
-                    logger.warn('[chat] failed to finalize generation job', { error: jobError });
+                    logger.warn('[chat] failed to finalize generation job', {
+                        requestId,
+                        errorType: jobError instanceof Error ? jobError.name : 'DatabaseError',
+                    });
                 }
             };
 
             try {
-                if (signal.aborted) return;
+                if (signal.aborted) {
+                    requestOutcome = 'aborted';
+                    requestSpan.setAttribute('chat.outcome', 'aborted');
+                    return;
+                }
                 const bodyParseStartedAt = performance.now();
                 let body: unknown;
                 try {
                     body = await parseJsonRequest(req);
                 } catch (error) {
+                    requestOutcome = 'rejected';
+                    requestSpan.setAttribute('chat.outcome', 'rejected');
                     const message = error instanceof ApiRequestError ? error.message : 'Invalid request';
                     await safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: message })}\n\n`);
                     safeClose(controller);
@@ -258,17 +273,59 @@ export async function handleChatRequest(
                 }
                 const parseResult = ChatRequestSchema.safeParse(body);
                 if (!parseResult.success) {
+                    requestOutcome = 'rejected';
+                    requestSpan.setAttribute('chat.outcome', 'rejected');
                     await safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: 'Invalid request' })}\n\n`);
                     safeClose(controller);
                     return;
                 }
 
-                const { threadId, userMessageId, model, reasoningEffort, systemPrompt } = parseResult.data;
+                const {
+                    threadId,
+                    userMessageId,
+                    model,
+                    reasoningEffort,
+                    systemPrompt,
+                } = parseResult.data;
+                generationJobClaimToken = parseResult.data.generationJobClaimToken;
                 modelForMetrics = model;
+                requestSpan.setAttribute('chat.model', model);
                 timing.bodyParseMs = performance.now() - bodyParseStartedAt;
                 requestUserMessageId = userMessageId;
+                if (generationJobClaimToken) {
+                    const { data: generationJob, error: generationJobError } = await supabase
+                        .from('generation_jobs')
+                        .select('id')
+                        .eq('user_id', user.id)
+                        .eq('user_message_id', userMessageId)
+                        .eq('claim_token', generationJobClaimToken)
+                        .eq('status', 'claimed')
+                        .maybeSingle();
+                    if (generationJobError) throw generationJobError;
+                    if (!generationJob) {
+                        throw new ApiRequestError(409, 'This generation request is no longer current.');
+                    }
+                    requestGenerationJobId = generationJob.id;
+                } else {
+                    const { data: claimedGeneration, error: claimedGenerationError } = await supabase
+                        .from('generation_jobs')
+                        .select('id')
+                        .eq('user_id', user.id)
+                        .eq('user_message_id', userMessageId)
+                        .in('status', ['pending', 'claimed'])
+                        .maybeSingle();
+                    if (claimedGenerationError) throw claimedGenerationError;
+                    if (claimedGeneration) {
+                        throw new ApiRequestError(
+                            409,
+                            'Refresh this chat before retrying its pending response.',
+                        );
+                    }
+                }
                 const modelConfig = AVAILABLE_MODELS.find(m => m.id === model);
                 if (!modelConfig) {
+                    requestOutcome = 'rejected';
+                    requestSpan.setAttribute('chat.outcome', 'rejected');
                     await safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: 'Invalid model selection' })}\n\n`);
                     safeClose(controller);
                     return;
@@ -282,9 +339,13 @@ export async function handleChatRequest(
                 // same query validates thread and message ownership.
                 const historyStartedAt = performance.now();
                 const limitsStartedAt = performance.now();
-                const historyPromise = supabase
+                const historyPromise = withResultSpan('chat.history.load', {
+                    'db.system.name': 'supabase',
+                    'db.operation.name': 'select',
+                    'chat.history.limit': MAX_CHAT_MESSAGES,
+                }, () => supabase
                         .from('messages')
-                        .select(MESSAGE_SELECT_COLUMNS)
+                        .select(CHAT_HISTORY_SELECT_COLUMNS)
                         .eq('thread_id', threadId)
                         .eq('user_id', user.id)
                         .is('deleted_at', null)
@@ -294,7 +355,7 @@ export async function handleChatRequest(
                         .then((result) => {
                             timing.historyLoadMs = performance.now() - historyStartedAt;
                             return result;
-                        });
+                        }));
                 const limitsPromise = resolveModelLimits(model, modelConfig, signal).finally(() => {
                     timing.modelLimitsMs = performance.now() - limitsStartedAt;
                 });
@@ -302,7 +363,7 @@ export async function handleChatRequest(
                 if (historyResult.error) throw historyResult.error;
 
                 const storedMessages = (historyResult.data ?? [])
-                    .map(mapMessageRowToMessage)
+                    .map(mapChatHistoryRow)
                     .reverse();
                 const userMessageIndex = storedMessages.findIndex(
                     (message) => message.id === userMessageId && message.role === 'user'
@@ -334,6 +395,8 @@ export async function handleChatRequest(
                 const systemPromptTokenEstimate = estimateSystemPromptTokens(normalizedSystemPrompt);
                 const systemPromptPlan = resolveOutputTokenPlan(limits, limits.maxOutputTokens, systemPromptTokenEstimate);
                 if (systemPromptPlan.remainingForOutput <= 0) {
+                    requestOutcome = 'rejected';
+                    requestSpan.setAttribute('chat.outcome', 'rejected');
                     await safeEnqueue(controller, `data: ${serializeChatStreamEvent({ type: 'error', message: 'System prompt is too long for the selected model context window.' })}\n\n`);
                     safeClose(controller);
                     return;
@@ -368,33 +431,48 @@ export async function handleChatRequest(
                     }
 
                     const attachmentStartedAt = performance.now();
-                    const preparedMessages = await prepareMessageAttachments(
+                    const preparedMessages = await withSpan('chat.attachments.prepare', {
+                        'chat.message.count': context.messages.length,
+                        'chat.attachment.count': context.messages.reduce((count, message) => count + (message.attachments?.length ?? 0), 0),
+                    }, () => prepareMessageAttachments(
                         context.messages,
                         supabase,
                         user.id,
                         modelConfig,
-                        signal
-                    );
+                        signal,
+                    ));
                     timing.attachmentPreparationMs = (timing.attachmentPreparationMs ?? 0)
                         + performance.now() - attachmentStartedAt;
                     const estimatedInputTokens = estimatePreparedConversationTokens(preparedMessages);
                     const estimatedInputTokensWithSystemPrompt = estimatedInputTokens + systemPromptTokenEstimate;
+                    const preparedOutputPlan = resolveOutputTokenPlan(
+                        limits,
+                        limits.maxOutputTokens,
+                        estimatedInputTokensWithSystemPrompt,
+                    );
+                    if (preparedOutputPlan.remainingForOutput <= 0) {
+                        throw new Error('Input is too long for selected model context window.');
+                    }
                     const tokenEstimates = {
                         estimatedInputTokens,
                         estimatedInputTokensWithSystemPrompt,
                     };
 
                     const providerStartedAt = performance.now();
-                    const providerStream = await chatProvider.getStream({
+                    const providerStream = await withSpan('chat.provider.connect', {
+                        'gen_ai.system': chatProvider.id,
+                        'gen_ai.request.model': model,
+                        'gen_ai.request.max_tokens': preparedOutputPlan.requestMaxTokens,
+                    }, () => chatProvider.getStream({
                         model,
                         messages: preparedMessages,
                         reasoningEffort: reasoningEffort || 'low',
                         modelConfig,
-                        maxOutputTokens: outputPlan.requestMaxTokens,
+                        maxOutputTokens: preparedOutputPlan.requestMaxTokens,
                         systemPrompt: normalizedSystemPrompt,
                         tokenEstimates,
                         signal,
-                    });
+                    }));
                     timing.providerConnectMs = (timing.providerConnectMs ?? 0)
                         + performance.now() - providerStartedAt;
                     return providerStream;
@@ -486,7 +564,8 @@ export async function handleChatRequest(
                         if (!firstProviderTokenLogged) {
                             firstProviderTokenLogged = true;
                             timing.providerFirstTokenMs = now - requestStartedAt;
-                            logger.info('[chat][perf] first provider token', {
+                        logger.info('[chat][perf] first provider token', {
+                            requestId,
                                 model: modelForMetrics,
                                 ...timing,
                             });
@@ -507,45 +586,52 @@ export async function handleChatRequest(
                     }
                     return true;
                 };
-                try {
-                    while (true) {
-                        if (signal.aborted) break;
-                        const { done, value } = await reader.read();
-                        if (done) {
-                            providerStreamCompleted = !signal.aborted;
-                            break;
-                        }
+                await withSpan('chat.provider.stream', {
+                    'gen_ai.system': chatProvider.id,
+                    'gen_ai.request.model': model,
+                }, async (providerSpan) => {
+                    try {
+                        while (true) {
+                            if (signal.aborted) break;
+                            const { done, value } = await reader.read();
+                            if (done) {
+                                providerStreamCompleted = !signal.aborted;
+                                break;
+                            }
 
-                        pipeBuffer += pipeDecoder.decode(value, { stream: true });
-                        let nlIdx: number;
-                        let searchFrom = 0;
-                        let forwardBuffer = '';
-                        while ((nlIdx = pipeBuffer.indexOf('\n', searchFrom)) !== -1) {
-                            const rawLine = pipeBuffer.substring(searchFrom, nlIdx);
-                            searchFrom = nlIdx + 1;
-                            if (processProviderLine(rawLine)) forwardBuffer += `${rawLine}\n`;
-                        }
-                        pipeBuffer = searchFrom > 0 ? pipeBuffer.substring(searchFrom) : pipeBuffer;
+                            pipeBuffer += pipeDecoder.decode(value, { stream: true });
+                            let nlIdx: number;
+                            let searchFrom = 0;
+                            let forwardBuffer = '';
+                            while ((nlIdx = pipeBuffer.indexOf('\n', searchFrom)) !== -1) {
+                                const rawLine = pipeBuffer.substring(searchFrom, nlIdx);
+                                searchFrom = nlIdx + 1;
+                                if (processProviderLine(rawLine)) forwardBuffer += `${rawLine}\n`;
+                            }
+                            pipeBuffer = searchFrom > 0 ? pipeBuffer.substring(searchFrom) : pipeBuffer;
 
-                        if (forwardBuffer) await safeEnqueue(controller, forwardBuffer);
-                    }
-                    // Streams may end with a final SSE line that has no newline.
-                    // Flush the decoder and parse that tail before persisting the
-                    // response so the last provider token is not silently lost.
-                    pipeBuffer += pipeDecoder.decode();
-                    if (pipeBuffer.length > 0 && processProviderLine(pipeBuffer)) {
-                        await safeEnqueue(controller, pipeBuffer);
-                    }
-                } finally {
-                    if (!providerStreamCompleted) {
-                        try {
-                            await reader.cancel(signal.reason);
-                        } catch {
-                            // The provider may already have errored or been cancelled.
+                            if (forwardBuffer) await safeEnqueue(controller, forwardBuffer);
                         }
+                        // Streams may end with a final SSE line that has no newline.
+                        // Flush the decoder and parse that tail before persisting the
+                        // response so the last provider token is not silently lost.
+                        pipeBuffer += pipeDecoder.decode();
+                        if (pipeBuffer.length > 0 && processProviderLine(pipeBuffer)) {
+                            await safeEnqueue(controller, pipeBuffer);
+                        }
+                        providerSpan.setAttribute('chat.response.characters', responseContentLength + responseReasoningLength);
+                        providerSpan.setAttribute('chat.outcome', signal.aborted ? 'aborted' : 'completed');
+                    } finally {
+                        if (!providerStreamCompleted) {
+                            try {
+                                await reader.cancel(signal.reason);
+                            } catch {
+                                // The provider may already have errored or been cancelled.
+                            }
+                        }
+                        reader.releaseLock();
                     }
-                    reader.releaseLock();
-                }
+                });
 
                 if ((providerStreamCompleted || signal.aborted) && (responseContentLength > 0 || responseReasoningLength > 0)) {
                     const persistedContent = responseContent.join('');
@@ -566,28 +652,55 @@ export async function handleChatRequest(
                         source: 'provider',
                     } satisfies Record<string, unknown>;
                     await persistThenEmitTerminal(async () => {
-                        await persistAssistantResponse(
-                            supabase,
-                            user.id,
-                            threadId,
-                            userMessageId,
-                            model,
-                            persistedContent,
-                            persistedReasoning,
-                            replyStats as Json | undefined,
-                        );
-                        await finishGenerationJob('completed');
+                        await withSpan('chat.persistence', {
+                            'db.system.name': 'supabase',
+                            'chat.generation.claimed': Boolean(generationJobClaimToken),
+                            'chat.response.characters': responseContentLength + responseReasoningLength,
+                        }, async () => {
+                        if (generationJobClaimToken && requestGenerationJobId) {
+                            const { data: replyId, error: persistError } = await supabase.rpc('persist_generation_response', {
+                                p_job_id: requestGenerationJobId,
+                                p_claim_token: generationJobClaimToken,
+                                p_model_id: model,
+                                p_content: persistedContent,
+                                p_reasoning: persistedReasoning,
+                                p_reply_stats: replyStats as Json | undefined ?? null,
+                            });
+                            if (persistError) throw persistError;
+                            if (!replyId) throw new Error('Generation claim is no longer current.');
+                        } else {
+                            await persistAssistantResponse(
+                                supabase,
+                                user.id,
+                                threadId,
+                                userMessageId,
+                                model,
+                                persistedContent,
+                                persistedReasoning,
+                                replyStats as Json | undefined,
+                            );
+                        }
                         generationCompleted = true;
                         try {
-                            const { error } = await supabase
+                            const { error } = await withResultSpan('chat.thread_timestamp.update', {
+                                'db.system.name': 'supabase',
+                                'db.operation.name': 'update',
+                            }, () => supabase
                                 .from('threads')
                                 .update({ updated_at: new Date().toISOString() })
                                 .eq('id', threadId)
-                                .eq('user_id', user.id);
-                            if (error) logger.warn('[chat] failed to update thread timestamp', { error });
+                                .eq('user_id', user.id));
+                            if (error) logger.warn('[chat] failed to update thread timestamp', {
+                                requestId,
+                                errorType: error instanceof Error ? error.name : 'DatabaseError',
+                            });
                         } catch (error) {
-                            logger.warn('[chat] failed to update thread timestamp', { error });
+                            logger.warn('[chat] failed to update thread timestamp', {
+                                requestId,
+                                errorType: error instanceof Error ? error.name : 'UnknownError',
+                            });
                         }
+                        });
                     }, async () => {
                         if (providerStreamCompleted && !signal.aborted) {
                             captureEvent?.('[DONE]');
@@ -596,29 +709,48 @@ export async function handleChatRequest(
                         }
                     });
                 } else if (signal.aborted || providerStreamCompleted) {
-                    await finishGenerationJob('failed', 'Generation ended before a response was produced');
+                    await finishGenerationJob(
+                        'failed',
+                        'Generation ended before a response was produced',
+                        generationJobClaimToken,
+                    );
                 }
 
                 if (!signal.aborted) {
                     safeClose(controller);
                 }
                 logger.info('[chat][perf] stream completed', {
+                    requestId,
                     model: modelForMetrics,
+                    outcome: signal.aborted ? 'aborted' : 'completed',
                     totalMs: performance.now() - requestStartedAt,
                     responseCharacters: responseContentLength + responseReasoningLength,
                     ...timing,
                 });
             } catch (error) {
                 if (!signal.aborted) {
+                    requestOutcome = 'failed';
+                    recordSpanError(requestSpan, error);
                     logger.warn('[chat][perf] stream failed', {
+                        requestId,
                         model: modelForMetrics,
+                        outcome: 'failed',
                         totalMs: performance.now() - requestStartedAt,
                         ...timing,
                     });
-                    await finishGenerationJob('failed', error instanceof Error ? error.message : 'Generation failed');
-                    logger.error('Chat API error:', error);
+                    await finishGenerationJob(
+                        'failed',
+                        error instanceof Error ? error.message : 'Generation failed',
+                        generationJobClaimToken,
+                    );
+                    logger.error('Chat API error:', new Error('Chat request failed'), {
+                        requestId,
+                        errorType: error instanceof Error ? error.name : 'UnknownError',
+                    });
                     const providerUnavailable = isTransientProviderError(error);
-                    const message = isInterruptedProviderStream(error)
+                    const message = error instanceof ApiRequestError && error.status === 409
+                        ? error.message
+                        : isInterruptedProviderStream(error)
                         ? 'The model connection ended before the response finished. Please retry to generate a complete response.'
                         : providerUnavailable
                         ? 'The selected model is busy right now. Please retry or choose another model.'
@@ -630,7 +762,9 @@ export async function handleChatRequest(
                     }
                 }
                 if (signal.aborted && !generationCompleted && requestUserMessageId) {
-                    await finishGenerationJob('failed', 'Generation was interrupted');
+                    requestOutcome = 'aborted';
+                    requestSpan.setAttribute('chat.outcome', 'aborted');
+                    await finishGenerationJob('failed', 'Generation was interrupted', generationJobClaimToken);
                 }
             } finally {
                 if (heartbeatInterval) {
@@ -654,14 +788,17 @@ export async function handleChatRequest(
                 requestSignal.removeEventListener('abort', onRequestAbort);
                 if (!responseCancelled) safeClose(controller);
             }
+            if (signal.aborted) requestOutcome = 'aborted';
+            requestSpan.setAttribute('chat.outcome', requestOutcome);
+        });
     }
 
-    return new Response(stream, {
+    return responseWithRequestId(new Response(stream, {
         headers: {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
             'X-Accel-Buffering': 'no',
         },
-    });
+    }), requestId);
 }

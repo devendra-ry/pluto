@@ -4,11 +4,12 @@ import { resolve } from 'node:path';
 import type {} from './fixtures/streaming-harness';
 
 let bundle: string;
+let workerBundle: string;
 test.beforeAll(async () => {
     const result = await build({
         entryPoints: [resolve('tests/e2e/fixtures/streaming-harness.tsx')], bundle: true, write: false,
         format: 'iife', platform: 'browser', jsx: 'automatic', loader: { '.css': 'empty' },
-        define: { 'process.env.NODE_ENV': '"development"', 'process.env': '{}' },
+        define: { 'process.env.NODE_ENV': '"development"', 'process.env': '{}', 'import.meta.url': '"http://localhost:3000/"' },
         plugins: [{
             name: 'playback-only-thread-metadata',
             setup(builder) {
@@ -21,9 +22,16 @@ test.beforeAll(async () => {
         }],
     });
     bundle = result.outputFiles[0]!.text;
+    const worker = await build({
+        entryPoints: [resolve('src/features/chat/lib/markdown.worker.ts')], bundle: true, write: false,
+        format: 'iife', platform: 'browser', conditions: ['worker'],
+        define: { 'process.env.NODE_ENV': '"development"', 'process.env': '{}' },
+    });
+    workerBundle = worker.outputFiles[0]!.text;
 });
 
 async function openPlayback(page: Page, failuresBeforeStream = 0) {
+    await page.route('**/markdown.worker.ts', route => route.fulfill({ contentType: 'text/javascript', body: workerBundle }));
     await page.route('**/__streaming_playback__', route => route.fulfill({
         contentType: 'text/html',
         body: '<!doctype html><html><body><div id="root"></div></body></html>',
@@ -36,6 +44,21 @@ async function openPlayback(page: Page, failuresBeforeStream = 0) {
         window.streamingTest.start();
     }, failuresBeforeStream);
 }
+
+test('code blocks preserve source characters and offer an exact code copy', async ({ page }) => {
+    await openPlayback(page);
+    await page.evaluate(() => {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+            writeText: async (value: string) => { sessionStorage.setItem('copied-code', value); },
+        } });
+    });
+    const code = '#define VERSION 2\nconst regex = /\\[abc\\]/;\n';
+    await page.evaluate(value => { window.streamingTest.delta(`\`\`\`\n${value}\`\`\``); window.streamingTest.finish(); }, code);
+    await expect(page.locator('pre code')).toHaveText(code);
+    await page.getByRole('button', { name: 'Copy code', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Code copied', exact: true })).toBeVisible();
+    expect(await page.evaluate(() => sessionStorage.getItem('copied-code'))).toBe(code);
+});
 
 test('reasoning and answer appear while the stream remains open and finish with exact Unicode text', async ({ page }) => {
     await openPlayback(page);

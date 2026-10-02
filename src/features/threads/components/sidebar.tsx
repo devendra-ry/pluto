@@ -12,6 +12,7 @@ import {
     PanelLeft,
     Search,
     Pin,
+    Pencil,
     X,
     LogIn,
     User,
@@ -23,12 +24,14 @@ import { List, type RowComponentProps } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import { useThreads } from '../hooks/use-threads';
 import { useThreadSearch } from '../hooks/use-thread-search';
-import { deleteThread, toggleThreadPin } from '../lib/thread-mutations';
+import { deleteThread, restoreThread, toggleThreadPin, updateThreadTitle } from '../lib/thread-mutations';
 import { type Thread } from '@/shared/contracts/thread';
 import { groupThreadsByDate } from '../lib/date-utils';
 import { useDebouncedValue } from '@/shared/hooks/use-debounce';
 import { cn } from '@/shared/core/utils';
 import { useToast } from '@/components/ui/toast';
+import { normalizeEditableThreadTitle } from '../lib/thread-model';
+import { triggerNewChat } from '../lib/thread-events';
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
 
@@ -70,21 +73,40 @@ function SidebarRow({ index, style, ariaAttributes, virtualItems, renderThreadIt
 const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: SidebarProps) {
     const [desktopCollapsed, setDesktopCollapsed] = useState(() => {
         if (typeof window === 'undefined') return false;
-        return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+        try {
+            return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+        } catch {
+            return false;
+        }
     });
     const [mobileOpen, setMobileOpen] = useState(false);
     const isCollapsed = isMobileSize ? !mobileOpen : desktopCollapsed;
 
     const [searchQuery, setSearchQuery] = useState('');
     const [deleteConfirm, setDeleteConfirm] = useState<Thread | null>(null);
+    const [editThread, setEditThread] = useState<Thread | null>(null);
+    const [editTitle, setEditTitle] = useState('');
+    const [editPending, setEditPending] = useState(false);
     const [deletePending, setDeletePending] = useState(false);
     const deleteInFlightRef = useRef(false);
     const pinInFlightRef = useRef(new Set<string>());
     const signOutInFlightRef = useRef(false);
     const [hiddenDeletedThreadIds, setHiddenDeletedThreadIds] = useState<Set<string>>(() => new Set());
     const [user, setUser] = useState<SupabaseUser | null>(initialUser);
+    const searchInputRef = useRef<HTMLInputElement>(null);
+    const mobileToggleRef = useRef<HTMLButtonElement>(null);
+    const asideRef = useRef<HTMLElement>(null);
     const debouncedSearch = useDebouncedValue(searchQuery, 300);
-    const { threads, loadMoreThreads, hasMoreThreads } = useThreads(user?.id ?? null);
+    const {
+        threads,
+        loadMoreThreads,
+        retryLoadMoreThreads,
+        hasMoreThreads,
+        isLoadingThreads,
+        threadsError,
+        loadMoreError,
+        refreshThreads,
+    } = useThreads(user?.id ?? null);
     const { showToast } = useToast();
 
     const [supabase] = useState(() => createClient());
@@ -103,6 +125,10 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         hasMore: hasMoreSearchThreads,
         loading: isSearching,
         loadMore: loadMoreSearchThreads,
+        error: searchError,
+        paginationError: searchPaginationError,
+        retrySearch,
+        retryLoadMore: retryLoadMoreSearchThreads,
     } = useThreadSearch(user?.id ?? null, debouncedSearch);
     const visibleThreads = useMemo(
         () => (searching ? searchThreads : threads).filter((thread) => !hiddenDeletedThreadIds.has(thread.id)),
@@ -111,13 +137,31 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
     const pinnedThreads = useMemo(() => visibleThreads.filter(t => t.is_pinned), [visibleThreads]);
     const unpinnedThreads = useMemo(() => visibleThreads.filter(t => !t.is_pinned), [visibleThreads]);
     const groupedThreads = useMemo(() => groupThreadsByDate(unpinnedThreads), [unpinnedThreads]);
+    const firstPageError = searching ? searchError : threadsError;
+    const olderPageError = searching ? searchPaginationError : loadMoreError;
+    const isListLoading = searching ? isSearching : isLoadingThreads;
+    const retryList = () => {
+        if (searching) {
+            if (searchError) retrySearch();
+            else if (searchPaginationError) void retryLoadMoreSearchThreads();
+        } else if (threadsError) {
+            void refreshThreads();
+        } else if (loadMoreError) {
+            void retryLoadMoreThreads();
+        }
+    };
     const pathname = usePathname();
+    const previousPathnameRef = useRef(pathname);
     const router = useRouter();
+    const pathnameRef = useRef(pathname);
+    pathnameRef.current = pathname;
 
     // Persist desktop collapsed state.
     useEffect(() => {
-        if (typeof window !== 'undefined') {
+        try {
             window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(desktopCollapsed));
+        } catch {
+            // The sidebar remains usable when browser storage is unavailable.
         }
     }, [desktopCollapsed]);
 
@@ -140,10 +184,10 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
 
     const handleRowsRendered = useCallback(({ stopIndex }: { startIndex: number; stopIndex: number }) => {
         if (stopIndex >= Math.max(0, virtualItems.length - 12)) {
-            if (searching && hasMoreSearchThreads) void loadMoreSearchThreads();
-            else if (!searching && hasMoreThreads) void loadMoreThreads();
+            if (searching && hasMoreSearchThreads && !searchError && !searchPaginationError) void loadMoreSearchThreads();
+            else if (!searching && hasMoreThreads && !threadsError && !isLoadingThreads && !loadMoreError) void loadMoreThreads();
         }
-    }, [searching, hasMoreSearchThreads, loadMoreSearchThreads, hasMoreThreads, loadMoreThreads, virtualItems.length]);
+    }, [searching, hasMoreSearchThreads, searchError, searchPaginationError, loadMoreSearchThreads, hasMoreThreads, threadsError, isLoadingThreads, loadMoreError, loadMoreThreads, virtualItems.length]);
 
     const collapseSidebar = useCallback(() => {
         if (isMobileSize) {
@@ -162,8 +206,35 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
     }, [isMobileSize]);
 
     const handleNewChat = useCallback(() => {
-        router.push('/');
-    }, [router]);
+        if (pathname === '/') triggerNewChat();
+        else router.push('/');
+    }, [pathname, router]);
+
+    const handleEditClick = useCallback((e: React.MouseEvent, thread: Thread) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setEditThread(thread);
+        setEditTitle(thread.title);
+    }, []);
+
+    const handleEditSave = useCallback(async () => {
+        if (!editThread || editPending) return;
+        const normalizedTitle = normalizeEditableThreadTitle(editTitle);
+        if (!normalizedTitle) {
+            showToast('Enter a title before saving.', 'error');
+            return;
+        }
+        setEditPending(true);
+        try {
+            await updateThreadTitle(editThread.id, normalizedTitle);
+            setEditThread(null);
+        } catch (error) {
+            console.error('[Sidebar] Error updating thread title:', error);
+            showToast('Failed to rename conversation', 'error');
+        } finally {
+            setEditPending(false);
+        }
+    }, [editThread, editPending, editTitle, showToast]);
 
     const handleDeleteClick = useCallback((e: React.MouseEvent, thread: Thread) => {
         try {
@@ -175,19 +246,44 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
         }
     }, []);
 
+    const handleUndoDelete = useCallback(async (threadId: string, wasActive: boolean) => {
+        try {
+            await restoreThread(threadId);
+            setHiddenDeletedThreadIds(previous => {
+                const next = new Set(previous);
+                next.delete(threadId);
+                return next;
+            });
+            if (wasActive && pathnameRef.current === '/') router.push(`/c/${threadId}`);
+            showToast('Conversation restored.', 'success');
+        } catch (error) {
+            console.error('[Sidebar] Error restoring conversation:', error);
+            showToast('Undo is no longer available for this conversation.', 'error');
+        }
+    }, [router, showToast]);
+
     const handleDeleteConfirm = useCallback(async () => {
         if (!deleteConfirm || deleteInFlightRef.current) return;
         deleteInFlightRef.current = true;
 
         const threadId = deleteConfirm.id;
+        const wasActive = pathname === `/c/${threadId}`;
         setHiddenDeletedThreadIds((previous) => new Set(previous).add(threadId));
         setDeletePending(true);
-        if (pathname === `/c/${threadId}`) {
-            router.push('/');
-        }
+        if (wasActive) router.push('/');
         try {
-            await deleteThread(threadId);
+            const deletion = await deleteThread(threadId);
+            window.dispatchEvent(new CustomEvent('pluto:thread-deleted'));
             setDeleteConfirm(null);
+            const undoRemainingMs = Date.parse(deletion.undo_until) - Date.now();
+            showToast('Conversation deleted.', 'info', {
+                ...(Number.isFinite(undoRemainingMs) && undoRemainingMs > 0
+                    ? {
+                        durationMs: undoRemainingMs,
+                        action: { label: 'Undo', onClick: () => { void handleUndoDelete(threadId, wasActive); } },
+                    }
+                    : {}),
+            });
         } catch (err) {
             setHiddenDeletedThreadIds((previous) => {
                 const next = new Set(previous);
@@ -195,13 +291,14 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                 return next;
             });
             setDeleteConfirm(null);
+            if (wasActive) router.push(`/c/${threadId}`);
             console.error('[Sidebar] Error in handleDeleteConfirm:', err);
             showToast('Failed to delete thread', 'error');
         } finally {
             deleteInFlightRef.current = false;
             setDeletePending(false);
         }
-    }, [deleteConfirm, pathname, router, showToast]);
+    }, [deleteConfirm, pathname, router, showToast, handleUndoDelete]);
 
     const handleDeleteCancel = useCallback(() => {
         try {
@@ -226,6 +323,54 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
             pinInFlightRef.current.delete(threadId);
         }
     }, [showToast]);
+
+    useEffect(() => {
+        if (!isMobileSize || !mobileOpen) return;
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        requestAnimationFrame(() => searchInputRef.current?.focus());
+        return () => { document.body.style.overflow = previousOverflow; };
+    }, [isMobileSize, mobileOpen]);
+
+    useEffect(() => {
+        if (!isMobileSize || mobileOpen) return;
+        requestAnimationFrame(() => mobileToggleRef.current?.focus());
+    }, [isMobileSize, mobileOpen]);
+
+    useEffect(() => {
+        if (!isMobileSize || !mobileOpen) return;
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (deleteConfirm || editThread) return;
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                setMobileOpen(false);
+                return;
+            }
+            if (event.key === 'Tab' && asideRef.current) {
+                const focusable = asideRef.current.querySelectorAll<HTMLElement>(
+                    'a[href], button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])'
+                );
+                const first = focusable.item(0);
+                const last = focusable.item(focusable.length - 1);
+                if (!first || !last) return;
+                if (event.shiftKey && document.activeElement === first) {
+                    event.preventDefault();
+                    last.focus();
+                } else if (!event.shiftKey && document.activeElement === last) {
+                    event.preventDefault();
+                    first.focus();
+                }
+            }
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [isMobileSize, mobileOpen, deleteConfirm, editThread]);
+
+    useEffect(() => {
+        if (previousPathnameRef.current === pathname) return;
+        previousPathnameRef.current = pathname;
+        if (isMobileSize) setMobileOpen(false);
+    }, [pathname, isMobileSize]);
 
     const handleSignOut = useCallback(async () => {
         if (signOutInFlightRef.current) return;
@@ -275,6 +420,17 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                 <div
                     className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition-opacity duration-200 h-full pr-1 z-10"
                 >
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        type="button"
+                        aria-label={`Rename ${thread.title}`}
+                        title="Rename conversation"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md"
+                        onClick={(e) => handleEditClick(e, thread)}
+                    >
+                        <Pencil className="h-3.5 w-3.5" />
+                    </Button>
                     {/* Pin Button */}
                     <div className="relative group/tooltip">
                         <Button
@@ -316,7 +472,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                 </div>
             </div>
         );
-    }, [pathname, handleTogglePin, handleDeleteClick]);
+    }, [pathname, handleTogglePin, handleDeleteClick, handleEditClick]);
 
     const rowProps = useMemo<SidebarRowData>(() => ({
         virtualItems,
@@ -339,6 +495,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
 
             {/* Animated Sidebar */}
             <aside
+                ref={asideRef}
                 className={cn(
                     'h-dvh flex flex-col bg-sidebar text-sidebar-foreground border-sidebar-border overflow-hidden whitespace-nowrap z-40 border-r',
                     isMobileSize
@@ -350,6 +507,9 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                 )}
                 aria-hidden={isCollapsed}
                 inert={isCollapsed}
+                role={isMobileSize && mobileOpen ? 'dialog' : 'navigation'}
+                aria-label={isMobileSize && mobileOpen ? 'Conversation navigation' : 'Conversation sidebar'}
+                aria-modal={isMobileSize && mobileOpen ? true : undefined}
             >
 
                 <div className="w-[260px] flex flex-col h-full shrink-0">
@@ -384,7 +544,9 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                         <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground group bg-background rounded-lg border border-input transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/50">
                             <Search className="h-5 w-5 text-muted-foreground group-focus-within:text-foreground transition-colors shrink-0" />
                             <Input
+                                ref={searchInputRef}
                                 type="text"
+                                aria-label="Search conversations"
                                 placeholder="Search conversations..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -394,13 +556,33 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                     </div>
 
                     {/* Chat List */}
-                    <div className="flex-1 min-h-0">
-                        <div className="h-full w-full relative px-2">
+                    <div className="flex min-h-0 flex-1 flex-col">
+                        {virtualItems.length > 0 && (firstPageError || olderPageError) && (
+                            <div role="alert" className="mx-3 mb-2 flex items-center justify-between gap-2 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-xs text-foreground">
+                                <span>{firstPageError ?? olderPageError}</span>
+                                <Button variant="ghost" size="sm" className="h-7 shrink-0 px-2" onClick={retryList}>Retry</Button>
+                            </div>
+                        )}
+                        <div className="min-h-0 flex-1">
+                          <div className="h-full w-full relative px-2">
                             {virtualItems.length === 0 ? (
                                 <div className="text-center py-12">
-                                    <p className="text-sm text-muted-foreground">
-                                        {searching && isSearching ? 'Searching...' : searching ? 'No results found' : 'No conversations yet'}
-                                    </p>
+                                    <div className="mx-auto max-w-[210px] whitespace-normal break-words px-3 py-12 text-center">
+                                        <p className="text-sm font-medium text-sidebar-foreground">
+                                            {firstPageError ? (searching ? 'Search failed' : 'Could not load conversations') : isListLoading ? (searching ? 'Searching conversations…' : 'Loading conversations…') : searching ? 'No matching conversations' : user ? 'Your conversations will appear here' : 'Sign in to save conversations'}
+                                        </p>
+                                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                                            {firstPageError ? (searching ? 'Check your connection and try the search again.' : 'Check your connection and try loading conversations again.') : searching ? `Try another title or clear “${debouncedSearch.trim()}”.` : user ? 'Start a new chat and it will be easy to find here.' : 'You can start chatting now, then sign in to keep your history.'}
+                                        </p>
+                                        {firstPageError && (
+                                            <Button variant="ghost" size="sm" className="mt-3 h-8" onClick={retryList}>Retry</Button>
+                                        )}
+                                        {!firstPageError && !isListLoading && searching && (
+                                            <Button variant="ghost" size="sm" className="mt-3 h-8" onClick={() => setSearchQuery('')}>
+                                                Clear search
+                                            </Button>
+                                        )}
+                                    </div>
                                 </div>
                             ) : (
                                 <div className="h-full w-full relative">
@@ -419,6 +601,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                                     />
                                 </div>
                             )}
+                          </div>
                         </div>
                     </div>
 
@@ -458,7 +641,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
             {/* Floating Pill for Collapsed State */}
             <div
                 className={cn(
-                    'fixed top-3 left-3 z-[100] flex items-center gap-0.5 bg-popover/95 text-popover-foreground backdrop-blur-xl p-1.5 rounded-xl border border-border shadow-xl shadow-black/20',
+                    'fixed top-3 left-3 z-40 flex items-center gap-0.5 bg-popover/95 text-popover-foreground backdrop-blur-xl p-1.5 rounded-xl border border-border shadow-xl shadow-black/20',
                     'transition-[opacity,transform] duration-[var(--motion-duration-slow,420ms)] ease-[var(--motion-ease,cubic-bezier(0.22,1,0.36,1))]',
                     isCollapsed ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-3 pointer-events-none'
                 )}
@@ -471,6 +654,7 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                     aria-label="Expand sidebar"
                     title="Expand sidebar"
                     onClick={expandSidebar}
+                    ref={mobileToggleRef}
                     className="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors rounded-lg"
                 >
                     <PanelLeft className="h-5 w-5" />
@@ -528,6 +712,28 @@ const Sidebar = memo(function Sidebar({ isMobileSize = false, initialUser }: Sid
                             >
                                 {deletePending ? 'Deleting...' : 'Confirm'}
                             </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={Boolean(editThread)} onOpenChange={(open) => { if (!open && !editPending) setEditThread(null); }}>
+                <DialogContent>
+                    <DialogTitle>Rename conversation</DialogTitle>
+                    <DialogDescription>Choose a title that will help you find this conversation later.</DialogDescription>
+                    <Input
+                        autoFocus
+                        aria-label="Conversation title"
+                        value={editTitle}
+                        maxLength={80}
+                        onChange={(event) => setEditTitle(event.target.value)}
+                        onKeyDown={(event) => { if (event.key === 'Enter') void handleEditSave(); }}
+                        disabled={editPending}
+                    />
+                    <DialogFooter>
+                        <Button variant="ghost" onClick={() => setEditThread(null)} disabled={editPending}>Cancel</Button>
+                        <Button onClick={() => void handleEditSave()} disabled={editPending || !editTitle.trim()}>
+                            {editPending ? 'Saving…' : 'Save title'}
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

@@ -49,6 +49,7 @@ export async function startChatWithMessage(input: StartChatWithMessageInput): Pr
 
 export interface ClaimedGenerationJob {
     id: string;
+    claimToken: string;
     userMessageId: string;
     modelId: string | null;
     reasoningEffort: ReasoningEffort | null;
@@ -75,13 +76,15 @@ export async function claimPendingGenerationJob(threadId: string, userMessageId?
 
     const record = row as Record<string, unknown>;
     const id = typeof record.id === 'string' ? record.id : null;
+    const claimToken = typeof record.claim_token === 'string' ? record.claim_token : null;
     const claimedUserMessageId = typeof record.user_message_id === 'string' ? record.user_message_id : null;
-    if (!id || !claimedUserMessageId) {
+    if (!id || !claimToken || !claimedUserMessageId) {
         return null;
     }
 
     return {
         id,
+        claimToken,
         userMessageId: claimedUserMessageId,
         modelId: typeof record.model_id === 'string' ? record.model_id : null,
         reasoningEffort: toReasoningEffort(record.reasoning_effort) ?? null,
@@ -91,6 +94,7 @@ export async function claimPendingGenerationJob(threadId: string, userMessageId?
 
 export async function completeGenerationJob(
     jobId: string,
+    claimToken: string,
     status: JobStatus,
     errorMessage?: string
 ): Promise<void> {
@@ -98,6 +102,7 @@ export async function completeGenerationJob(
 
     const { error } = await supabase.rpc('complete_generation_job', {
         p_job_id: jobId,
+        p_claim_token: claimToken,
         p_status: status,
         p_error: errorMessage,
     });

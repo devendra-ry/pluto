@@ -11,6 +11,7 @@ interface ChatStreamParams {
     model: string;
     reasoningEffort: ReasoningEffort;
     systemPrompt?: string;
+    generationJobClaimToken?: string;
     signal?: AbortSignal;
 }
 
@@ -75,6 +76,7 @@ class ChatService {
         userMessageId,
         reasoningEffort,
         systemPrompt,
+        generationJobClaimToken,
         signal,
     }: ChatStreamParams): AsyncGenerator<ChatServiceStreamChunk, void, unknown> {
         const streamId = createIdempotencyKey('chat');
@@ -97,6 +99,7 @@ class ChatService {
                         model,
                         reasoningEffort,
                         systemPrompt,
+                        generationJobClaimToken,
                     }),
                     ...(signal ? { signal } : {}),
                 });

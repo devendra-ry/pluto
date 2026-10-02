@@ -1,8 +1,3 @@
-import {
-    buildBranchMessageRows,
-    buildBranchTitle,
-    selectMessagesThroughBranch,
-} from './branch-plan';
 import { triggerThreadRefresh } from './thread-events';
 import { mapThreadRowToThread } from './thread-model';
 import type { ChatViewMessage } from '@/shared/contracts/chat';
@@ -12,59 +7,22 @@ import { createClient } from '@/shared/lib/supabase/client';
 export async function branchThread(
     parentThreadId: string,
     messageId: string,
-    parentThread: Thread,
-    messages: ChatViewMessage[]
+    _parentThread: Thread,
+    _messages: ChatViewMessage[]
 ): Promise<Thread> {
+    // Retain the existing call signature for the chat UI; persistence now comes from Postgres.
+    void _parentThread;
+    void _messages;
     const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError) throw authError;
-    if (!user) throw new Error('You must be signed in to branch a chat.');
-
-    const messagesToCopy = selectMessagesThroughBranch(messages, messageId);
-    const { data: sourceRows, error: sourceError } = await supabase
-        .from('messages')
-        .select('id, created_at')
-        .eq('thread_id', parentThreadId)
-        .in('id', messagesToCopy.map((message) => message.id));
-    if (sourceError) throw sourceError;
-
-    const { data: newThreadRow, error: threadError } = await supabase
-        .from('threads')
-        .insert({
-            title: buildBranchTitle(parentThread.title),
-            model: parentThread.model,
-            reasoning_effort: parentThread.reasoning_effort ?? null,
-            system_prompt: parentThread.system_prompt ?? null,
-            user_id: user.id,
-        })
-        .select()
-        .single();
-    if (threadError) throw threadError;
-
-    const newThread = mapThreadRowToThread(newThreadRow);
-    const createdAtById = new Map((sourceRows ?? []).map((row) => [row.id, row.created_at]));
-    const messageRows = buildBranchMessageRows(
-        messagesToCopy,
-        newThread.id,
-        user.id,
-        createdAtById,
-        new Date().toISOString(),
-    );
-    try {
-        const { error: messageError } = await supabase.from('messages').insert(messageRows);
-        if (messageError) throw messageError;
-    } catch (messageError) {
-        try {
-            const { error: cleanupError } = await supabase.from('threads').delete().eq('id', newThread.id);
-            if (cleanupError) {
-                console.error('[threads] Failed to remove incomplete branch thread:', cleanupError);
-            }
-        } catch (cleanupError) {
-            console.error('[threads] Failed to remove incomplete branch thread:', cleanupError);
-        }
-        throw messageError;
-    }
+    // The UI's loaded list may be only the latest history page. The database
+    // validates the anchor and copies the complete persisted prefix atomically.
+    const { data, error } = await supabase.rpc('branch_thread', {
+        p_parent_thread_id: parentThreadId,
+        p_anchor_message_id: messageId,
+    });
+    if (error) throw error;
+    if (!data) throw new Error('The branch could not be created.');
 
     triggerThreadRefresh();
-    return newThread;
+    return mapThreadRowToThread(data);
 }

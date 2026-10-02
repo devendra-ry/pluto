@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Search } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { FLUID_TRANSITION } from '@/shared/lib/motion';
 
@@ -8,12 +8,24 @@ interface ChatHeaderProps {
     showScrollButton: boolean;
     hasMessages: boolean;
     onScrollToBottom: () => void;
+    onSearchMessages?: () => void;
 }
 
-export function ChatHeader({ showScrollButton, hasMessages, onScrollToBottom }: ChatHeaderProps) {
+export function ChatHeader({ showScrollButton, hasMessages, onScrollToBottom, onSearchMessages }: ChatHeaderProps) {
     const reduceMotion = useReducedMotion();
     return (
         <div className="relative w-full max-w-3xl mx-auto px-4">
+            {onSearchMessages && hasMessages && (
+                <button
+                    type="button"
+                    aria-label="Search messages"
+                    title="Search this conversation"
+                    onClick={onSearchMessages}
+                    className="absolute -top-14 right-4 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-xl hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                    <Search className="h-4 w-4" aria-hidden="true" />
+                </button>
+            )}
             <AnimatePresence>
                 {showScrollButton && hasMessages && (
                     <motion.div
